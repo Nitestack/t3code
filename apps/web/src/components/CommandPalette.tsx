@@ -588,7 +588,7 @@ function OpenCommandPaletteDialog(props: {
   };
 
   const addProjectEnvironmentOptions = (() => {
-    const options = environments
+    const options = filterByEnvironmentScope(environments, activeScope, assignments)
       .filter((environment) => canCreateProjectInEnvironment(environment.connection.phase))
       .map((environment): AddProjectEnvironmentOption => {
         const isPrimary = environment.entry.target._tag === "PrimaryConnectionTarget";
@@ -629,7 +629,9 @@ function OpenCommandPaletteDialog(props: {
         ? desktopLocalBackendId(environment.entry.target)?.startsWith("wsl:") === true
         : false;
     }) ?? null;
-  const browseEnvironmentId = addProjectEnvironmentId ?? defaultAddProjectEnvironmentId;
+  const browseEnvironmentId =
+    addProjectEnvironmentOptions.find((option) => option.environmentId === addProjectEnvironmentId)
+      ?.environmentId ?? defaultAddProjectEnvironmentId;
   const canCreateProject = useEnvironmentScope(browseEnvironmentId, AuthOrchestrationOperateScope);
   const browseEnvironment =
     environments.find((environment) => environment.environmentId === browseEnvironmentId) ?? null;
@@ -714,6 +716,7 @@ function OpenCommandPaletteDialog(props: {
   );
   const scratchTargetEnvironmentId = scratchEnvironmentId(
     currentProjectEnvironmentId ?? scopedEnvironmentIds[0] ?? null,
+    scopedEnvironmentIds,
   );
   const supportsTriage = (environmentId: EnvironmentId | null) =>
     environments.find((environment) => environment.environmentId === environmentId)?.serverConfig

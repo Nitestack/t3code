@@ -1,7 +1,7 @@
 import appCss from "../../index.css?inline";
 import { DEFAULT_CLIENT_SETTINGS, EnvironmentId } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
-import { userEvent } from "vite-plus/test/browser";
+import { page, userEvent } from "vite-plus/test/browser";
 
 import { render } from "../../../test/render";
 import { __setClientSettingsForTests, getClientSettings } from "../../hooks/useSettings";
@@ -14,9 +14,8 @@ vi.mock("../../hooks/useSettings", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../hooks/useSettings")>();
   return {
     ...actual,
-    updateClientSettings: async (patch: Partial<ReturnType<typeof actual.getClientSettings>>) => {
-      actual.__setClientSettingsForTests({ ...actual.getClientSettings(), ...patch });
-    },
+    updateClientSettings: (patch: Partial<ReturnType<typeof actual.getClientSettings>>) =>
+      actual.persistClientSettingsPatch(patch, async () => {}),
   };
 });
 vi.mock("../../state/environments", { spy: true });
@@ -51,7 +50,7 @@ describe("EnvironmentScopeSwitcher", () => {
     expect(toggleGroup!.scrollWidth).toBeLessThanOrEqual(toggleGroup!.clientWidth);
 
     await userEvent.click(screen.getByRole("button", { name: "Classify environments" }));
-    await userEvent.click(screen.getByRole("menuitemcheckbox", { name: "Work server" }));
+    await userEvent.click(page.getByRole("menuitemcheckbox", { name: "Work server" }));
     expect(getClientSettings().environmentScopeAssignments[environmentId]).toBe("work");
   });
 });

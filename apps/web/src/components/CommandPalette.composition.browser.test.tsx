@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
-import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
+import { DEFAULT_CLIENT_SETTINGS, type ClientSettings } from "@t3tools/contracts/settings";
+import type { EnvironmentScope } from "@t3tools/client-runtime/environment";
 import { AuthOrchestrationOperateScope, AuthSourceControlWriteScope } from "@t3tools/contracts";
 import { act, render } from "../../test/render";
 import { CommandPalette } from "./CommandPalette";
@@ -11,10 +12,12 @@ import { primaryServerKeybindingsAtom } from "../state/server";
 const scopes = vi.hoisted(() => ({
   denied: undefined as string | undefined,
   sourceControl: undefined as unknown,
+  activeScope: "personal" as EnvironmentScope,
 }));
 const setup = (deniedScope?: string, sourceControl?: unknown) => {
   scopes.denied = deniedScope;
   scopes.sourceControl = sourceControl;
+  scopes.activeScope = "personal";
 };
 const githubAvailable = {
   versionControlSystems: [],
@@ -49,7 +52,14 @@ vi.mock("../hooks/useCustomThemes", () => ({ useCustomThemes: () => [] }));
 vi.mock("../hooks/useEnvironmentTheme", () => ({ useEnvironmentThemeDefinitions: () => [] }));
 vi.mock("../hooks/useSettings", async (original) => ({
   ...(await original<typeof import("../hooks/useSettings")>()),
-  useClientSettings: () => DEFAULT_CLIENT_SETTINGS,
+  useClientSettings: (selector?: (settings: ClientSettings) => unknown) => {
+    const settings: ClientSettings = {
+      ...DEFAULT_CLIENT_SETTINGS,
+      activeEnvironmentScope: scopes.activeScope,
+      environmentScopeAssignments: { work: "work" },
+    };
+    return selector ? selector(settings) : settings;
+  },
   useUpdateEnvironmentSettings: () => () => undefined,
 }));
 vi.mock("../hooks/useScratchProject", () => ({
@@ -87,6 +97,17 @@ vi.mock("../state/environments", async (original) => ({
           environment: { platform: { os: "linux" }, capabilities: { projectCloneTracking: true } },
           settings: { addProjectBaseDirectory: "/workspace/" },
           newProjectsRoot: "/workspace/",
+        },
+      },
+      {
+        environmentId: "work",
+        label: "Work server",
+        connection: { phase: "connected" },
+        entry: { target: { _tag: "BearerConnectionTarget", connectionId: "remote:work" } },
+        serverConfig: {
+          environment: { platform: { os: "linux" }, capabilities: { projectCloneTracking: true } },
+          settings: { addProjectBaseDirectory: "/work/" },
+          newProjectsRoot: "/work/",
         },
       },
     ],
@@ -129,6 +150,15 @@ vi.mock("../state/query", async (original) => ({
 vi.mock("./settings/useAvailableSettingsSearchItems", () => ({
   useAvailableSettingsSearchItems: () => [],
 }));
+
+it("keeps Add Project in the selected scope when the primary environment is personal", async () => {
+  setup();
+  scopes.activeScope = "work";
+  await using _screen = await render(<CommandPalette>{null}</CommandPalette>);
+  await act(() => openCommandPalette({ open: "add-project" }));
+  await page.getByText("Local folder", { exact: true }).click();
+  await expect.element(page.getByRole("combobox")).toHaveValue("/work/");
+});
 
 // The real palette and Base UI input must agree that confirming composition is typing.
 describe.each(["repository", "folder", "destination"] as const)("add-project %s", (step) => {

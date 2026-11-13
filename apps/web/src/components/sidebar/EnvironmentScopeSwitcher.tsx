@@ -12,6 +12,7 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -47,28 +48,30 @@ export function EnvironmentScopeSwitcher() {
           <Settings2Icon aria-hidden="true" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="max-w-[min(20rem,calc(100vw-2rem))]">
-          <DropdownMenuLabel>Work environments</DropdownMenuLabel>
-          <DropdownMenuSeparator />
-          {environments.map((environment) => (
-            <DropdownMenuCheckboxItem
-              key={environment.environmentId}
-              checked={getEnvironmentScope(assignments, environment.environmentId) === "work"}
-              closeOnClick={false}
-              onCheckedChange={(checked) =>
-                void setEnvironmentScopeAssignment(
-                  environment.environmentId,
-                  checked ? "work" : "personal",
-                )
-              }
-            >
-              {environment.label}
-            </DropdownMenuCheckboxItem>
-          ))}
-          {environments.length === 0 ? (
-            <div className="px-2 py-1.5 text-sm text-muted-foreground">
-              No environments available
-            </div>
-          ) : null}
+          <DropdownMenuGroup>
+            <DropdownMenuLabel>Work environments</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            {environments.map((environment) => (
+              <DropdownMenuCheckboxItem
+                key={environment.environmentId}
+                checked={getEnvironmentScope(assignments, environment.environmentId) === "work"}
+                closeOnClick={false}
+                onCheckedChange={(checked) =>
+                  void setEnvironmentScopeAssignment(
+                    environment.environmentId,
+                    checked ? "work" : "personal",
+                  )
+                }
+              >
+                {environment.label}
+              </DropdownMenuCheckboxItem>
+            ))}
+            {environments.length === 0 ? (
+              <div className="px-2 py-1.5 text-sm text-muted-foreground">
+                No environments available
+              </div>
+            ) : null}
+          </DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>
     </div>

@@ -140,13 +140,14 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
       "chat.newWithoutProject": (event) => {
         const context = readThreadContext();
         const selectedEnvironmentId = resolveThreadActionProjectRef(context)?.environmentId;
-        const scopedEnvironmentId = filterEnvironmentIdsByScope(
+        const scopedEnvironmentIds = filterEnvironmentIdsByScope(
           [...appAtomRegistry.get(environmentPresentations.presentationsAtom).keys()],
           context.environmentScope.activeScope,
           context.environmentScope.assignments,
-        )[0];
+        );
         const environmentId = scratch.scratchEnvironmentId(
-          selectedEnvironmentId ?? scopedEnvironmentId ?? null,
+          selectedEnvironmentId ?? scopedEnvironmentIds[0] ?? null,
+          scopedEnvironmentIds,
         );
         if (environmentId === null) return;
         claim(event);
