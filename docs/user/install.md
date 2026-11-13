@@ -128,6 +128,53 @@ Home Manager, update your configuration's nixpkgs input or channel and rebuild.
 Nix manages both the desktop app and the bundled
 `t3` command; use Nix to update them instead of the in-app updater or `t3 update`.
 
+### T3 Code fork (Nix)
+
+The fork has its own pinned flake and command names, so it can be installed next to
+the nixpkgs `t3code` package. Replace `FULL_COMMIT` with a reviewed 40-character
+commit from the fork; the profile records that revision, and the flake pins its
+nixpkgs input in `flake.lock`:
+
+```bash
+nix profile add 'github:Nitestack/t3code/FULL_COMMIT#t3code-fork'
+```
+
+Update to another reviewed commit by replacing `FULL_COMMIT` and installing that
+source. Check `nix profile list` afterwards and remove the previous fork entry
+by its index if Nix kept both revisions:
+
+```bash
+nix profile install 'github:Nitestack/t3code/NEW_FULL_COMMIT#t3code-fork'
+```
+
+For NixOS, use the same package in `environment.systemPackages`. In a flake-based
+Home Manager configuration, add a pinned input and include
+`inputs.t3code-fork.packages.${pkgs.system}.t3code-fork` in `home.packages`.
+To update either configuration, change the input to a reviewed full commit and
+rebuild so its lock file records the new source.
+The package provides `t3code-fork` for the CLI and `t3code-fork-desktop` for the
+desktop app; neither replaces the original `t3` or `t3code-desktop` commands.
+
+Give the fork its own data directory and an unused port when launching it. The
+same settings work for the desktop app or the headless server:
+
+```bash
+T3CODE_HOME="$HOME/.local/share/t3code-fork" \
+T3CODE_PORT=43101 \
+  t3code-fork-desktop
+
+T3CODE_HOME="$HOME/.local/share/t3code-fork" \
+  t3code-fork serve --no-browser --port 43101
+```
+
+Choose one launch mode for that T3 home at a time; each server owns its data
+directory while running.
+
+Nix only installs the pinned application build. It does not configure aix,
+resolve profiles, or place endpoints or API keys in the store. aix profile
+support is available only when the server-side integration is implemented and
+configured separately.
+
 ### The `t3` command
 
 The desktop app includes the `t3` command-line tool. A new install sets it up
