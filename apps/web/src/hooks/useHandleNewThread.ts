@@ -50,6 +50,8 @@ import { useThreadRouteTarget } from "./useThreadRouteTarget";
 import { readUnloadedThreadCount } from "../state/olderSettledShelf";
 import { resolveProjectDefaultProviderModelSelection } from "../providerInstances";
 import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
+import { filterByEnvironmentScope } from "@t3tools/client-runtime/environment";
+import { useClientEnvironmentScope } from "../environmentScope";
 
 export const LAST_USED_PROJECT_STORAGE_KEY = "t3code:last-used-project:v1";
 export const lastUsedProjectKeySchema = Schema.NullOr(Schema.String);
@@ -485,7 +487,13 @@ export function useHandleNewThread() {
         : useComposerDraftStore.getState().getDraftSession(routeTarget.draftId)
       : null,
   );
-  const projects = useProjects();
+  const allProjects = useProjects();
+  const environmentScope = useClientEnvironmentScope();
+  const projects = filterByEnvironmentScope(
+    allProjects,
+    environmentScope.activeScope,
+    environmentScope.assignments,
+  );
   const handleNewThread = useNewThreadHandler();
   const defaultProjectRef = resolveDefaultProjectRef(
     projects,
@@ -497,6 +505,7 @@ export function useHandleNewThread() {
   return {
     activeDraftThread,
     activeThread,
+    environmentScope,
     defaultProjectRef,
     defaultProjectFallbackReady,
     handleNewThread,

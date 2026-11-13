@@ -99,6 +99,8 @@ import { useAtomValue } from "@effect/atom-react";
 import { isDesktopLocalConnectionTarget } from "../connection/desktopLocal";
 import { useDesktopLocalBootstraps } from "../connection/useDesktopLocalBootstraps";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
+import { filterByEnvironmentScope } from "@t3tools/client-runtime/environment";
+import { filterEnvironmentIdsByScope, useClientEnvironmentScope } from "../environmentScope";
 import { useOpenPanelPullRequestUrl } from "../hooks/useOpenPanelPullRequestUrl";
 import { copyThreadReference } from "../lib/copyThreadReference";
 import {
@@ -477,10 +479,12 @@ function OpenCommandPaletteDialog(props: {
   const desktopLocalBootstraps = useDesktopLocalBootstraps();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const availableSettingsSearchItems = useAvailableSettingsSearchItems();
-  const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
+  const { activeDraftThread, activeThread, defaultProjectRef, environmentScope, handleNewThread } =
     useHandleNewThread();
   const paletteRouteTarget = useThreadRouteTarget();
-  const projects = useProjects();
+  const allProjects = useProjects();
+  const { activeScope, assignments } = useClientEnvironmentScope();
+  const projects = filterByEnvironmentScope(allProjects, activeScope, assignments);
   const referenceThreadRef =
     pathname === "/pull-requests"
       ? environments.some((environment) => environment.serverConfig !== null)
@@ -513,7 +517,11 @@ function OpenCommandPaletteDialog(props: {
     await copyThreadReference(activeThreadReferenceCopyTarget);
   };
   // Side chats and subagents open inside their parent, so opening a project never lands on one.
-  const threads = useVisibleThreadShells().filter((thread) => !isSidebarHiddenThread(thread));
+  const threads = filterByEnvironmentScope(
+    useVisibleThreadShells(),
+    activeScope,
+    assignments,
+  ).filter((thread) => !isSidebarHiddenThread(thread));
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const providersByEnvironment = useEnvironmentProviders();
   const { changeThemeItem, changeAppearanceItem, themeEditorItem } = useCommandPaletteThemeItems();
@@ -546,6 +554,7 @@ function OpenCommandPaletteDialog(props: {
     activeDraftThread,
     activeThread: activeThread ?? undefined,
     defaultProjectRef,
+    environmentScope,
     handleNewThread,
   });
   const projectPickerEntries = buildSidebarProjectPickerEntries({
@@ -579,7 +588,7 @@ function OpenCommandPaletteDialog(props: {
   };
 
   const addProjectEnvironmentOptions = (() => {
-    const options = environments
+    const options = filterByEnvironmentScope(environments, activeScope, assignments)
       .filter((environment) => canCreateProjectInEnvironment(environment.connection.phase))
       .map((environment): AddProjectEnvironmentOption => {
         const isPrimary = environment.entry.target._tag === "PrimaryConnectionTarget";
@@ -620,7 +629,9 @@ function OpenCommandPaletteDialog(props: {
         ? desktopLocalBackendId(environment.entry.target)?.startsWith("wsl:") === true
         : false;
     }) ?? null;
-  const browseEnvironmentId = addProjectEnvironmentId ?? defaultAddProjectEnvironmentId;
+  const browseEnvironmentId =
+    addProjectEnvironmentOptions.find((option) => option.environmentId === addProjectEnvironmentId)
+      ?.environmentId ?? defaultAddProjectEnvironmentId;
   const canCreateProject = useEnvironmentScope(browseEnvironmentId, AuthOrchestrationOperateScope);
   const browseEnvironment =
     environments.find((environment) => environment.environmentId === browseEnvironmentId) ?? null;
@@ -694,10 +705,19 @@ function OpenCommandPaletteDialog(props: {
   const supportsThreadFind =
     environments.find((environment) => environment.environmentId === activeThread?.environmentId)
       ?.serverConfig?.threadFind === true;
-  const currentProjectEnvironmentId =
-    activeThread?.environmentId ?? activeDraftThread?.environmentId ?? null;
-  const currentProjectId = activeThread?.projectId ?? activeDraftThread?.projectId ?? null;
-  const scratchTargetEnvironmentId = scratchEnvironmentId(currentProjectEnvironmentId);
+  const currentProjectEnvironmentId = contextualProjectRef?.environmentId ?? null;
+  const currentProjectId = contextualProjectRef?.projectId ?? null;
+  const scopedEnvironmentIds = filterEnvironmentIdsByScope(
+    environments
+      .filter((environment) => environment.connection.phase === "connected")
+      .map((environment) => environment.environmentId),
+    activeScope,
+    assignments,
+  );
+  const scratchTargetEnvironmentId = scratchEnvironmentId(
+    currentProjectEnvironmentId ?? scopedEnvironmentIds[0] ?? null,
+    scopedEnvironmentIds,
+  );
   const supportsTriage = (environmentId: EnvironmentId | null) =>
     environments.find((environment) => environment.environmentId === environmentId)?.serverConfig
       ?.environment.capabilities.triage === true;
@@ -1307,6 +1327,7 @@ function OpenCommandPaletteDialog(props: {
             activeDraftThread,
             activeThread: activeThread ?? undefined,
             defaultProjectRef,
+            environmentScope,
             handleNewThread,
           });
         },

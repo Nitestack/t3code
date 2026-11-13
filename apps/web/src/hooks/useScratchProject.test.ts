@@ -38,6 +38,9 @@ describe("scratchEnvironmentId", () => {
   it("prefers the primary environment over the one on screen", () => {
     expect(actions(local, "/local/scratch").scratchEnvironmentId(remote)).toBe(local);
     expect(actions(local, "/local/scratch").scratchEnvironmentId(null)).toBe(local);
+    expect(actions(local, "/local/scratch").scratchEnvironmentId(remote, [remote])).toBe(remote);
+    expect(actions(local, "/local/scratch").scratchEnvironmentId(remote, [other])).toBe(other);
+    expect(actions(local, "/local/scratch").scratchEnvironmentId(remote, [])).toBeNull();
   });
 
   it("falls back when the primary environment offers no scratch root", () => {

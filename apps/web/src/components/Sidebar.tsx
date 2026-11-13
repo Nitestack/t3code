@@ -129,7 +129,7 @@ import { useSidebarProjectGroups } from "../hooks/useSidebarProjectGroups";
 import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
 import { registerSettleAndAdvance } from "../settleAndAdvance";
 import { startNewThreadFromContext } from "../lib/chatThreadActions";
-import { useClientSettings } from "../hooks/useSettings";
+import { getClientSettings, updateClientSettings, useClientSettings } from "../hooks/useSettings";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useNowMinute } from "../hooks/useNowMinute";
@@ -238,6 +238,13 @@ import { copyThreadReference } from "../lib/copyThreadReference";
 import { threadChipCopyTarget } from "@t3tools/client-runtime/thread-reference";
 import { Button } from "./ui/button";
 import { isProjectPinShortcut, ProjectPinButton } from "./ProjectPinButton";
+import { EnvironmentScopeSwitcher } from "./sidebar/EnvironmentScopeSwitcher";
+import { filterByEnvironmentScope, getEnvironmentScope } from "@t3tools/client-runtime/environment";
+import {
+  filterEnvironmentIdsByScope,
+  filterThreadKeysByEnvironmentScope,
+  useClientEnvironmentScope,
+} from "../environmentScope";
 import {
   Combobox,
   ComboboxEmpty,
@@ -419,6 +426,7 @@ function useSidebarThreads(input: {
   readonly scopedProjectKeys: ReadonlySet<string> | null;
   readonly serverConfigs: ReadonlyMap<EnvironmentId, EnvironmentServerConfig>;
   readonly connectedEnvironmentIds: readonly EnvironmentId[];
+  readonly scopedEnvironmentIds: readonly EnvironmentId[];
   readonly optimisticDrop: SidebarOptimisticDrop | null;
   readonly threads: readonly EnvironmentThreadShell[];
   readonly delegatedUnderParent: ReadonlySet<string>;
@@ -433,6 +441,7 @@ function useSidebarThreads(input: {
     scopedProjectKeys,
     serverConfigs,
     connectedEnvironmentIds,
+    scopedEnvironmentIds,
     optimisticDrop,
     threads,
     delegatedUnderParent,
@@ -494,7 +503,7 @@ function useSidebarThreads(input: {
     partition;
   // Older settled threads load in pages; the shelf lists them only as far as they are loaded.
   const olderSettledShelf = useOlderSettledShelf({
-    scopes: olderSettledScopes([...serverConfigs.keys()], scopedProjectKeys),
+    scopes: olderSettledScopes(scopedEnvironmentIds, scopedProjectKeys),
     expanded: settledShelfExpanded,
     visibleCount: settledVisibleCount,
   });
@@ -805,7 +814,9 @@ function isOptimisticDropReleased(input: {
 
 // Build maps in a hook so the compiler can prove they are frozen and cache them.
 function useSidebarLookups() {
-  const projects = useProjects();
+  const allProjects = useProjects();
+  const { activeScope, assignments } = useClientEnvironmentScope();
+  const projects = filterByEnvironmentScope(allProjects, activeScope, assignments);
   const environments = useEnvironmentIdentities();
   const serverConfigs = useServerConfigs();
   const providerEntriesByEnvironment = useAtomValue(sidebarProviderEntriesAtom);
@@ -913,6 +924,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   } = useSidebarLookups();
   const delegatedUnderParent = useDelegatedUnderParent();
   const router = useRouter();
+  const { activeScope, assignments } = useClientEnvironmentScope();
   const { isMobile, setOpenMobile } = useSidebar();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
@@ -1034,7 +1046,16 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const threadSearchInputRef = useRef<HTMLInputElement>(null);
   const [threadSearchQuery, setThreadSearchQuery] = useState("");
   const [searchHighlightKey, setSearchHighlightKey] = useState<string | null>(null);
-  const connectedEnvironmentIds = useConnectedEnvironmentIds();
+  const connectedEnvironmentIds = filterEnvironmentIdsByScope(
+    useConnectedEnvironmentIds(),
+    activeScope,
+    assignments,
+  );
+  const scopedEnvironmentIds = filterEnvironmentIdsByScope(
+    [...serverConfigs.keys()],
+    activeScope,
+    assignments,
+  );
   const queuePendingFileDrop = useSidebarPendingFileDropStore((s) => s.queuePendingFileDrop);
   const clearPendingFileDrop = useSidebarPendingFileDropStore((s) => s.clearPendingFileDrop);
   const [renamingThreadRef, setRenamingThreadRef] = useState<ScopedThreadRef | null>(null);
@@ -1082,6 +1103,22 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     routeDraftRedirect,
   );
   const routeThreadKey = routeThreadRef ? scopedThreadKey(routeThreadRef) : null;
+  const routeEnvironmentId =
+    routeThreadRef?.environmentId ??
+    (routeTarget?.kind === "draft" ? routeDraftThread?.environmentId : null);
+  const routeSyncKey =
+    routeThreadKey ?? (routeTarget?.kind === "draft" ? routeTarget.draftId : null);
+  const routeScope =
+    routeEnvironmentId == null ? null : getEnvironmentScope(assignments, routeEnvironmentId);
+  // Route changes from links and notifications select the environment's local view.
+  // Scope changes themselves do not trigger this effect, so users can browse away from the open thread.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- route navigation synchronizes the local view with the route's environment
+  useEffect(() => {
+    if (routeSyncKey === null || routeScope === null) return;
+    if (getClientSettings().activeEnvironmentScope !== routeScope) {
+      void updateClientSettings({ activeEnvironmentScope: routeScope });
+    }
+  }, [routeScope, routeSyncKey]);
 
   // A selection made under one scope can hold threads the next scope hides.
   // The viewport outlives the scope and does not anchor, so a new list starts at the top.
@@ -1116,7 +1153,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             ),
           ),
         );
-  const threads = useQuietThreadShells();
+  const threads = filterByEnvironmentScope(useQuietThreadShells(), activeScope, assignments);
   const promotingDraftThreadKeys = usePromotingDraftThreadKeys();
   const listedThreads =
     promotingDraftThreadKeys.length === 0
@@ -1356,6 +1393,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     scopedProjectKeys,
     serverConfigs,
     connectedEnvironmentIds,
+    scopedEnvironmentIds,
     optimisticDrop,
     threads: listedThreads,
     delegatedUnderParent,
@@ -1766,10 +1804,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     if (key === null) return [];
     const selected = useThreadSelectionStore.getState().selectedThreadKeys;
     const keys = selected.has(key) ? [...selected] : [key];
-    return keys.flatMap((candidate) => {
-      const ref = parseScopedThreadKey(candidate);
-      return ref ? [ref] : [];
-    });
+    const settings = getClientSettings();
+    return filterThreadKeysByEnvironmentScope(
+      keys,
+      settings.activeEnvironmentScope,
+      settings.environmentScopeAssignments,
+    );
   };
   const pointerOutsideThreadList = (point: { x: number; y: number }) => {
     // Search results replace the thread list, so only one of them is mounted.
@@ -2957,6 +2997,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
         activeDraftThread: newThreadContext.activeDraftThread,
         activeThread: newThreadContext.activeThread ?? undefined,
         defaultProjectRef: newThreadContext.defaultProjectRef,
+        environmentScope: newThreadContext.environmentScope,
         handleNewThread,
       }).then((started) => {
         if (!started) openCommandPalette({ open: "new-thread-in" });
@@ -2981,6 +3022,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
         className="min-h-full"
         fixedHeader={
           <SidebarGroup className="z-[1]">
+            <div className="mb-1">
+              <EnvironmentScopeSwitcher />
+            </div>
             <SidebarThreadHeader
               hasProjects={projectGroups.length > 0}
               projectScope={
