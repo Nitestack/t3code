@@ -38,9 +38,7 @@ export function getSyncDecision(
   releases,
   { integratedTag, targetTag, openSyncPullRequests = [] } = {},
 ) {
-  const openSyncPullRequest = openSyncPullRequests.find(
-    ({ headRefName }) => typeof headRefName === "string" && headRefName.startsWith(BRANCH_PREFIX),
-  );
+  const openSyncPullRequest = getSyncPullRequests(openSyncPullRequests)[0];
   if (openSyncPullRequest) {
     return { kind: "duplicate", branch: openSyncPullRequest.headRefName };
   }
@@ -183,7 +181,11 @@ function validateSyncBranch({ branch, branchCommit, mainRef, targetTag, targetCo
 
 function getSyncPullRequests(pullRequests) {
   return pullRequests.filter(
-    ({ headRefName }) => typeof headRefName === "string" && headRefName.startsWith(BRANCH_PREFIX),
+    ({ headRefName, headRepository }) =>
+      typeof headRefName === "string" &&
+      headRefName.startsWith(BRANCH_PREFIX) &&
+      typeof headRepository?.nameWithOwner === "string" &&
+      headRepository.nameWithOwner.toLowerCase() === FORK_REPOSITORY.toLowerCase(),
   );
 }
 
@@ -392,7 +394,7 @@ function getOpenSyncPullRequests() {
       "--base",
       "main",
       "--json",
-      "headRefName,title,url",
+      "headRefName,headRepository,title,url",
       "--limit",
       "1000",
     ],
@@ -429,6 +431,7 @@ function writeStepSummary(message) {
 
 async function main() {
   requireFork();
+  const dryRun = process.env.DRY_RUN === "true";
   const releases = getPublishedReleases();
   if (releases.length === 0) throw new Error("Upstream releases API returned no releases.");
   const stableReleases = releases.filter(isStableRelease);
@@ -463,6 +466,12 @@ async function main() {
       targetTag: release.tag_name,
       targetCommit,
     });
+    if (dryRun) {
+      const message = `Dry run only; existing sync pull request ${branch} verified without dispatching CI.`;
+      console.log(message);
+      await writeStepSummary(message);
+      return;
+    }
     const dispatched = dispatchForkCi(branch);
     const message = dispatched
       ? `Existing sync pull request ${branch} verified; fork CI was dispatched on that branch.`
@@ -515,7 +524,6 @@ async function main() {
     integratedRelease?.commit ??
     (integratedTag ? resolveTagCommit(integratedTag) : git(["merge-base", mainRef, targetCommit]));
   const branch = `${BRANCH_PREFIX}${targetTag}-${targetCommit.slice(0, 8)}`;
-  const dryRun = process.env.DRY_RUN === "true";
 
   const existingBranchCommit = getRemoteBranchCommit(branch);
   if (existingBranchCommit) {

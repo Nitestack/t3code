@@ -111,11 +111,12 @@ if (args[0] === "api" && args.some((arg) => arg.includes("/releases?"))) {
   state.runs.push({ databaseId: state.runs.length + 1, event: "workflow_dispatch", branch: ref, status: "queued" });
   fs.writeFileSync(statePath, JSON.stringify(state));
 } else if (args[0] === "pr" && args[1] === "list") {
-  output(state.pullRequests);
+  const fields = args[args.indexOf("--json") + 1].split(",");
+  output(state.pullRequests.map((pr) => Object.fromEntries(fields.map((field) => [field, pr[field]]))));
 } else if (args[0] === "pr" && args[1] === "create") {
   if (state.prCreateError) fail(state.prCreateError);
   const head = args[args.indexOf("--head") + 1].split(":").at(-1);
-  state.pullRequests.push({ headRefName: head, title: "upstream sync", url: "https://github.com/Nitestack/t3code/pull/17" });
+  state.pullRequests.push({ headRefName: head, headRepository: { nameWithOwner: "Nitestack/t3code" }, title: "upstream sync", url: "https://github.com/Nitestack/t3code/pull/17" });
   fs.writeFileSync(statePath, JSON.stringify(state));
   process.stdout.write("https://github.com/Nitestack/t3code/pull/17\\n");
 } else if (args[0] === "run" && args[1] === "list") {
@@ -144,7 +145,7 @@ if (args[0] === "api" && args.some((arg) => arg.includes("/releases?"))) {
       dispatchError,
     }),
   );
-  const runSync = () => {
+  const runSync = ({ dryRun: runDryRun = dryRun } = {}) => {
     try {
       return {
         status: 0,
@@ -155,7 +156,7 @@ if (args[0] === "api" && args.some((arg) => arg.includes("/releases?"))) {
             ...process.env,
             PATH: `${bin}:${process.env.PATH}`,
             GITHUB_REPOSITORY: "Nitestack/t3code",
-            DRY_RUN: dryRun ? "true" : "false",
+            DRY_RUN: runDryRun ? "true" : "false",
             T17_GH_STATE: statePath,
             T17_GH_CALLS: callsPath,
           },
@@ -236,10 +237,25 @@ NodeTest.test(
     );
     NodeAssert.deepEqual(
       getSyncDecision(releases, {
-        openSyncPullRequests: [{ headRefName: "automation/upstream-stable-v4.2.0" }],
+        openSyncPullRequests: [
+          {
+            headRefName: "automation/upstream-stable-v4.2.0",
+            headRepository: { nameWithOwner: "Nitestack/t3code" },
+          },
+        ],
       }),
       { kind: "duplicate", branch: "automation/upstream-stable-v4.2.0" },
     );
+    for (const headRepository of [undefined, null, { nameWithOwner: "contributor/t3code" }]) {
+      NodeAssert.equal(
+        getSyncDecision(releases, {
+          openSyncPullRequests: [
+            { headRefName: "automation/upstream-stable-v4.2.0", headRepository },
+          ],
+        }).kind,
+        "update",
+      );
+    }
   },
 );
 
@@ -267,27 +283,37 @@ NodeTest.test("a 0.1.9 release already in main is a true no-op", async () => {
 NodeTest.test(
   "dry run reports the candidate without pushing or opening a pull request",
   async () => {
-    const fixture = await createSyncFixture({ dryRun: true });
-    try {
-      const result = fixture.runSync();
-      NodeAssert.equal(result.status, 0, result.output);
-      NodeAssert.match(
-        result.output,
-        /Dry run only; no branch was pushed and no pull request was created/,
-      );
-      const state = await fixture.readState();
-      NodeAssert.equal(state.pullRequests.length, 0);
-      NodeAssert.equal(state.runs.length, 0);
-      NodeAssert.equal(
-        fixture.git(fixture.fork, [
-          "for-each-ref",
-          "--format=%(refname:short)",
-          "refs/heads/automation",
-        ]),
-        "",
-      );
-    } finally {
-      await NodeFSP.rm(fixture.root, { recursive: true, force: true });
+    for (const foreignPr of [false, true]) {
+      const fixture = await createSyncFixture({ dryRun: true });
+      try {
+        const initialState = await fixture.readState();
+        if (foreignPr) {
+          initialState.pullRequests.push({
+            headRefName: "automation/upstream-stable-v0.1.10-deadbeef",
+            headRepository: { nameWithOwner: "contributor/t3code" },
+          });
+          await fixture.writeState(initialState);
+        }
+        const result = fixture.runSync();
+        NodeAssert.equal(result.status, 0, result.output);
+        NodeAssert.match(
+          result.output,
+          /Dry run only; no branch was pushed and no pull request was created/,
+        );
+        const state = await fixture.readState();
+        NodeAssert.deepEqual(state.pullRequests, initialState.pullRequests);
+        NodeAssert.equal(state.runs.length, 0);
+        NodeAssert.equal(
+          fixture.git(fixture.fork, [
+            "for-each-ref",
+            "--format=%(refname:short)",
+            "refs/heads/automation",
+          ]),
+          "",
+        );
+      } finally {
+        await NodeFSP.rm(fixture.root, { recursive: true, force: true });
+      }
     }
   },
 );
@@ -346,6 +372,11 @@ NodeTest.test(
       NodeAssert.equal(state.pullRequests.length, 1);
       state.runs = [];
       await fixture.writeState(state);
+
+      const dryRun = fixture.runSync({ dryRun: true });
+      NodeAssert.equal(dryRun.status, 0, dryRun.output);
+      NodeAssert.match(dryRun.output, /Dry run only/);
+      NodeAssert.equal((await fixture.readState()).runs.length, 0);
 
       const retry = fixture.runSync();
       NodeAssert.equal(retry.status, 0, retry.output);
