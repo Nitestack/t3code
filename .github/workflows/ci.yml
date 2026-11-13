@@ -21,6 +21,7 @@ jobs:
   # their dependents. Pushes to main still run every Linux job. Detection fails
   # open: if the diff cannot be resolved, everything runs.
   changes:
+    if: github.repository == 'pingdotgg/t3code'
     name: Changes
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
@@ -60,6 +61,7 @@ jobs:
   # file, docs included. The `Check` job at the end of this file passes only
   # when every other job passes or was skipped by `changes`.
   lint:
+    if: github.repository == 'pingdotgg/t3code'
     permissions:
       contents: read
       id-token: write
@@ -119,7 +121,7 @@ jobs:
       id-token: write
     name: Build and Typecheck
     needs: changes
-    if: ${{ !cancelled() && (needs.changes.outputs.build != 'false' || needs.changes.outputs.typecheck != 'false') }}
+    if: ${{ github.repository == 'pingdotgg/t3code' && (!cancelled() && (needs.changes.outputs.build != 'false' || needs.changes.outputs.typecheck != 'false')) }}
     runs-on: blacksmith-8vcpu-ubuntu-2404
     timeout-minutes: 10
     steps:
@@ -274,7 +276,7 @@ jobs:
       id-token: write
     name: Test
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.test != 'false' }}
+    if: ${{ github.repository == 'pingdotgg/t3code' && (!cancelled() && needs.changes.outputs.test != 'false') }}
     runs-on: blacksmith-8vcpu-ubuntu-2404
     timeout-minutes: 10
     steps:
@@ -364,7 +366,7 @@ jobs:
       id-token: write
     name: Test Web ${{ matrix.shard }}
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.test_web != 'false' }}
+    if: ${{ github.repository == 'pingdotgg/t3code' && (!cancelled() && needs.changes.outputs.test_web != 'false') }}
     runs-on: blacksmith-8vcpu-ubuntu-2404
     timeout-minutes: 10
     strategy:
@@ -423,6 +425,7 @@ jobs:
   # The shards are the longest jobs, so they gate themselves instead of waiting
   # ~15s for `changes`: a shard the change cannot affect stops after checkout.
   test_server:
+    if: github.repository == 'pingdotgg/t3code'
     permissions:
       contents: read
       id-token: write
@@ -556,7 +559,7 @@ jobs:
   rust:
     name: Rust
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' }}
+    if: ${{ github.repository == 'pingdotgg/t3code' && (!cancelled() && needs.changes.outputs.rust != 'false') }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
     steps:
@@ -590,7 +593,7 @@ jobs:
   mobile_native_static_analysis:
     name: Mobile Native Static Analysis
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.mobile_native != 'false' }}
+    if: ${{ github.repository == 'pingdotgg/t3code' && (!cancelled() && needs.changes.outputs.mobile_native != 'false') }}
     runs-on: blacksmith-6vcpu-macos-26
     timeout-minutes: 10
     steps:
@@ -623,7 +626,7 @@ jobs:
       id-token: write
     name: Release Smoke
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.release_smoke != 'false' }}
+    if: ${{ github.repository == 'pingdotgg/t3code' && (!cancelled() && needs.changes.outputs.release_smoke != 'false') }}
     runs-on: blacksmith-8vcpu-ubuntu-2404
     timeout-minutes: 15
     steps:
@@ -644,6 +647,106 @@ jobs:
       - name: Exercise release-only workflow steps
         run: node scripts/release-smoke.ts
 
+  fork_server:
+    name: Fork Server
+    if: github.repository != 'pingdotgg/t3code'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+
+      - name: Setup Vite+ and dependencies
+        uses: ./.github/actions/setup-ci-deps
+        with:
+          install-args: --filter=t3...
+
+      - name: Typecheck server
+        run: vp run --filter t3 typecheck
+
+      - name: Install Chromium for server tests
+        run: node apps/server/node_modules/playwright-core/cli.js install --with-deps --only-shell chromium
+
+      - name: Test server
+        run: vp run --filter t3 test
+
+  fork_web:
+    name: Fork Web
+    if: github.repository != 'pingdotgg/t3code'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+
+      - name: Setup Vite+ and dependencies
+        uses: ./.github/actions/setup-ci-deps
+        with:
+          install-args: --filter=@t3tools/web...
+
+      - name: Build web
+        run: vp run --filter @t3tools/web build
+
+      - name: Install Chromium for web tests
+        run: node apps/web/node_modules/playwright/cli.js install --with-deps --only-shell chromium
+
+      - name: Test web
+        run: vp run --filter @t3tools/web test
+
+  fork_desktop:
+    name: Fork Desktop Build
+    if: github.repository != 'pingdotgg/t3code'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+
+      - name: Setup Vite+ and dependencies
+        uses: ./.github/actions/setup-ci-deps
+        with:
+          install-args: --filter=@t3tools/desktop... --filter=t3... --filter=@t3tools/web...
+
+      - name: Install desktop build libraries
+        run: sudo apt-get update && sudo apt-get install -y libsecret-1-dev pkg-config xvfb
+
+      - name: Ensure Electron is installed
+        run: vp run --filter @t3tools/desktop ensure:electron
+
+      - name: Build desktop pipeline
+        run: vp run build:desktop
+
+      - name: Verify preload bundle
+        run: node apps/desktop/scripts/verify-preload-bundle.mjs
+
+  fork_mobile:
+    name: Fork Mobile Type and Unit
+    if: github.repository != 'pingdotgg/t3code'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+
+      - name: Setup Vite+ and dependencies
+        uses: ./.github/actions/setup-ci-deps
+        with:
+          install-args: --filter=@t3tools/mobile...
+
+      - name: Typecheck mobile
+        run: vp run --filter @t3tools/mobile typecheck
+
+      - name: Test mobile unit and React projects
+        run: vp run --filter @t3tools/mobile test
+
   # Branch protection requires this job by its name, `Check`. It fails when any
   # other job fails, is cancelled, or is skipped without a reason, so splitting
   # or resharding jobs needs no ruleset change. Add every new job to `needs`.
@@ -651,7 +754,7 @@ jobs:
   # branch protection, so a cancelled run must still produce a failing check.
   check:
     name: Check
-    if: ${{ always() }}
+    if: ${{ github.repository == 'pingdotgg/t3code' && (always()) }}
     needs:
       [
         changes,
