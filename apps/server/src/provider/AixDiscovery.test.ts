@@ -14,7 +14,11 @@ import { AixDiscoveryError, listModels, listProfiles, resolveEnvironment } from 
 const secretSentinel = "aix-secret-sentinel-do-not-leak";
 const encoder = new TextEncoder();
 
-type CommandResult = { readonly stdout: string; readonly stderr?: string; readonly code?: number };
+type CommandResult = {
+  readonly stdout: string;
+  readonly stderr?: string | ReadonlyArray<Uint8Array>;
+  readonly code?: number;
+};
 
 function mockHandle(result: CommandResult, onKill: () => void = () => undefined) {
   return ChildProcessSpawner.makeHandle({
@@ -25,7 +29,10 @@ function mockHandle(result: CommandResult, onKill: () => void = () => undefined)
     unref: Effect.succeed(Effect.void),
     stdin: Sink.drain,
     stdout: Stream.make(encoder.encode(result.stdout)),
-    stderr: Stream.make(encoder.encode(result.stderr ?? "")),
+    stderr:
+      typeof result.stderr === "string" || result.stderr === undefined
+        ? Stream.make(encoder.encode(result.stderr ?? ""))
+        : Stream.fromIterable(result.stderr),
     all: Stream.empty,
     getInputFd: () => Sink.drain,
     getOutputFd: () => Stream.empty,
@@ -245,18 +252,23 @@ it.effect("distinguishes a missing aix executable and an unavailable gateway", (
   }),
 );
 
-it.effect("does not decode oversized stderr or leak its secret sentinel", () =>
+it.effect("does not decode oversized single or fragmented stderr or leak its secret sentinel", () =>
   Effect.gen(function* () {
-    const result = yield* Effect.result(
-      withAix(resolveEnvironment("oauth-profile"), () => ({
-        stdout: "",
-        stderr: `oauth ${secretSentinel}${"x".repeat(65_536)}`,
-        code: 3,
-      })),
-    );
+    const stderr = `oauth ${secretSentinel}${"x".repeat(65_536)}`;
+    const bytes = encoder.encode(stderr);
+    const fragments = Array.from(bytes, (byte) => new Uint8Array([byte]));
+    for (const output of [stderr, fragments]) {
+      const result = yield* Effect.result(
+        withAix(resolveEnvironment("oauth-profile"), () => ({
+          stdout: "",
+          stderr: output,
+          code: 3,
+        })),
+      );
 
-    assert.equal(Result.isFailure(result) && result.failure.reason, "command-failed");
-    assert.equal(JSON.stringify(result).includes(secretSentinel), false);
+      assert.equal(Result.isFailure(result) && result.failure.reason, "command-failed");
+      assert.equal(JSON.stringify(result).includes(secretSentinel), false);
+    }
   }),
 );
 

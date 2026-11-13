@@ -67,40 +67,25 @@ const COMMAND_TIMEOUT = Duration.seconds(15);
 const STDOUT_LIMIT = 1024 * 1024;
 const STDERR_LIMIT = 64 * 1024;
 
-interface BoundedOutput {
-  readonly chunks: ReadonlyArray<Uint8Array>;
-  readonly byteLength: number;
-  readonly exceeded: boolean;
-}
-
-const emptyOutput: BoundedOutput = { chunks: [], byteLength: 0, exceeded: false };
-
 const collectBounded = <E, R>(stream: Stream.Stream<Uint8Array, E, R>, limit: number) =>
   stream.pipe(
     Stream.runFold(
-      () => emptyOutput,
-      (output, chunk): BoundedOutput => {
-        if (output.exceeded || output.byteLength + chunk.byteLength > limit) {
-          return { chunks: [], byteLength: output.byteLength + chunk.byteLength, exceeded: true };
+      () => ({ bytes: new Uint8Array(limit), byteLength: 0, exceeded: false }),
+      (output, chunk) => {
+        if (output.exceeded) return output;
+        if (output.byteLength + chunk.byteLength > limit) {
+          output.exceeded = true;
+          return output;
         }
-        return {
-          chunks: [...output.chunks, chunk],
-          byteLength: output.byteLength + chunk.byteLength,
-          exceeded: false,
-        };
+        output.bytes.set(chunk, output.byteLength);
+        output.byteLength += chunk.byteLength;
+        return output;
       },
     ),
   );
 
-const decodeOutput = (output: BoundedOutput) => {
-  const bytes = new Uint8Array(output.byteLength);
-  let offset = 0;
-  for (const chunk of output.chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return new TextDecoder().decode(bytes);
-};
+const decodeOutput = (output: { readonly bytes: Uint8Array; readonly byteLength: number }) =>
+  new TextDecoder().decode(output.bytes.subarray(0, output.byteLength));
 
 const runAix = Effect.fn("AixDiscovery.runAix")(function* (
   args: ReadonlyArray<string>,
