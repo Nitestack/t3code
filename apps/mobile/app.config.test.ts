@@ -6,7 +6,12 @@ import assetLinks from "../web/public/.well-known/assetlinks.json";
 
 // Keep config parsing independent of local env files and build credentials.
 vi.mock("../../scripts/lib/public-config.ts", () => ({
-  loadRepoEnv: () => ({ APP_VARIANT: process.env.APP_VARIANT }),
+  loadRepoEnv: () => ({
+    APP_VARIANT: process.env.APP_VARIANT,
+    ...(process.env.T3CODE_MOBILE_VERSION === undefined
+      ? {}
+      : { T3CODE_MOBILE_VERSION: process.env.T3CODE_MOBILE_VERSION }),
+  }),
 }));
 
 afterEach(() => {
@@ -21,7 +26,7 @@ async function loadConfig(variant: string | undefined) {
 
 it.each(["prod", ""])("rejects APP_VARIANT=%j before selecting production IDs", async (value) => {
   await expect(loadConfig(value)).rejects.toThrow(
-    "APP_VARIANT must be development, preview, or production.",
+    "APP_VARIANT must be development, preview, production, or android-fork.",
   );
 });
 
@@ -45,3 +50,28 @@ it.each([
   ]);
   expect(assetLinks.map((link) => link.target.package_name)).toContain(identifier);
 });
+
+it.each([
+  ["2.3.0", 2_003_000],
+  ["2.3.1", 2_003_001],
+  ["2.4.0", 2_004_000],
+  ["3.0.0", 3_000_000],
+])("versions the Android fork as %s without changing its identity", async (version, code) => {
+  vi.stubEnv("T3CODE_MOBILE_VERSION", version);
+  const config = await loadConfig("android-fork");
+
+  expect(config.name).toBe("T3 Code (Nitestack)");
+  expect(config.scheme).toBe("t3code-aix");
+  expect(config.android?.package).toBe("com.nitestack.t3code");
+  expect(config.ios?.bundleIdentifier).toBe("com.t3tools.t3code");
+  expect(config.version).toBe(version);
+  expect(config.android?.versionCode).toBe(code);
+});
+
+it.each(["2.3.0-preview.1", "2.03.0", "2.1000.0", "2.3.1000", "2100.0.1", "0.0.0"])(
+  "rejects an Android fork version that cannot produce an ordered version code: %s",
+  async (version) => {
+    vi.stubEnv("T3CODE_MOBILE_VERSION", version);
+    await expect(loadConfig("android-fork")).rejects.toThrow("Android fork version");
+  },
+);
