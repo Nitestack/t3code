@@ -34,6 +34,8 @@ import { primaryServerProvidersAtom } from "../state/server";
 import { threadEnvironment } from "../state/threads";
 import { useAtomCommand } from "../state/use-atom-command";
 import { buildThreadRouteParams } from "../threadRoutes";
+import { filterByEnvironmentScope } from "@t3tools/client-runtime/environment";
+import { filterEnvironmentIdsByScope, useClientEnvironmentScope } from "../environmentScope";
 import { formatRelativeTimeLabel } from "../timestampFormat";
 import { buildThreadActionItems, ITEM_ICON_CLASS } from "./CommandPalette.logic";
 import { useEnvironmentLookups, useProjectLookups } from "./CommandPaletteLookups";
@@ -68,10 +70,16 @@ function useProviderEntryByEnvironmentAndInstanceId() {
 
 function useConnectedThreadSearch(query: string) {
   const { environments } = useEnvironments();
+  const { activeScope, assignments } = useClientEnvironmentScope();
   const { projectEnvironmentLocationById } = useEnvironmentLookups();
-  const environmentIds: ReadonlyArray<EnvironmentId> = environments
+  const connectedEnvironmentIds: ReadonlyArray<EnvironmentId> = environments
     .filter((environment) => environment.connection.phase === "connected")
     .map((environment) => environment.environmentId);
+  const environmentIds = filterEnvironmentIdsByScope(
+    connectedEnvironmentIds,
+    activeScope,
+    assignments,
+  );
   // The palette matches environment names when there are several; older rows must match the same.
   const environmentLabels =
     environments.length > 1
@@ -99,10 +107,12 @@ export function useCommandPaletteThreadItems(input: {
 }) {
   const { activeThread, threadSearchQuery } = input;
   const navigate = useNavigate();
-  const threads = useVisibleThreadShells();
+  const allThreads = useVisibleThreadShells();
   const { projectEnvironmentLocationById } = useEnvironmentLookups();
   const providerEntryByEnvironmentAndInstanceId = useProviderEntryByEnvironmentAndInstanceId();
   const messageSearch = useConnectedThreadSearch(threadSearchQuery);
+  const { activeScope, assignments } = useClientEnvironmentScope();
+  const threads = filterByEnvironmentScope(allThreads, activeScope, assignments);
   const { projectByKey } = useProjectLookups();
   const visitThread = useAtomCommand(threadEnvironment.visit, { reportFailure: false });
   // Ranking is relative to when the palette opened, so rows do not reorder as time passes.

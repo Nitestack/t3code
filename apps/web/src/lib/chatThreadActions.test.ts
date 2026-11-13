@@ -1,6 +1,15 @@
-import { ProviderInstanceId, type ModelSelection } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  ProjectId,
+  ProviderInstanceId,
+  type ModelSelection,
+} from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
-import { resolveNewThreadModelSelectionOverride } from "./chatThreadActions";
+import { scopeProjectRef } from "@t3tools/client-runtime/environment";
+import {
+  resolveNewThreadModelSelectionOverride,
+  resolveThreadActionProjectRef,
+} from "./chatThreadActions";
 
 const PROJECT_DEFAULT_SELECTION: ModelSelection = {
   instanceId: ProviderInstanceId.make("codex"),
@@ -32,5 +41,27 @@ describe("chatThreadActions", () => {
         destinationDraftId: "draft-b",
       }),
     ).toEqual(PROJECT_DEFAULT_SELECTION);
+  });
+
+  it("uses the selected scope's project when the open thread belongs to another scope", () => {
+    const workEnvironmentId = EnvironmentId.make("environment-work");
+    const personalEnvironmentId = EnvironmentId.make("environment-personal");
+    const workProjectRef = scopeProjectRef(workEnvironmentId, ProjectId.make("work-project"));
+
+    expect(
+      resolveThreadActionProjectRef({
+        activeDraftThread: null,
+        activeThread: { environmentId: personalEnvironmentId, projectId: ProjectId.make("same") },
+        defaultProjectRef: workProjectRef,
+        environmentScope: {
+          activeScope: "work",
+          assignments: {
+            [workEnvironmentId]: "work",
+            [personalEnvironmentId]: "personal",
+          },
+        },
+        handleNewThread: async () => null,
+      }),
+    ).toEqual(workProjectRef);
   });
 });

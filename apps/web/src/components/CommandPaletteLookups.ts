@@ -8,6 +8,8 @@ import { isDesktopLocalConnectionTarget } from "../connection/desktopLocal";
 import { useClientSettings } from "../hooks/useSettings";
 import { getProjectOrderKey } from "@t3tools/client-runtime/state/project-grouping";
 import { useProjects, useVisibleThreadShells } from "../state/entities";
+import { filterByEnvironmentScope } from "@t3tools/client-runtime/environment";
+import { useClientEnvironmentScope } from "../environmentScope";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
 import { buildSidebarProjectSnapshots } from "../sidebarProjectGrouping";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
@@ -39,7 +41,9 @@ export function useEnvironmentLookups() {
 }
 
 export function useProjectLookups() {
-  const projects = useProjects();
+  const allProjects = useProjects();
+  const { activeScope, assignments } = useClientEnvironmentScope();
+  const projects = filterByEnvironmentScope(allProjects, activeScope, assignments);
   const projectByKey = new Map(
     projects.map((project) => [`${project.environmentId}:${project.id}`, project]),
   );
@@ -54,11 +58,14 @@ export const selectCommandPaletteClientSettings = (settings: ClientSettings) => 
 });
 
 export function useSortedProjectGroups(environmentLabelById: ReadonlyMap<EnvironmentId, string>) {
-  const projects = useProjects();
-  const threads = useVisibleThreadShells();
+  const allProjects = useProjects();
+  const allThreads = useVisibleThreadShells();
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const clientSettings = useClientSettings(selectCommandPaletteClientSettings);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const { activeScope, assignments } = useClientEnvironmentScope();
+  const projects = filterByEnvironmentScope(allProjects, activeScope, assignments);
+  const threads = filterByEnvironmentScope(allThreads, activeScope, assignments);
   const projectGroupingSettings = {
     sidebarProjectGroupingMode: clientSettings.sidebarProjectGroupingMode,
     sidebarProjectGroupingOverrides: clientSettings.sidebarProjectGroupingOverrides,

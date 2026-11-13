@@ -5,6 +5,11 @@ import type {
   ProjectId,
   ScopedProjectRef,
 } from "@t3tools/contracts";
+import {
+  getEnvironmentScope,
+  type EnvironmentScopeAssignments,
+  type EnvironmentScope,
+} from "@t3tools/client-runtime/environment";
 import type { ComposerThreadDraftState, DraftThreadEnvMode } from "../composerDraftStore";
 
 type ComposerModelSelectionState = Pick<
@@ -33,6 +38,10 @@ export interface ChatThreadActionContext {
   readonly activeDraftThread: ThreadContextLike | null;
   readonly activeThread: ThreadContextLike | undefined;
   readonly defaultProjectRef: ScopedProjectRef | null;
+  readonly environmentScope?: {
+    readonly activeScope: EnvironmentScope;
+    readonly assignments: EnvironmentScopeAssignments;
+  };
   readonly handleNewThread: NewThreadHandler;
 }
 
@@ -70,16 +79,22 @@ export function hasExplicitComposerModelSelection(
 export function resolveThreadActionProjectRef(
   context: ChatThreadActionContext,
 ): ScopedProjectRef | null {
-  if (context.activeThread) {
+  const isInScope = (environmentId: EnvironmentId) =>
+    context.environmentScope === undefined ||
+    getEnvironmentScope(context.environmentScope.assignments, environmentId) ===
+      context.environmentScope.activeScope;
+  if (context.activeThread && isInScope(context.activeThread.environmentId)) {
     return scopeProjectRef(context.activeThread.environmentId, context.activeThread.projectId);
   }
-  if (context.activeDraftThread) {
+  if (context.activeDraftThread && isInScope(context.activeDraftThread.environmentId)) {
     return scopeProjectRef(
       context.activeDraftThread.environmentId,
       context.activeDraftThread.projectId,
     );
   }
-  return context.defaultProjectRef;
+  return context.defaultProjectRef && isInScope(context.defaultProjectRef.environmentId)
+    ? context.defaultProjectRef
+    : null;
 }
 
 export async function startNewThreadFromContext(

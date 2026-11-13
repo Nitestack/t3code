@@ -232,6 +232,7 @@ export function SnapShotCoordinator() {
     activeDraftThread,
     activeThread,
     defaultProjectRef,
+    environmentScope,
     defaultProjectFallbackReady,
     handleNewThread,
     routeDraftId,
@@ -309,6 +310,7 @@ export function SnapShotCoordinator() {
       activeDraftThread,
       activeThread: activeThread ?? undefined,
       defaultProjectRef,
+      environmentScope,
       handleNewThread,
     });
     if (!projectRef) return null;
