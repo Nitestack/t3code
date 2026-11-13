@@ -41,7 +41,7 @@ stay in the server process/settings boundary; do not add them to provider snapsh
 | Official iOS → fork server              | Same React Native source and contracts; no fork-only UI field is required for model selection. The official client receives no Work/Private toggle.                                                                                      | Not run. Device access is disabled here. No fork iOS build was made.                                                                                                                                                                                                |
 | Fork mobile client → original T3 server | The fork client sends the existing `ModelSelection` shape and requests only existing config/provider DTOs. It can select only instances and models the original server reports. Work/Private classification remains local to the client. | Source/contract only; no live original server was contacted. An aix-only instance cannot be selected when the original server does not provide it.                                                                                                                  |
 
-The official iOS App Store listing showed version `1.4.0` on 2026-11-13. The official GitHub
+The official iOS App Store listing showed version `2.3.0` on 2026-11-13. The official GitHub
 releases page showed the Android nightly above. These are discovery observations, not binaries
 tested by this spike ([App Store](https://apps.apple.com/us/app/t3-code-remote-claude-more/id6787819824),
 [official releases](https://github.com/pingdotgg/t3code/releases)). A future app version is not
@@ -64,7 +64,7 @@ metadata additive and optional, and prefer server-side `displayName` plus normal
 ## Reproducible local evidence
 
 Added tests round-trip custom models for `codex`, `claudeAgent`, and `opencode` through the existing
-provider-status JSON codec, reject an empty model ID, verify mobile selection preserves exact
+provider-status JSON codec, reject a missing model ID, verify mobile selection preserves exact
 instance/model IDs, and verify a driver-locked picker excludes other drivers. Existing
 `modelSelection.test.ts` covers legacy `provider` decoding and canonical `instanceId` serialization.
 Existing `packages/client-runtime/src/connection/compatibility.test.ts` covers the descriptor
