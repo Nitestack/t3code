@@ -42,6 +42,7 @@ scripts/.e2e/
 .github/pr-assets/
 native/**/target/
 node_modules/
+.devenv/
 .alchemy/
 *.log
 .env*
