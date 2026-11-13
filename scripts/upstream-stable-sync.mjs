@@ -121,6 +121,195 @@ function git(args, options) {
   return run("git", args, options);
 }
 
+function getRemoteBranchCommit(branch) {
+  const ref = `refs/heads/${branch}`;
+  const result = git(["ls-remote", "--heads", "origin", ref]);
+  if (!result) return undefined;
+  const matches = result.split("\n").filter(Boolean);
+  if (matches.length !== 1) throw new Error(`Remote sync branch ${branch} is ambiguous.`);
+  const [commit, remoteRef] = matches[0].split("\t");
+  if (!/^[0-9a-f]{40,64}$/i.test(commit) || remoteRef !== ref) {
+    throw new Error(`Remote sync branch ${branch} returned an invalid ref.`);
+  }
+  git(["fetch", "origin", ref]);
+  const fetchedCommit = git(["rev-parse", "FETCH_HEAD"]);
+  if (fetchedCommit !== commit) {
+    throw new Error(`Remote sync branch ${branch} changed while it was being inspected.`);
+  }
+  return commit;
+}
+
+function validateSyncBranch({ branch, branchCommit, mainRef, targetTag, targetCommit }) {
+  const expectedMarker = `${JSON.stringify({ tag: targetTag, commit: targetCommit }, null, 2)}\n`;
+  const marker = `${branchCommit}:${MARKER_PATH}`;
+  let actualMarker;
+  try {
+    actualMarker = git(["show", marker]);
+  } catch {
+    throw new Error(`Existing update branch ${branch} is missing its upstream marker.`);
+  }
+  if (actualMarker !== expectedMarker.trimEnd()) {
+    throw new Error(`Existing update branch ${branch} has an unexpected upstream marker.`);
+  }
+
+  const mergeParents = git(["show", "-s", "--format=%P", branchCommit]).split(" ");
+  if (mergeParents.length !== 2 || mergeParents[1] !== targetCommit) {
+    throw new Error(
+      `Existing update branch ${branch} contains unexpected commits or does not merge the expected upstream tag.`,
+    );
+  }
+  if (!isAncestor(mergeParents[0], mainRef)) {
+    throw new Error(
+      `Existing update branch ${branch} is not based on the current fork main history.`,
+    );
+  }
+  let expectedMergeTree;
+  try {
+    expectedMergeTree = git(["merge-tree", "--write-tree", mergeParents[0], targetCommit])
+      .split("\n")[0]
+      .trim();
+  } catch {
+    throw new Error(`Existing update branch ${branch} contains an unresolved upstream merge.`);
+  }
+  const mergeChanges = git(["diff", "--name-only", expectedMergeTree, branchCommit])
+    .split("\n")
+    .filter(Boolean);
+  if (mergeChanges.length !== 1 || mergeChanges[0] !== MARKER_PATH) {
+    throw new Error(
+      `Existing update branch ${branch} contains unexpected fork changes or merge resolutions.`,
+    );
+  }
+}
+
+function getSyncPullRequests(pullRequests) {
+  return pullRequests.filter(
+    ({ headRefName }) => typeof headRefName === "string" && headRefName.startsWith(BRANCH_PREFIX),
+  );
+}
+
+function releaseFromBranch(branch, releases) {
+  const match =
+    /^automation\/upstream-stable-(v?(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))-([0-9a-f]{8})$/.exec(
+      branch,
+    );
+  if (!match)
+    throw new Error(`Existing sync pull request has an unexpected branch name: ${branch}`);
+  const release = releases.find(
+    (candidate) => candidate.tag_name === match[1] && isStableRelease(candidate),
+  );
+  if (!release)
+    throw new Error(`Existing sync branch ${branch} does not match a published stable release.`);
+  return { release, commitPrefix: match[2] };
+}
+
+function findWorkflowDispatch(branch) {
+  let runs;
+  try {
+    runs = JSON.parse(
+      run(
+        "gh",
+        [
+          "run",
+          "list",
+          "--repo",
+          FORK_REPOSITORY,
+          "--workflow",
+          "ci.yml",
+          "--branch",
+          branch,
+          "--event",
+          "workflow_dispatch",
+          "--limit",
+          "1",
+          "--json",
+          "databaseId,status,conclusion",
+        ],
+        { githubRequest: true },
+      ),
+    );
+  } catch (error) {
+    throw new Error(`Could not check whether fork CI was already dispatched for ${branch}.`, {
+      cause: error,
+    });
+  }
+  if (!Array.isArray(runs)) throw new Error("GitHub returned invalid workflow run data.");
+  return runs.length > 0;
+}
+
+function dispatchForkCi(branch) {
+  if (findWorkflowDispatch(branch)) return false;
+  try {
+    run(
+      "gh",
+      [
+        "api",
+        "--method",
+        "POST",
+        `repos/${FORK_REPOSITORY}/actions/workflows/ci.yml/dispatches`,
+        "-f",
+        `ref=${branch}`,
+      ],
+      { githubRequest: true },
+    );
+  } catch (error) {
+    const details = `${error.message} ${error.cause?.message ?? ""} ${error.cause?.stderr ?? ""}`;
+    if (
+      /HTTP 403|resource not accessible by integration|permission.*actions|actions.*permission/i.test(
+        details,
+      )
+    ) {
+      throw new Error(
+        `GitHub denied CI dispatch for ${branch}. The sync job declares actions:write; a maintainer must allow that token permission. The update branch and pull request are preserved for retry.`,
+        { cause: error },
+      );
+    }
+    throw new Error(
+      `Could not dispatch fork CI for ${branch}. The update branch and pull request are preserved; retrying will recover this dispatch.`,
+      { cause: error },
+    );
+  }
+  return true;
+}
+
+function createSyncPullRequest(branch, targetTag, bodyPath) {
+  try {
+    return run(
+      "gh",
+      [
+        "pr",
+        "create",
+        "--repo",
+        FORK_REPOSITORY,
+        "--base",
+        "main",
+        "--head",
+        `Nitestack:${branch}`,
+        "--title",
+        `chore: sync upstream stable ${targetTag}`,
+        "--body-file",
+        bodyPath,
+      ],
+      { githubRequest: true },
+    );
+  } catch (error) {
+    const stderr = String(error.cause?.stderr ?? error.message ?? "");
+    if (
+      /not permitted|not allowed|resource not accessible by integration|pull requests.*disabled|HTTP 403/i.test(
+        stderr,
+      )
+    ) {
+      throw new Error(
+        `GitHub blocked automated pull-request creation. A maintainer must allow GitHub Actions to create pull requests in the repository Actions policy. The update branch ${branch} is preserved; retry after that policy change.`,
+        { cause: error },
+      );
+    }
+    throw new Error(
+      `GitHub rejected pull-request creation. The update branch ${branch} is preserved for retry.`,
+      { cause: error },
+    );
+  }
+}
+
 function resolveTagCommit(tag) {
   const ref = `refs/tags/upstream/${tag}^{commit}`;
   const commit = git(["rev-parse", "--verify", ref], { allowFailure: true });
@@ -251,6 +440,38 @@ async function main() {
   git(["fetch", "origin", "main"]);
   git(["fetch", "--no-tags", UPSTREAM_URL, "+refs/tags/*:refs/tags/upstream/*"]);
 
+  const syncPullRequests = getSyncPullRequests(openSyncPullRequests);
+  if (syncPullRequests.length > 1) {
+    throw new Error(
+      "Multiple upstream stable-sync pull requests are open; refusing to create another.",
+    );
+  }
+  if (syncPullRequests.length === 1) {
+    const { headRefName: branch } = syncPullRequests[0];
+    const { release, commitPrefix } = releaseFromBranch(branch, releases);
+    const targetCommit = resolveTagCommit(release.tag_name);
+    if (!targetCommit.startsWith(commitPrefix)) {
+      throw new Error(`Existing sync branch ${branch} does not match the release tag commit.`);
+    }
+    const branchCommit = getRemoteBranchCommit(branch);
+    if (!branchCommit)
+      throw new Error(`Open sync pull request branch ${branch} is missing from origin.`);
+    validateSyncBranch({
+      branch,
+      branchCommit,
+      mainRef,
+      targetTag: release.tag_name,
+      targetCommit,
+    });
+    const dispatched = dispatchForkCi(branch);
+    const message = dispatched
+      ? `Existing sync pull request ${branch} verified; fork CI was dispatched on that branch.`
+      : `Existing sync pull request ${branch} verified; fork CI already has a workflow_dispatch run.`;
+    console.log(message);
+    await writeStepSummary(message);
+    return;
+  }
+
   const marker = readIntegratedMarker(mainRef, stableReleases);
   const integratedRelease = marker
     ? { tag: marker.tag, commit: marker.commit }
@@ -261,7 +482,6 @@ async function main() {
   const decision = getSyncDecision(releases, {
     integratedTag,
     targetTag: process.env.TARGET_TAG || undefined,
-    openSyncPullRequests,
   });
 
   if (decision.kind === "duplicate") {
@@ -297,21 +517,32 @@ async function main() {
   const branch = `${BRANCH_PREFIX}${targetTag}-${targetCommit.slice(0, 8)}`;
   const dryRun = process.env.DRY_RUN === "true";
 
-  git(["config", "user.name", "github-actions[bot]"]);
-  git(["config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"]);
-  mergeStableRelease({
-    targetTag,
-    mainRef,
-    branch,
-    tagRef: `refs/tags/upstream/${targetTag}`,
-  });
+  const existingBranchCommit = getRemoteBranchCommit(branch);
+  if (existingBranchCommit) {
+    validateSyncBranch({
+      branch,
+      branchCommit: existingBranchCommit,
+      mainRef,
+      targetTag,
+      targetCommit,
+    });
+  } else {
+    git(["config", "user.name", "github-actions[bot]"]);
+    git(["config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"]);
+    mergeStableRelease({
+      targetTag,
+      mainRef,
+      branch,
+      tagRef: `refs/tags/upstream/${targetTag}`,
+    });
 
-  await NodeFSP.writeFile(
-    MARKER_PATH,
-    `${JSON.stringify({ tag: targetTag, commit: targetCommit }, null, 2)}\n`,
-  );
-  git(["add", "--", MARKER_PATH]);
-  git(["commit", "--no-edit", "-m", `chore: sync upstream stable ${targetTag}`]);
+    await NodeFSP.writeFile(
+      MARKER_PATH,
+      `${JSON.stringify({ tag: targetTag, commit: targetCommit }, null, 2)}\n`,
+    );
+    git(["add", "--", MARKER_PATH]);
+    git(["commit", "--no-edit", "-m", `chore: sync upstream stable ${targetTag}`]);
+  }
 
   const commits = git(["log", "--format=%s (%h)", `${baseCommit}..${targetCommit}`])
     .split("\n")
@@ -334,7 +565,7 @@ async function main() {
     changeSummary,
     "",
     "### Verification",
-    "- Fork CI covers server, web, desktop build, and mobile type/unit checks. GitHub may hold pull request runs created with `GITHUB_TOKEN` for maintainer approval; use the `CI` workflow's `workflow_dispatch` on this branch to start the checks explicitly.",
+    "- The sync workflow dispatches Fork CI on this exact branch and fails if dispatch is rejected. Confirm a CI run exists and passes before merging; this workflow never approves or merges the pull request.",
   ].join("\n");
   if (dryRun) {
     const summary = `## Upstream stable sync: ${targetTag}\n\n${changeSummary}\n\nDry run only; no branch was pushed and no pull request was created.`;
@@ -344,26 +575,10 @@ async function main() {
   }
   const bodyPath = `${process.env.RUNNER_TEMP ?? "/tmp"}/upstream-stable-sync-pr.md`;
   await NodeFSP.writeFile(bodyPath, `${body}\n`);
-  git(["push", "origin", `HEAD:refs/heads/${branch}`]);
-  const pullRequestUrl = run(
-    "gh",
-    [
-      "pr",
-      "create",
-      "--repo",
-      FORK_REPOSITORY,
-      "--base",
-      "main",
-      "--head",
-      `Nitestack:${branch}`,
-      "--title",
-      `chore: sync upstream stable ${targetTag}`,
-      "--body-file",
-      bodyPath,
-    ],
-    { githubRequest: true },
-  );
-  const summary = `## Upstream stable sync: ${targetTag}\n\n${changeSummary}\n\nCreated a review pull request: ${pullRequestUrl}\n\nNo merge or release was performed.`;
+  if (!existingBranchCommit) git(["push", "origin", `HEAD:refs/heads/${branch}`]);
+  const pullRequestUrl = createSyncPullRequest(branch, targetTag, bodyPath);
+  const dispatched = dispatchForkCi(branch);
+  const summary = `## Upstream stable sync: ${targetTag}\n\n${changeSummary}\n\nCreated a review pull request: ${pullRequestUrl}\n\nFork CI ${dispatched ? "was dispatched" : "already has a workflow_dispatch run"} on ${branch}. No merge or release was performed.`;
   console.log(summary);
   await writeStepSummary(summary);
 }
