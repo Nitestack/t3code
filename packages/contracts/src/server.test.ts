@@ -7,6 +7,7 @@ import {
   OtlpEndpointCheckInput,
   resolveEnvironmentMachineKind,
   ServerConfigProviderStatusDeltasPayload,
+  ServerConfigStreamProviderStatusesEvent,
   ServerObservability,
   ServerProvider,
   serverProviderDeltas,
@@ -16,6 +17,7 @@ import { ServerSettings } from "./settings.ts";
 
 const decodeServerProvider = Schema.decodeUnknownSync(ServerProvider);
 const decodeServerProviders = Schema.decodeUnknownSync(ServerProviders);
+const encodeServerProvider = Schema.encodeSync(ServerProvider);
 
 const baseProviderSnapshot = {
   instanceId: "codex",
@@ -31,16 +33,87 @@ const baseProviderSnapshot = {
 
 describe("ServerProvider", () => {
   it("preserves installed-version presence through the provider wire codec", () => {
-    const encode = Schema.encodeSync(ServerProvider);
     for (const installation of [{}, { installedVersion: null }, { installedVersion: "1.2.3" }]) {
       const decoded = decodeServerProvider({ ...baseProviderSnapshot, ...installation });
-      const wire = JSON.parse(JSON.stringify(encode(decoded)));
+      const wire = JSON.parse(JSON.stringify(encodeServerProvider(decoded)));
       expect(wire).toMatchObject({ version: "1.0.0", ...installation });
       expect(Object.hasOwn(wire, "installedVersion")).toBe(
         Object.hasOwn(installation, "installedVersion"),
       );
       expect(decodeServerProvider(wire)).toEqual(decoded);
     }
+  });
+
+  it("round-trips custom models on named instances through the existing provider DTO", () => {
+    const providers = [
+      { instanceId: "codex_work", driver: "codex", slug: "vendor/gpt-6.1-sol" },
+      {
+        instanceId: "claude_work",
+        driver: "claudeAgent",
+        slug: "litellm/claude-opus-5-5",
+      },
+      {
+        instanceId: "opencode_work",
+        driver: "opencode",
+        slug: "google/gemma-4-31b-it",
+      },
+    ].map(({ instanceId, driver, slug }) =>
+      decodeServerProvider({
+        ...baseProviderSnapshot,
+        instanceId,
+        driver,
+        displayName: `${driver} Work`,
+        models: [{ slug, name: slug, isCustom: true, capabilities: null }],
+      }),
+    );
+    const codec = Schema.toCodecJson(ServerConfigStreamProviderStatusesEvent);
+    const event = { version: 1, type: "providerStatuses", payload: { providers } } as const;
+    const wire = JSON.parse(JSON.stringify(Schema.encodeSync(codec)(event))) as unknown;
+
+    expect(Schema.decodeUnknownSync(codec)(wire)).toEqual(event);
+    expect(wire).toMatchObject({
+      version: 1,
+      type: "providerStatuses",
+      payload: {
+        providers: [
+          { instanceId: "codex_work", driver: "codex", models: [{ slug: "vendor/gpt-6.1-sol" }] },
+          {
+            instanceId: "claude_work",
+            driver: "claudeAgent",
+            models: [{ slug: "litellm/claude-opus-5-5" }],
+          },
+          {
+            instanceId: "opencode_work",
+            driver: "opencode",
+            models: [{ slug: "google/gemma-4-31b-it" }],
+          },
+        ],
+      },
+    });
+  });
+
+  it("rejects a custom model without an id instead of emitting an unroutable choice", () => {
+    expect(() =>
+      decodeServerProvider({
+        ...baseProviderSnapshot,
+        instanceId: "codex_work",
+        models: [{ name: "Missing ID", isCustom: true, capabilities: null }],
+      }),
+    ).toThrow();
+  });
+
+  it("does not serialize provider configuration or API keys in the mobile-facing DTO", () => {
+    const sentinel = "T02_SENTINEL_API_KEY";
+    const provider = decodeServerProvider({
+      ...baseProviderSnapshot,
+      instanceId: "codex_work",
+      config: { endpoint: "https://gateway.invalid/v1", apiKey: sentinel },
+    });
+    const wire = JSON.stringify(encodeServerProvider(provider));
+
+    expect(wire).not.toContain(sentinel);
+    expect(wire).not.toContain("apiKey");
+    expect(wire).not.toContain("gateway.invalid");
   });
 });
 
