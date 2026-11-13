@@ -3,7 +3,7 @@ import type { ExpoConfig } from "expo/config";
 import { BRAND_ASSET_PATHS } from "../../scripts/lib/brand-assets.ts";
 import { loadRepoEnv } from "../../scripts/lib/public-config.ts";
 
-type AppVariant = "development" | "preview" | "production";
+type AppVariant = "development" | "preview" | "production" | "android-fork";
 
 const repoEnv = loadRepoEnv();
 Object.assign(process.env, repoEnv);
@@ -102,6 +102,14 @@ const VARIANT_CONFIG = {
     relyingParty: "clerk.t3.codes",
     assets: RELEASE_ASSETS,
   },
+  "android-fork": {
+    appName: "T3 Code (Nitestack)",
+    scheme: "t3code-aix",
+    iosBundleIdentifier: "com.t3tools.t3code",
+    androidPackage: "com.nitestack.t3code",
+    relyingParty: "clerk.t3.codes",
+    assets: RELEASE_ASSETS,
+  },
 } as const;
 
 function resolveAppVariant(value: string | undefined): AppVariant {
@@ -109,11 +117,12 @@ function resolveAppVariant(value: string | undefined): AppVariant {
     case "development":
     case "preview":
     case "production":
+    case "android-fork":
       return value;
     case undefined:
       return "production";
     default:
-      throw new Error("APP_VARIANT must be development, preview, or production.");
+      throw new Error("APP_VARIANT must be development, preview, production, or android-fork.");
   }
 }
 
@@ -452,6 +461,7 @@ const config: ExpoConfig = {
     // Mods run in reverse order; expo-widgets must create and wipe the target before assets are added.
     ...(!isIosPersonalTeamBuild ? ["./plugins/withWidgetLogoAsset.cjs", widgetsPlugin] : []),
     "./plugins/withAndroidNetworkSecurityConfig.cjs",
+    ...(APP_VARIANT === "android-fork" ? ["./plugins/withAndroidForkSigning.cjs"] : []),
     "./plugins/withAndroidGradleHeap.cjs",
     "./plugins/withAndroidInputBackground.cjs",
     "./plugins/withAndroidModernPopupMenu.cjs",

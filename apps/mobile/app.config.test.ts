@@ -21,7 +21,7 @@ async function loadConfig(variant: string | undefined) {
 
 it.each(["prod", ""])("rejects APP_VARIANT=%j before selecting production IDs", async (value) => {
   await expect(loadConfig(value)).rejects.toThrow(
-    "APP_VARIANT must be development, preview, or production.",
+    "APP_VARIANT must be development, preview, production, or android-fork.",
   );
 });
 
@@ -44,4 +44,13 @@ it.each([
     { scheme: "https", host, pathPrefix: "/threads/" },
   ]);
   expect(assetLinks.map((link) => link.target.package_name)).toContain(identifier);
+});
+
+it("gives the Nitestack Android fork its own identity without changing iOS", async () => {
+  const config = await loadConfig("android-fork");
+
+  expect(config.name).toBe("T3 Code (Nitestack)");
+  expect(config.scheme).toBe("t3code-aix");
+  expect(config.android?.package).toBe("com.nitestack.t3code");
+  expect(config.ios?.bundleIdentifier).toBe("com.t3tools.t3code");
 });
