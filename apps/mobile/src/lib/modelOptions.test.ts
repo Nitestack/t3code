@@ -22,6 +22,90 @@ import {
 } from "./modelOptions";
 
 describe("mobile model options", () => {
+  it("offers custom model ids from multiple standard-driver instances without rewriting them", () => {
+    const providers = [
+      {
+        instanceId: "codex_work",
+        driver: "codex",
+        displayName: "Codex Work",
+        slug: "vendor/gpt-6.1-sol",
+      },
+      {
+        instanceId: "claude_work",
+        driver: "claudeAgent",
+        displayName: "Claude Work",
+        slug: "litellm/claude-opus-5-5",
+      },
+      {
+        instanceId: "opencode_work",
+        driver: "opencode",
+        displayName: "OpenCode Work",
+        slug: "google/gemma-4-31b-it",
+      },
+    ].map((provider) => ({
+      ...provider,
+      enabled: true,
+      installed: true,
+      auth: { status: "authenticated" as const },
+      models: [
+        {
+          slug: provider.slug,
+          name: provider.slug,
+          isCustom: true,
+          capabilities: null,
+        },
+      ],
+    }));
+    const config = { providers } as unknown as ServerConfig;
+
+    const options = buildModelOptions(config, null, undefined, null);
+
+    expect(
+      options.map((option) => ({
+        instanceId: option.selection.instanceId,
+        model: option.selection.model,
+        providerLabel: option.providerLabel,
+      })),
+    ).toEqual([
+      {
+        instanceId: "codex_work",
+        model: "vendor/gpt-6.1-sol",
+        providerLabel: "Codex Work",
+      },
+      {
+        instanceId: "claude_work",
+        model: "litellm/claude-opus-5-5",
+        providerLabel: "Claude Work",
+      },
+      {
+        instanceId: "opencode_work",
+        model: "google/gemma-4-31b-it",
+        providerLabel: "OpenCode Work",
+      },
+    ]);
+  });
+
+  it("does not leak another driver into a provider-locked model picker", () => {
+    const providers = [
+      { instanceId: "codex_work", driver: "codex" },
+      { instanceId: "claude_work", driver: "claudeAgent" },
+      { instanceId: "opencode_work", driver: "opencode" },
+    ].map((provider) => ({
+      ...provider,
+      enabled: true,
+      installed: true,
+      auth: { status: "authenticated" as const },
+      models: [{ slug: "custom/model-id", name: "Custom", isCustom: true, capabilities: null }],
+    }));
+    const config = { providers } as unknown as ServerConfig;
+
+    expect(
+      buildModelOptions(config, null, ProviderInstanceId.make("claude_work"), null).map(
+        (option) => option.providerKey,
+      ),
+    ).toEqual(["claude_work"]);
+  });
+
   it("distinguishes same-name OpenCode models without changing their routing", () => {
     const sources = [
       { id: "anthropic", label: "Anthropic" },
