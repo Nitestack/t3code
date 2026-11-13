@@ -43,6 +43,12 @@ it("normalizes known model names while preserving exact selectable IDs", () => {
     ["gpt-oss-120b", "GPT-OSS 120B"],
   ]);
   expect(models.find(({ id }) => id === "gpt-oss-120b")?.provider).toBe("openai");
+  expect(models.map(({ id, family }) => [id, family])).toEqual([
+    ["claude-opus-5-5*", "Claude"],
+    ["google/gemma-4-31b-it", "Gemma"],
+    ["gpt-6.1-sol", "OpenAI GPT"],
+    ["gpt-oss-120b", "GPT-OSS"],
+  ]);
 });
 
 it("filters non-chat and generic wildcard routes but keeps named wildcard aliases", () => {
@@ -69,6 +75,18 @@ it("filters non-chat and generic wildcard routes but keeps named wildcard aliase
   );
 
   expect(models.map(({ id }) => id)).toEqual(["claude-opus-5-5*"]);
+});
+
+it("filters known non-chat and generic wildcard IDs even when model info is missing", () => {
+  const models = ModelCatalog.normalizeModelInfo([], undefined, [
+    "text-embedding-3-large",
+    "gpt-image-1.5",
+    "a2a/assistant",
+    "openai/*",
+    "tenant/Custom_Chat_Model",
+  ]);
+
+  expect(models.map(({ id }) => id)).toEqual(["tenant/Custom_Chat_Model"]);
 });
 
 it("includes listed custom IDs without metadata and leaves absent metadata unknown", () => {
@@ -105,6 +123,13 @@ it("conservatively aggregates deployments and partial metadata", () => {
     pricing: { inputPerMillionTokens: 3, outputPerMillionTokens: 15 },
     reasoning: { efforts: ["high"] },
   });
+
+  expect(
+    ModelCatalog.normalizeModelInfo([
+      deployment("mixed-mode-model", { mode: "chat" }),
+      deployment("mixed-mode-model", { mode: "embedding" }),
+    ]),
+  ).toEqual([]);
 
   const incomplete = ModelCatalog.normalizeModelInfo([
     deployment("partial", { max_input_tokens: 128_000, input_cost_per_token: 0.000003 }),

@@ -19,6 +19,8 @@ export interface CatalogModel {
   /** LiteLLM's selectable ID. Keep it unchanged when formatting its display name. */
   readonly id: string;
   readonly displayName: string;
+  /** Display-only family inferred from the model ID, not an API compatibility hint. */
+  readonly family?: string;
   /** The upstream provider reported by LiteLLM; this does not imply an API protocol. */
   readonly provider?: string;
   readonly contextTokens?: number;
@@ -100,6 +102,22 @@ const isNonNegative = (value: number) => value >= 0;
 
 const CHAT_MODES = new Set(["chat", "responses"]);
 const NON_MODEL_PROVIDERS = new Set(["a2a"]);
+
+function knownNonChatId(id: string): boolean {
+  const lower = id.toLowerCase();
+  const name = lower.split("/").at(-1) ?? lower;
+  return (
+    genericWildcard(lower) ||
+    lower.startsWith("a2a/") ||
+    name.startsWith("a2a-") ||
+    name.startsWith("text-embedding-") ||
+    name.startsWith("embedding-") ||
+    name.startsWith("gpt-image-") ||
+    name.startsWith("dall-e-") ||
+    name.startsWith("imagen-") ||
+    name.startsWith("stable-diffusion-")
+  );
+}
 
 interface Deployment {
   readonly name: string;
@@ -268,11 +286,13 @@ function toModel(
     infos.map((info) => numberAt(info, "max_output_tokens", isPositiveInteger)),
   );
   const provider = agreed(providers);
+  const family = modelFamily(id);
   return {
     id,
     displayName:
       infos.map((info) => stringAt(info, "display_name")).find((name) => name !== undefined) ??
       formatModelName(id),
+    ...(family !== undefined && { family }),
     ...(provider !== undefined && { provider }),
     ...(contextTokens !== undefined && { contextTokens }),
     ...(maxOutputTokens !== undefined && { maxOutputTokens }),
@@ -280,6 +300,31 @@ function toModel(
     ...(reasoning && { reasoning }),
   };
 }
+
+function modelFamily(id: string): string | undefined {
+  const tokens = nameTokens(id).map((token) => token.toLowerCase());
+  if (modelRegion(id) !== undefined) tokens.shift();
+  const [first, second] = tokens;
+  if (first === "gpt") return second === "oss" ? "GPT-OSS" : "OpenAI GPT";
+  return first === undefined ? undefined : MODEL_FAMILIES.get(first);
+}
+
+const MODEL_FAMILIES = new Map([
+  ["claude", "Claude"],
+  ["gemma", "Gemma"],
+  ["gemini", "Gemini"],
+  ["llama", "Llama"],
+  ["qwen", "Qwen"],
+  ["deepseek", "DeepSeek"],
+  ["mistral", "Mistral"],
+  ["mixtral", "Mistral"],
+  ["grok", "Grok"],
+  ["phi", "Phi"],
+  ["glm", "GLM"],
+  ["command", "Cohere Command"],
+  ["jamba", "Jamba"],
+  ["minimax", "MiniMax"],
+]);
 
 /** Model names that cannot be selected as a coding chat model are omitted. */
 export function normalizeModelInfo(
@@ -290,6 +335,7 @@ export function normalizeModelInfo(
   const byName = new Map<string, Deployment[]>();
   const knownNames = new Set<string>();
   const unresolved = new Set<string>();
+  const nonChat = new Set<string>();
 
   for (const raw of entries) {
     const deployment = parseDeployment(raw);
@@ -302,10 +348,13 @@ export function normalizeModelInfo(
     const provider = providerOf(deployment);
     const mode = stringAt(deployment.info, "mode")?.toLowerCase();
     if (
+      knownNonChatId(deployment.name) ||
       (provider && NON_MODEL_PROVIDERS.has(provider)) ||
       (mode !== undefined && !CHAT_MODES.has(mode))
-    )
+    ) {
+      nonChat.add(deployment.name);
       continue;
+    }
     const deployments = byName.get(deployment.name) ?? [];
     deployments.push(deployment);
     byName.set(deployment.name, deployments);
@@ -313,13 +362,16 @@ export function normalizeModelInfo(
 
   const listed = modelIds === undefined ? undefined : new Set(modelIds);
   for (const name of listed ?? []) {
-    if (name.includes("*") && genericWildcard(name)) continue;
+    if (knownNonChatId(name)) continue;
     if (knownNames.has(name) || unresolved.has(name)) continue;
     byName.set(name, [{ name, params: {}, info: {} }]);
   }
 
   return [...byName.entries()]
-    .filter(([name]) => !unresolved.has(name) && (listed === undefined || listed.has(name)))
+    .filter(
+      ([name]) =>
+        !unresolved.has(name) && !nonChat.has(name) && (listed === undefined || listed.has(name)),
+    )
     .map(([name, deployments]) => toModel(name, deployments, groups?.get(name)))
     .sort(
       (left, right) =>
