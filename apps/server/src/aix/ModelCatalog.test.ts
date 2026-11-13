@@ -83,6 +83,8 @@ it("filters known non-chat and generic wildcard IDs even when model info is miss
     "gpt-image-1.5",
     "a2a/assistant",
     "openai/*",
+    "tenant/model*",
+    "tenant/*/model",
     "tenant/Custom_Chat_Model",
   ]);
 
@@ -146,6 +148,27 @@ it("conservatively aggregates deployments and partial metadata", () => {
       deployment("provider-conflict", { litellm_provider: "anthropic" }),
     ])[0],
   ).not.toHaveProperty("provider");
+
+  for (const { info, efforts } of [
+    { info: { supports_max_reasoning_effort: true }, efforts: ["max"] },
+    { info: { supports_medium_reasoning_effort: true }, efforts: ["medium"] },
+    { info: { supports_reasoning: true, supports_low_reasoning_effort: false }, efforts: [] },
+  ]) {
+    expect(
+      ModelCatalog.normalizeModelInfo([deployment("sparse-reasoning", info)])[0]?.reasoning,
+    ).toEqual({ efforts });
+  }
+
+  for (const names of [
+    ["First", "Second"],
+    ["Second", "First"],
+  ]) {
+    expect(
+      ModelCatalog.normalizeModelInfo(
+        names.map((display_name) => deployment("gpt-6.1-sol", { display_name })),
+      )[0]?.displayName,
+    ).toBe("GPT-6.1 Sol");
+  }
 });
 
 it.effect("fetches every metadata page and derives sibling v2 and group endpoints", () =>
@@ -170,7 +193,7 @@ it.effect("fetches every metadata page and derives sibling v2 and group endpoint
         page === 1
           ? Array.from({ length: 100 }, (_, index) => deployment(`model-${index}`))
           : [deployment("model-100")];
-      return Response.json({ data });
+      return Response.json({ data, ...(page === 2 ? { total_pages: 2 } : {}) });
     });
     const result = yield* ModelCatalog.fetchLiteLlmModelCatalog({
       baseURL: "https://gateway.example/proxy/v1",
@@ -280,24 +303,34 @@ it.effect("keeps the catalog when optional group metadata fails", () =>
 
 it.effect("rejects inconsistent page counts instead of returning a partial catalog", () =>
   Effect.gen(function* () {
-    const client = makeHttpClient((request) => {
-      if (request.url.includes("/v1/models")) {
-        return Response.json({ data: [{ id: "model-0" }] });
-      }
-      const page = new URL(request.url).searchParams.get("page");
-      return Response.json({
-        data: page === "1" ? [deployment("model-0")] : [],
-        total_pages: page === "1" ? 2 : 1,
+    for (const { firstTotal, finalTotal, finalCount } of [
+      { firstTotal: 2, finalTotal: 1, finalCount: 0 },
+      { firstTotal: undefined, finalTotal: 1, finalCount: 1 },
+      { firstTotal: 2, finalTotal: 2, finalCount: 0 },
+      { firstTotal: 3, finalTotal: 3, finalCount: 0 },
+    ]) {
+      const client = makeHttpClient((request) => {
+        if (request.url.includes("/v1/models")) {
+          return Response.json({ data: [{ id: "model-0" }] });
+        }
+        const first = new URL(request.url).searchParams.get("page") === "1";
+        const total = first ? firstTotal : finalTotal;
+        return Response.json({
+          data: Array.from({ length: first ? 100 : finalCount }, (_, index) =>
+            deployment(`model-${index}`),
+          ),
+          ...(total === undefined ? {} : { total_pages: total }),
+        });
       });
-    });
-    const result = yield* ModelCatalog.fetchLiteLlmModelCatalog({
-      baseURL: "https://gateway.example/v1",
-      apiKey: "sentinel-api-key",
-    }).pipe(Effect.provideService(HttpClient.HttpClient, client), Effect.result);
+      const result = yield* ModelCatalog.fetchLiteLlmModelCatalog({
+        baseURL: "https://gateway.example/v1",
+        apiKey: "sentinel-api-key",
+      }).pipe(Effect.provideService(HttpClient.HttpClient, client), Effect.result);
 
-    expect(result).toMatchObject({
-      _tag: "Failure",
-      failure: { reason: "inconsistentPagination" },
-    });
+      expect(result).toMatchObject({
+        _tag: "Failure",
+        failure: { reason: "inconsistentPagination" },
+      });
+    }
   }),
 );

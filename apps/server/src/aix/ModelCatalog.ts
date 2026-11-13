@@ -171,6 +171,8 @@ function reasoningOf(info: Record<string, unknown>): CatalogModel["reasoning"] {
     none: booleanAt(info, "supports_none_reasoning_effort"),
     minimal: booleanAt(info, "supports_minimal_reasoning_effort"),
     low: booleanAt(info, "supports_low_reasoning_effort"),
+    medium: booleanAt(info, "supports_medium_reasoning_effort"),
+    high: booleanAt(info, "supports_high_reasoning_effort"),
     xhigh: booleanAt(info, "supports_xhigh_reasoning_effort"),
     max: booleanAt(info, "supports_max_reasoning_effort"),
   };
@@ -181,17 +183,7 @@ function reasoningOf(info: Record<string, unknown>): CatalogModel["reasoning"] {
   const efforts =
     explicit !== undefined
       ? effortsOf(explicit)
-      : (() => {
-          const accepted = new Set<ReasoningEffort>(["medium", "high"]);
-          const provider = stringAt(info, "litellm_provider");
-          if (provider === "azure" ? flags.none === true : flags.none !== false)
-            accepted.add("none");
-          if (flags.minimal !== false) accepted.add("minimal");
-          if (flags.low !== false) accepted.add("low");
-          if (flags.xhigh === true) accepted.add("xhigh");
-          if (flags.max === true) accepted.add("max");
-          return REASONING_EFFORTS.filter((effort) => accepted.has(effort));
-        })();
+      : REASONING_EFFORTS.filter((effort) => flags[effort] === true);
   const defaultEffort = stringAt(info, "default_reasoning_effort");
   return {
     efforts,
@@ -289,9 +281,7 @@ function toModel(
   const family = modelFamily(id);
   return {
     id,
-    displayName:
-      infos.map((info) => stringAt(info, "display_name")).find((name) => name !== undefined) ??
-      formatModelName(id),
+    displayName: agreed(infos.map((info) => stringAt(info, "display_name"))) ?? formatModelName(id),
     ...(family !== undefined && { family }),
     ...(provider !== undefined && { provider }),
     ...(contextTokens !== undefined && { contextTokens }),
@@ -362,7 +352,7 @@ export function normalizeModelInfo(
 
   const listed = modelIds === undefined ? undefined : new Set(modelIds);
   for (const name of listed ?? []) {
-    if (knownNonChatId(name)) continue;
+    if (knownNonChatId(name) || name.includes("*")) continue;
     if (knownNames.has(name) || unresolved.has(name)) continue;
     byName.set(name, [{ name, params: {}, info: {} }]);
   }
@@ -600,6 +590,7 @@ export const fetchLiteLlmModelCatalog = Effect.fn("AixModelCatalog.fetch")(funct
     if (result.totalPages !== undefined) {
       if (
         result.totalPages > MODEL_INFO_MAX_PAGES ||
+        (result.totalPages < page && !(page === 1 && result.totalPages === 0)) ||
         (expectedPages !== undefined && expectedPages !== result.totalPages)
       ) {
         return yield* fail("pagination", "inconsistentPagination");
@@ -611,6 +602,9 @@ export const fetchLiteLlmModelCatalog = Effect.fn("AixModelCatalog.fetch")(funct
       if (expectedPages === 0) {
         if (entries.length > 0) return yield* fail("pagination", "inconsistentPagination");
         break;
+      }
+      if (result.data.length === 0 && (page > 1 || expectedPages > 1)) {
+        return yield* fail("pagination", "inconsistentPagination");
       }
       if (page >= expectedPages) break;
     } else if (result.data.length < MODEL_INFO_PAGE_SIZE) {
