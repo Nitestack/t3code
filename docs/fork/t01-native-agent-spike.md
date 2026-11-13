@@ -20,9 +20,17 @@ run `aix profiles`, `aix env`, provider authentication, or any model request. Co
 availability, response, tool call, or endpoint error was observed. Model names and the locally
 installed CLI versions are not evidence of runtime compatibility.
 
-The existing test fixtures were attempted after the worktree-local `vp i` completed successfully.
-The tests failed during suite setup, before any test ran; exact results are listed below. No fixture
-result is treated as proof of model availability.
+The existing test fixtures were run after the worktree-local `vp i` completed successfully. They
+passed with each package's workspace-local Vite+ shim. These fixtures validate T3-side behavior only;
+they do not prove model availability at a real endpoint.
+
+The `vite-plus` symlinks for the root, `apps/server`, and `packages/provider-opencode` resolve to the
+same worktree-local `node_modules/.pnpm/vite-plus@1.4.0_.../node_modules/vite-plus` package. The
+package-local `node_modules/.bin/vp` entries are generated shims targeting that package's `bin/vp`.
+The earlier failed attempts put the isolated
+`/home/nhan/Programming/projects/t3code/.git/t3-aix-orchestration/t00-tests/bin` runner first in
+`PATH`, causing the duplicate Vitest context described in the T00 runner probe. The passing commands
+below invoke the local shim by path and do not include that directory in `PATH`.
 
 ## Existing extension points and constraints
 
@@ -62,9 +70,10 @@ result is treated as proof of model availability.
 
 ## Required model matrix
 
-The endpoint column identifies the protocol each driver would have to use. **Every observed result
-is unrun**, because no safe endpoint or credential was available. Therefore the error column means
-no runtime error was captured, not that a request succeeded.
+The endpoint column identifies the protocol each driver would have to use. **Every real model
+request remains unrun**, because no safe endpoint or credential was available. Therefore the error
+column means no runtime error was captured, not that a request succeeded. The fixture tests below
+are not endpoint observations.
 
 | Model ID                | Agent       | Endpoint / API type to probe                      | Expected from current routing and interfaces                                                                                      | Observed result / error             |
 | ----------------------- | ----------- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
@@ -99,15 +108,16 @@ Not run: aix and a safe two-profile endpoint fixture are unavailable. The requir
 
 ## Fixture test attempts
 
-After `vp i` succeeded, these focused tests were run with the workspace-local `vp`:
+After `vp i` succeeded, these focused tests were run via the package-local Vite+ shims. Only the
+Node toolchain directory was added to `PATH`; the isolated T00 runner directory was omitted.
 
-| Command                                                                                                                                                                                    | Result                                                                                                                                                                                                                   |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| From `apps/server`: `vp run test src/textGeneration/CodexTextGeneration.test.ts src/textGeneration/ClaudeTextGeneration.test.ts src/orchestration-v2/SelectionRestart.integration.test.ts` | Failed before tests: Codex and Claude suites raised `TypeError: Cannot read properties of undefined (reading 'config')`; SelectionRestart raised `Vitest failed to find the current suite`. 3 files failed, 0 tests ran. |
-| From `packages/provider-opencode`: `vp run test src/server/textGeneration.test.ts`                                                                                                         | Failed before tests: `TypeError: Cannot read properties of undefined (reading 'config')`. 0 tests ran.                                                                                                                   |
+| Command                                                                                                                                                                                                        | Result                                   |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| From `apps/server`: `./node_modules/.bin/vp run test src/textGeneration/CodexTextGeneration.test.ts src/textGeneration/ClaudeTextGeneration.test.ts src/orchestration-v2/SelectionRestart.integration.test.ts` | Exit 0; 3 files passed, 60 tests passed. |
+| From `packages/provider-opencode`: `./node_modules/.bin/vp run test src/server/textGeneration.test.ts`                                                                                                         | Exit 0; 1 file passed, 13 tests passed.  |
 
-No tests were added or changed. The T3 test-runner setup must be fixed or run in its supported
-environment before fixture behaviors can be independently confirmed.
+No tests or runner files were added or changed. The earlier global-runner failures were invocation
+errors and were superseded by these package-local passing runs.
 
 ## Recommendation and gates
 
@@ -119,6 +129,6 @@ environment before fixture behaviors can be independently confirmed.
 | T11       | **STOP**       | Do not claim profile/session continuation until two distinct credentials and cross-driver portable handoffs are exercised; native session identity is not portable.                 |
 
 STOP here means the required evidence is missing; it does not establish that the models fail. The
-ticket remains blocked on a safe, disposable LiteLLM gateway for real model requests and a runnable
-T3 fixture-test environment. An endpoint emulator can validate protocol handling only; it cannot
-prove real model availability. No silent replacement routing is approved by this spike.
+ticket remains blocked on a safe, disposable LiteLLM gateway for real model requests. An endpoint
+emulator can validate protocol handling only; it cannot prove real model availability. No silent
+replacement routing is approved by this spike.
