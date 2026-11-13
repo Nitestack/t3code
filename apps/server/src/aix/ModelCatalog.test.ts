@@ -303,11 +303,17 @@ it.effect("keeps the catalog when optional group metadata fails", () =>
 
 it.effect("rejects inconsistent page counts instead of returning a partial catalog", () =>
   Effect.gen(function* () {
-    for (const { firstTotal, finalTotal, finalCount } of [
-      { firstTotal: 2, finalTotal: 1, finalCount: 0 },
-      { firstTotal: undefined, finalTotal: 1, finalCount: 1 },
-      { firstTotal: 2, finalTotal: 2, finalCount: 0 },
-      { firstTotal: 3, finalTotal: 3, finalCount: 0 },
+    for (const { firstTotal, firstCount, finalTotal, finalCount } of [
+      { firstTotal: 2, firstCount: 100, finalTotal: 1, finalCount: 0 },
+      { firstTotal: undefined, firstCount: 100, finalTotal: 1, finalCount: 1 },
+      { firstTotal: 2, firstCount: 100, finalTotal: 2, finalCount: 0 },
+      { firstTotal: 3, firstCount: 100, finalTotal: 3, finalCount: 0 },
+      ...["2", null, -1, 1.5].map((firstTotal) => ({
+        firstTotal,
+        firstCount: 1,
+        finalTotal: 2,
+        finalCount: 1,
+      })),
     ]) {
       const client = makeHttpClient((request) => {
         if (request.url.includes("/v1/models")) {
@@ -316,7 +322,7 @@ it.effect("rejects inconsistent page counts instead of returning a partial catal
         const first = new URL(request.url).searchParams.get("page") === "1";
         const total = first ? firstTotal : finalTotal;
         return Response.json({
-          data: Array.from({ length: first ? 100 : finalCount }, (_, index) =>
+          data: Array.from({ length: first ? firstCount : finalCount }, (_, index) =>
             deployment(`model-${index}`),
           ),
           ...(total === undefined ? {} : { total_pages: total }),

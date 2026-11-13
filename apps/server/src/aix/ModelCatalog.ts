@@ -568,6 +568,9 @@ const readModelInfoPage = Effect.fn("AixModelCatalog.readModelInfoPage")(functio
   if (!parsed) return yield* fail("modelInfo", "invalidResponse");
   const record = recordOf(body);
   const total = numberAt(record, "total_pages", (value) => Number.isInteger(value) && value >= 0);
+  if (Object.hasOwn(record, "total_pages") && total === undefined) {
+    return yield* fail("pagination", "inconsistentPagination");
+  }
   return { data: parsed.data, totalPages: total };
 });
 
