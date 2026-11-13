@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -671,6 +672,9 @@ jobs:
 
       - name: Test server
         run: vp run --filter t3 test
+
+      - name: Test contracts
+        run: vp run --filter @t3tools/contracts test
 
   fork_web:
     name: Fork Web
