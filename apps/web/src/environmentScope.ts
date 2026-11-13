@@ -1,5 +1,7 @@
 import {
   getEnvironmentScope,
+  filterByEnvironmentScope,
+  parseScopedThreadKey,
   type EnvironmentScope,
   type EnvironmentScopeAssignments,
 } from "@t3tools/client-runtime/environment";
@@ -20,6 +22,18 @@ export function filterEnvironmentIdsByScope(
   return environmentIds.filter(
     (environmentId) => getEnvironmentScope(assignments, environmentId) === scope,
   );
+}
+
+export function filterThreadKeysByEnvironmentScope(
+  threadKeys: ReadonlyArray<string>,
+  scope: EnvironmentScope,
+  assignments: EnvironmentScopeAssignments,
+) {
+  const threads = threadKeys.flatMap((key) => {
+    const ref = parseScopedThreadKey(key);
+    return ref === null ? [] : [ref];
+  });
+  return filterByEnvironmentScope(threads, scope, assignments);
 }
 
 export function setActiveEnvironmentScope(scope: EnvironmentScope): Promise<void> {

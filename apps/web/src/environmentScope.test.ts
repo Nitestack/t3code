@@ -1,7 +1,10 @@
-import { EnvironmentId } from "@t3tools/contracts";
-import { filterByEnvironmentScope } from "@t3tools/client-runtime/environment";
+import { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { filterByEnvironmentScope, scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { describe, expect, it } from "vite-plus/test";
-import { filterEnvironmentIdsByScope } from "./environmentScope";
+import {
+  filterEnvironmentIdsByScope,
+  filterThreadKeysByEnvironmentScope,
+} from "./environmentScope";
 
 describe("filterEnvironmentIdsByScope", () => {
   it("filters by environment identity when project names and paths overlap", () => {
@@ -25,5 +28,22 @@ describe("filterEnvironmentIdsByScope", () => {
     ]);
     expect(filterByEnvironmentScope(projects, "work", assignments)).toEqual([projects[0]]);
     expect(filterByEnvironmentScope(projects, "personal", assignments)).toEqual([projects[1]]);
+
+    const workThread = { environmentId: workEnvironmentId, threadId: ThreadId.make("same-id") };
+    const personalThread = {
+      environmentId: personalEnvironmentId,
+      threadId: ThreadId.make("same-id"),
+    };
+    const staleSelection = [
+      scopedThreadKey(workThread),
+      scopedThreadKey(personalThread),
+      "invalid",
+    ];
+    expect(filterThreadKeysByEnvironmentScope(staleSelection, "personal", assignments)).toEqual([
+      personalThread,
+    ]);
+    expect(filterThreadKeysByEnvironmentScope(staleSelection, "work", assignments)).toEqual([
+      workThread,
+    ]);
   });
 });

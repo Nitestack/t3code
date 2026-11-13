@@ -240,7 +240,11 @@ import { Button } from "./ui/button";
 import { isProjectPinShortcut, ProjectPinButton } from "./ProjectPinButton";
 import { EnvironmentScopeSwitcher } from "./sidebar/EnvironmentScopeSwitcher";
 import { filterByEnvironmentScope, getEnvironmentScope } from "@t3tools/client-runtime/environment";
-import { filterEnvironmentIdsByScope, useClientEnvironmentScope } from "../environmentScope";
+import {
+  filterEnvironmentIdsByScope,
+  filterThreadKeysByEnvironmentScope,
+  useClientEnvironmentScope,
+} from "../environmentScope";
 import {
   Combobox,
   ComboboxEmpty,
@@ -1800,10 +1804,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     if (key === null) return [];
     const selected = useThreadSelectionStore.getState().selectedThreadKeys;
     const keys = selected.has(key) ? [...selected] : [key];
-    return keys.flatMap((candidate) => {
-      const ref = parseScopedThreadKey(candidate);
-      return ref ? [ref] : [];
-    });
+    const settings = getClientSettings();
+    return filterThreadKeysByEnvironmentScope(
+      keys,
+      settings.activeEnvironmentScope,
+      settings.environmentScopeAssignments,
+    );
   };
   const pointerOutsideThreadList = (point: { x: number; y: number }) => {
     // Search results replace the thread list, so only one of them is mounted.

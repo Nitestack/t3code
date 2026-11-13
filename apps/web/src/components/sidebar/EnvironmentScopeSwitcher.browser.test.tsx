@@ -37,6 +37,7 @@ describe("EnvironmentScopeSwitcher", () => {
 
     const container = document.createElement("div");
     container.style.width = "216px";
+    // This control only updates local preferences and performs no navigation.
     await using screen = await render(<EnvironmentScopeSwitcher />, { container, router: false });
 
     await userEvent.tab();
