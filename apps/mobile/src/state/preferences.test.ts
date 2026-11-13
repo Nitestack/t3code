@@ -60,6 +60,56 @@ function makePreferencesState(
 }
 
 describe("mobile preferences state", () => {
+  it.effect("persists environment scope preferences across state recreation", () =>
+    Effect.gen(function* () {
+      let persisted: MobilePreferences.Preferences = {};
+      const createState = () =>
+        makePreferencesState({
+          load: Effect.succeed(persisted),
+          savePatch: (patch) =>
+            Effect.sync(() => {
+              persisted = { ...persisted, ...patch };
+              return persisted;
+            }),
+        });
+      const state = createState();
+      const registry = AtomRegistry.make();
+      const unmountPreferences = registry.mount(state.preferencesAtom);
+      const unmountUpdate = registry.mount(state.updatePreferencesAtom);
+      yield* AtomRegistry.getResult(registry, state.preferencesAtom, { suspendOnWaiting: true });
+
+      registry.set(state.updatePreferencesAtom, {
+        activeEnvironmentScope: "work",
+        environmentScopeAssignments: { "env-a": "work", "env-b": "personal" },
+      });
+      yield* AtomRegistry.getResult(registry, state.updatePreferencesAtom, {
+        suspendOnWaiting: true,
+      });
+      expect(persisted).toMatchObject({
+        activeEnvironmentScope: "work",
+        environmentScopeAssignments: { "env-a": "work", "env-b": "personal" },
+      });
+
+      unmountUpdate();
+      unmountPreferences();
+      registry.dispose();
+
+      const restoredState = createState();
+      const restoredRegistry = AtomRegistry.make();
+      const unmountRestored = restoredRegistry.mount(restoredState.preferencesAtom);
+      expect(
+        yield* AtomRegistry.getResult(restoredRegistry, restoredState.preferencesAtom, {
+          suspendOnWaiting: true,
+        }),
+      ).toMatchObject({
+        activeEnvironmentScope: "work",
+        environmentScopeAssignments: { "env-a": "work", "env-b": "personal" },
+      });
+      unmountRestored();
+      restoredRegistry.dispose();
+    }),
+  );
+
   it.effect("preserves an optimistic patch when the initial load finishes later", () =>
     Effect.gen(function* () {
       const pendingLoad = deferred<MobilePreferences.Preferences>();

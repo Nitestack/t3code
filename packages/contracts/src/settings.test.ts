@@ -41,6 +41,31 @@ const encodeServerSettings = Schema.encodeSync(ServerSettings);
 const encodeServerSettingsPatch = Schema.encodeSync(ServerSettingsPatch);
 const decodeClaudeSettings = Schema.decodeUnknownSync(ClaudeSettings);
 
+describe("ClientSettings environment scope preferences", () => {
+  it("defaults old settings and unclassified environments to personal", () => {
+    expect(decodeClientSettings({}).activeEnvironmentScope).toBe("personal");
+    expect(decodeClientSettings({}).environmentScopeAssignments).toEqual({});
+  });
+
+  it("persists active scope and independent environment classifications", () => {
+    const settings = decodeClientSettings({
+      activeEnvironmentScope: "work",
+      environmentScopeAssignments: { "env-a": "work", "env-b": "personal" },
+    });
+    expect(encodeClientSettings(settings)).toMatchObject({
+      activeEnvironmentScope: "work",
+      environmentScopeAssignments: { "env-a": "work", "env-b": "personal" },
+    });
+  });
+
+  it("rejects invalid scopes in settings and patches", () => {
+    expect(() => decodeClientSettings({ activeEnvironmentScope: "other" })).toThrow();
+    expect(() =>
+      decodeClientSettingsPatch({ environmentScopeAssignments: { "env-a": "other" } }),
+    ).toThrow();
+  });
+});
+
 describe("storage cleanup settings", () => {
   it("keeps cleanup disabled for existing installations", () => {
     expect(decodeServerSettings({}).worktreeCleanup).toBeNull();

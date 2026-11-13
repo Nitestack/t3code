@@ -167,6 +167,30 @@ describe("client settings hydration", () => {
 });
 
 describe("persistClientSettingsPatch", () => {
+  it("persists environment scope preferences across client settings hydration", async () => {
+    let persisted: ClientSettings | null = null;
+    persistenceMocks.getClientSettings.mockImplementation(async () => persisted);
+    persistenceMocks.setClientSettings.mockImplementation(async (settings) => {
+      persisted = settings;
+    });
+
+    await persistClientSettingsPatch({
+      activeEnvironmentScope: "work",
+      environmentScopeAssignments: { "env-a": "work", "env-b": "personal" },
+    });
+    expect(persisted).toMatchObject({
+      activeEnvironmentScope: "work",
+      environmentScopeAssignments: { "env-a": "work", "env-b": "personal" },
+    });
+
+    __resetClientSettingsPersistenceForTests();
+    await ensureClientSettingsHydrated();
+    expect(getClientSettings()).toMatchObject({
+      activeEnvironmentScope: "work",
+      environmentScopeAssignments: { "env-a": "work", "env-b": "personal" },
+    });
+  });
+
   it("waits for settings writes in request order", async () => {
     __setClientSettingsForTests(DEFAULT_CLIENT_SETTINGS);
     let finishFirst!: () => void;
