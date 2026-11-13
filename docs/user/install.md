@@ -155,11 +155,14 @@ rebuild so its lock file records the new source.
 The package provides `t3code-fork` for the CLI and `t3code-fork-desktop` for the
 desktop app; neither replaces the original `t3` or `t3code-desktop` commands.
 
-Give the fork its own data directory and an unused port when launching it. The
-same settings work for the desktop app or the headless server:
+Give the fork its own data directory and an unused port when launching it. On
+Linux, the desktop app also needs a separate `XDG_CONFIG_HOME`: Electron stores
+its browser profile and single-instance lock there, independently of
+`T3CODE_HOME`. The headless server does not need this extra setting.
 
 ```bash
 T3CODE_HOME="$HOME/.local/share/t3code-fork" \
+XDG_CONFIG_HOME="$HOME/.config/t3code-fork" \
 T3CODE_PORT=43101 \
   t3code-fork-desktop
 
@@ -168,7 +171,10 @@ T3CODE_HOME="$HOME/.local/share/t3code-fork" \
 ```
 
 Choose one launch mode for that T3 home at a time; each server owns its data
-directory while running.
+directory while running. Set these variables only for the fork command, leaving
+the original desktop app's profile unchanged. The desktop's child processes
+inherit `XDG_CONFIG_HOME` too, so configure any provider that uses it for config
+discovery in the fork's separate configuration directory.
 
 Nix only installs the pinned application build. It does not configure aix,
 resolve profiles, or place endpoints or API keys in the store. aix profile
