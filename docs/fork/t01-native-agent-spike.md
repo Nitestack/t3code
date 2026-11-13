@@ -57,11 +57,14 @@ below invoke the local shim by path and do not include that directory in `PATH`.
   is endpoint-specific. See [OpenCode provider configuration](https://opencode.ai/docs/providers).
 - **Profile isolation:** all three drivers receive per-instance environments, and secret references
   are resolved before driver launch. This is a candidate runtime injection seam, not evidence that
-  aix output is currently consumed safely. Codex continuation identity is based on its home layout;
-  Claude's continuation key is based on its config directory. Endpoint/credential changes are not
-  part of those keys. Two credential profiles sharing a home/config directory could therefore appear
-  continuation-compatible; isolate their homes or explicitly include profile identity before using
-  native session continuation across profile changes.
+  aix output is currently consumed safely. Codex's continuation key uses `sharedHomePath`, including
+  in `authOverlay` mode; it excludes `shadowHomePath`. Two profiles sharing a shared home can remain
+  continuation-compatible even with separate auth overlays. Claude's continuation key uses its
+  config directory. Endpoint/credential changes are not part of either key; profile isolation must
+  account for this before native continuation across profile changes is enabled.
+  OpenCode's continuation identity uses the driver kind and `instanceId`: different instances are
+  incompatible and require a handoff under T3's transition policy, while rotating credentials within
+  the same instance does not change its identity.
 - **Switch/handoff:** `provider.switch` is handled by `ProviderSwitchService`; incompatible
   continuation identities select `create_with_handoff`, and T3's provider-turn start persists a
   portable context transfer. This transfers selected conversation history; it does not promise the
@@ -73,9 +76,10 @@ below invoke the local shim by path and do not include that directory in `PATH`.
 The endpoint column identifies the protocol each driver would have to use. **Every real model
 request remains unrun**, because no safe endpoint or credential was available. Therefore the error
 column means no runtime error was captured, not that a request succeeded. The fixture tests below
-are not endpoint observations.
+are not endpoint observations. The routing expectations below describe the proposed F-09 mapping,
+not implemented aix routing in the inspected baseline.
 
-| Model ID                | Agent       | Endpoint / API type to probe                      | Expected from current routing and interfaces                                                                                      | Observed result / error             |
+| Model ID                | Agent       | Endpoint / API type to probe                      | Expected from proposed F-09 mapping and existing interfaces                                                                       | Observed result / error             |
 | ----------------------- | ----------- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
 | `gpt-6.1-sol`           | Codex       | LiteLLM Responses API; Codex `wire_api=responses` | Candidate only with explicit custom model and compatible Responses/tool behavior. Current T3 may substitute an unregistered slug. | Not run; no request/error captured. |
 | `gpt-6.1-sol`           | Claude Code | LiteLLM Anthropic Messages                        | Not selected by the GPT-to-Codex routing rule; non-Claude routing is not a supported Claude gateway guarantee.                    | Not run; no request/error captured. |
