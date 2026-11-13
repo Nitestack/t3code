@@ -27,10 +27,8 @@ they do not prove model availability at a real endpoint.
 The `vite-plus` symlinks for the root, `apps/server`, and `packages/provider-opencode` resolve to the
 same worktree-local `node_modules/.pnpm/vite-plus@1.4.0_.../node_modules/vite-plus` package. The
 package-local `node_modules/.bin/vp` entries are generated shims targeting that package's `bin/vp`.
-The earlier failed attempts put the isolated
-`/home/nhan/Programming/projects/t3code/.git/t3-aix-orchestration/t00-tests/bin` runner first in
-`PATH`, causing the duplicate Vitest context described in the T00 runner probe. The passing commands
-below invoke the local shim by path and do not include that directory in `PATH`.
+The earlier failed attempts put a separately installed Vite+ runner first in `PATH`, causing a
+duplicate Vitest context. The passing commands below invoke the workspace-local shim directly.
 
 ## Existing extension points and constraints
 
