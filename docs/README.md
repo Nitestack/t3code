@@ -2,6 +2,7 @@
 
 ## Using T3 Code
 
+- [Nitestack/t3code fork](./user/nitestack-fork.md)
 - [Install T3 Code](./user/install.md)
 - [Messages and context](./user/composer.md)
 - [Working with threads](./user/thread-sidebar.md)
