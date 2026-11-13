@@ -1,0 +1,84 @@
+name: Upstream Stable Sync
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/upstream-stable-sync.yml
+      - scripts/upstream-stable-sync.mjs
+      - scripts/upstream-stable-sync.test.mjs
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/upstream-stable-sync.yml
+      - scripts/upstream-stable-sync.mjs
+      - scripts/upstream-stable-sync.test.mjs
+  schedule:
+    - cron: "37 23 * * *"
+  workflow_dispatch:
+    inputs:
+      target_tag:
+        description: Optional published stable upstream SemVer tag to inspect
+        required: false
+        type: string
+      dry_run:
+        description: Build and report the update without pushing a branch or opening a pull request
+        required: true
+        default: true
+        type: boolean
+
+concurrency:
+  group: upstream-stable-sync
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    if: github.repository == 'Nitestack/t3code'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the tested revision
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || 'main' }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 26.12.1
+
+      - name: Test stable release filtering and failure handling
+        run: node --test scripts/upstream-stable-sync.test.mjs
+
+  sync:
+    if: ${{ github.repository == 'Nitestack/t3code' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Check out the fork main branch
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 26.12.1
+
+      - name: Inspect releases and propose a reviewed update
+        env:
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          RUNNER_TEMP: ${{ runner.temp }}
+          TARGET_TAG: ${{ inputs.target_tag }}
+        run: node scripts/upstream-stable-sync.mjs
