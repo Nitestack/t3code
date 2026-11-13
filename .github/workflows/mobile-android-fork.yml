@@ -2,6 +2,11 @@ name: Nitestack Android APK
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: Stable app version (defaults to the app configuration)
+        type: string
+        required: false
   push:
     tags:
       - "t3-android-v*"
@@ -34,6 +39,23 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
+
+      - name: Select Android app version
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          version="$REQUESTED_VERSION"
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            version="${GITHUB_REF_NAME#t3-android-v}"
+          fi
+          if [ "$GITHUB_REF_TYPE" = tag ] || [ -n "$version" ]; then
+            if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+              echo "::error::Android app version must be stable MAJOR.MINOR.PATCH."
+              exit 1
+            fi
+            printf 'T3CODE_MOBILE_VERSION=%s\n' "$version" >> "$GITHUB_ENV"
+          fi
 
       - name: Require Android signing secrets
         env:
@@ -74,7 +96,10 @@ jobs:
 
       - name: Generate Android project
         working-directory: apps/mobile
-        run: pnpm exec expo prebuild --clean --platform android
+        run: |
+          set -euo pipefail
+          pnpm exec expo config --json | node -e 'const fs = require("node:fs"); const c = JSON.parse(fs.readFileSync(0, "utf8")); fs.appendFileSync(process.env.GITHUB_ENV, "T3_ANDROID_EXPECTED_VERSION_NAME=" + c.version + "\nT3_ANDROID_EXPECTED_VERSION_CODE=" + c.android.versionCode + "\n");'
+          pnpm exec expo prebuild --clean --platform android
 
       - name: Decode upload keystore
         env:
@@ -90,9 +115,9 @@ jobs:
       - name: Build and verify signed APK
         working-directory: apps/mobile/android
         env:
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          T3_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          T3_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          T3_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           set -euo pipefail
           ./gradlew :app:assembleRelease --no-daemon --console=plain
@@ -101,7 +126,7 @@ jobs:
           test -s "$apk"
           build_tools="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d -print | sort -V | tail -n 1)"
           "$build_tools/apksigner" verify --verbose "$apk"
-          expected_cert_sha256="$(keytool -exportcert -keystore "$T3_ANDROID_KEYSTORE_PATH" -alias "$ANDROID_KEY_ALIAS" -storepass "$ANDROID_KEYSTORE_PASSWORD" | sha256sum | cut -d' ' -f1)"
+          expected_cert_sha256="$(keytool -exportcert -keystore "$T3_ANDROID_KEYSTORE_PATH" -alias "$T3_ANDROID_KEY_ALIAS" -storepass "$T3_ANDROID_KEYSTORE_PASSWORD" | sha256sum | cut -d' ' -f1)"
           apk_cert_sha256="$("$build_tools/apksigner" verify --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | tr -d ':' | tr '[:upper:]' '[:lower:]')"
           if [ -z "$apk_cert_sha256" ] || [ "$apk_cert_sha256" != "$expected_cert_sha256" ]; then
             echo "::error::APK signature does not match the configured upload keystore."
@@ -113,6 +138,10 @@ jobs:
           read -r package_name version_code version_name <<< "$package_info"
           if [ "$package_name" != "com.nitestack.t3code" ]; then
             echo "::error::Unexpected APK application id: $package_name"
+            exit 1
+          fi
+          if [ "$version_name" != "$T3_ANDROID_EXPECTED_VERSION_NAME" ] || [ "$version_code" != "$T3_ANDROID_EXPECTED_VERSION_CODE" ]; then
+            echo "::error::APK version does not match the selected Android release version."
             exit 1
           fi
 

@@ -11,6 +11,7 @@ Object.assign(process.env, repoEnv);
 process.env.EXPO_NO_TYPESCRIPT_SETUP = "1";
 
 const APP_VARIANT = resolveAppVariant(repoEnv.APP_VARIANT);
+const appVersion = repoEnv.T3CODE_MOBILE_VERSION ?? "2.3.0";
 const isIosPersonalTeamBuild = repoEnv.T3CODE_IOS_PERSONAL_TEAM === "1";
 const runtimeVersionPolicy =
   process.env.MOBILE_VERSION_POLICY ??
@@ -124,6 +125,25 @@ function resolveAppVariant(value: string | undefined): AppVariant {
     default:
       throw new Error("APP_VARIANT must be development, preview, production, or android-fork.");
   }
+}
+
+function androidForkVersionCode(version: string): number {
+  const parts = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(version);
+  if (parts === null) throw new Error("Android fork version must be stable MAJOR.MINOR.PATCH.");
+  const major = Number(parts[1]);
+  const minor = Number(parts[2]);
+  const patch = Number(parts[3]);
+  const code = major * 1_000_000 + minor * 1_000 + patch;
+  if (
+    !Number.isSafeInteger(code) ||
+    code <= 0 ||
+    code > 2_100_000_000 ||
+    minor > 999 ||
+    patch > 999
+  ) {
+    throw new Error("Android fork version exceeds the ordered Android versionCode range.");
+  }
+  return code;
 }
 
 const variant = VARIANT_CONFIG[APP_VARIANT];
@@ -246,7 +266,7 @@ const config: ExpoConfig = {
   slug: "t3-code",
   platforms: ["ios", "android"],
   scheme: variant.scheme,
-  version: repoEnv.T3CODE_MOBILE_VERSION ?? "2.3.0",
+  version: appVersion,
   runtimeVersion: {
     // Skip costly fingerprinting on dev launches; preview and production OTAs require matching native projects.
     policy: runtimeVersionPolicy,
@@ -306,6 +326,7 @@ const config: ExpoConfig = {
   android: {
     icon: variant.assets.appIcon,
     package: variant.androidPackage,
+    ...(APP_VARIANT === "android-fork" ? { versionCode: androidForkVersionCode(appVersion) } : {}),
     ...(repoEnv.T3CODE_ANDROID_GOOGLE_SERVICES_FILE
       ? { googleServicesFile: repoEnv.T3CODE_ANDROID_GOOGLE_SERVICES_FILE }
       : {}),

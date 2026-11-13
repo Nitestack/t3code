@@ -2,6 +2,8 @@
 
 The `Nitestack Android APK` workflow builds a signed, sideloadable Android APK on GitHub-hosted `ubuntu-latest`. Run it manually from `main` for a workflow artifact, or push a `t3-android-v*` tag to attach the APK, SHA-256 checksum, and version metadata to a GitHub Release. It does not run on the hourly upstream checks and builds Android only.
 
+Release tags use `t3-android-vMAJOR.MINOR.PATCH` and set the APK version from that tag. A manual run can supply the `version` input; otherwise it uses the app configuration's version. Android `versionCode` is `MAJOR * 1000000 + MINOR * 1000 + PATCH`, so each increasing release version produces a larger code. Minor and patch components must be at most 999, and the result must be within Android's positive version-code range. Prerelease versions are rejected. The workflow verifies the APK's embedded name and code against the selected Expo configuration before uploading it.
+
 ## Configure the signing key
 
 Generate a dedicated upload key on a trusted machine. `keytool` prompts for the passwords; keep the keystore and password backup in the team's approved encrypted storage.
