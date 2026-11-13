@@ -21,11 +21,13 @@ This starts the local development server and web client. Use the address printed
 
 There are no published Nitestack desktop installers, Android APKs, or Nix packages at this time. To check for fork releases and assets, use `gh release list --repo Nitestack/t3code` or visit [Nitestack/t3code releases](https://github.com/Nitestack/t3code/releases). Upstream T3 download and package-manager links install the original product, not this fork.
 
-The official [iOS](https://apps.apple.com/us/app/t3-code-remote-claude-more/id6787819824) and [Android](https://play.google.com/store/apps/details?id=com.t3tools.t3code) apps are upstream clients. There is no fork Android build yet; the iOS app is unchanged and has no fork-specific Work/Personal control. Live compatibility with a fork server has not been established.
+The official [iOS](https://apps.apple.com/us/app/t3-code-remote-claude-more/id6787819824) and [Android](https://play.google.com/store/apps/details?id=com.t3tools.t3code) apps are upstream clients. This fork includes an Android variant and [build workflow](./docs/operations/android-fork-apk.md), but signing secrets, a real signed build, and an install smoke test are still outstanding; no verified fork APK is published. The iOS app is unchanged and has no fork-specific Work/Personal control. Live compatibility with a fork server has not been established.
 
 ## Learn more
 
 - [Nitestack fork guide](./docs/user/nitestack-fork.md)
+- [aix profiles and native compatibility](./docs/user/nitestack-fork.md#aix-profiles-and-native-compatibility)
+- [Catalog refresh and Work/Personal status](./docs/user/nitestack-fork.md#catalog-and-workpersonal-status)
 - [Remote access](./docs/user/remote-access.md)
 - [Portable handoffs](./docs/user/portable-handoffs.md)
 - [Upstream T3 documentation](./docs/README.md)
