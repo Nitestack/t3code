@@ -661,7 +661,7 @@ jobs:
       - name: Setup Vite+ and dependencies
         uses: ./.github/actions/setup-ci-deps
         with:
-          install-args: --filter=t3...
+          install-args: --filter=t3... --filter=@t3tools/scripts...
 
       - name: Typecheck server
         run: vp run --filter t3 typecheck
@@ -711,7 +711,7 @@ jobs:
       - name: Setup Vite+ and dependencies
         uses: ./.github/actions/setup-ci-deps
         with:
-          install-args: --filter=@t3tools/desktop... --filter=t3... --filter=@t3tools/web...
+          install-args: --filter=@t3tools/desktop... --filter=t3... --filter=@t3tools/web... --filter=@t3tools/scripts...
 
       - name: Install desktop build libraries
         run: sudo apt-get update && sudo apt-get install -y libsecret-1-dev pkg-config xvfb
