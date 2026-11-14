@@ -81,7 +81,7 @@ been established.
 A guarded stable-release sync workflow is present in local `main`. It checks daily at 23:37 UTC and
 supports manual dispatch with dry run enabled by default. When it runs, it prepares reviewable pull
 requests; it does not auto-merge or publish a fork release. Operational acceptance is still open:
-the first dry run failed during checkout before the sync script started, and the fork's GitHub token
+the first push-triggered fixture run failed during checkout before the sync script started, and the fork's GitHub token
 policy prevents PR creation. A narrow CI repair is in progress. See the [workflow source](../../.github/workflows/upstream-stable-sync.yml).
 
 Until a reviewed update is available on the fork's remote, update a clean source checkout to the

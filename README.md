@@ -45,7 +45,7 @@ compatibility with the fork server has not been established. See the [Android bu
 A guarded stable-release sync workflow is present in the source. It checks daily at 23:37 UTC and
 supports manual dispatch with a dry run enabled by default. It proposes reviewable pull requests;
 it does not auto-merge or publish a fork release. Operational acceptance is still open: the fork's
-GitHub token policy prevents PR creation, and the first dry run failed during checkout before the
+GitHub token policy prevents PR creation, and the first push-triggered fixture run failed during checkout before the
 sync script started. A narrow CI repair is in progress.
 See the [workflow](./.github/workflows/upstream-stable-sync.yml) and
 [fork update guide](./docs/user/nitestack-fork.md#updates).
