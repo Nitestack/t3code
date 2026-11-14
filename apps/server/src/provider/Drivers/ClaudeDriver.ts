@@ -55,6 +55,7 @@ import {
   mergeClaudeProcessEnvironment,
   resolveClaudeProviderInstanceEnvironment,
   resolveClaudeHomePath,
+  validateClaudeAixSettingsAuth,
 } from "./ClaudeHome.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { makeClaudeMaintenanceResolution } from "./ClaudeMaintenance.ts";
@@ -130,6 +131,18 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
       process.env,
     );
     const resolvesAixProfile = environment.some(({ name }) => name === "T3_AIX_PROFILE");
+    if (resolvesAixProfile) {
+      yield* validateClaudeAixSettingsAuth(config, undefined, processEnv).pipe(
+        Effect.mapError(
+          () =>
+            new ProviderDriverError({
+              driver: DRIVER_KIND,
+              instanceId,
+              detail: "Claude settings contain conflicting authentication values.",
+            }),
+        ),
+      );
+    }
     const resolveProcessEnvironment = resolvesAixProfile
       ? () =>
           resolveClaudeProviderInstanceEnvironment(environment).pipe(
@@ -148,10 +161,14 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
               const freshApiKey = freshEnvironment.find(
                 ({ name }) => name === "ANTHROPIC_API_KEY",
               )?.value;
+              const freshAuthToken = freshEnvironment.find(
+                ({ name }) => name === "ANTHROPIC_AUTH_TOKEN",
+              )?.value;
               return {
                 ...processEnv,
                 ...(freshEndpoint === undefined ? {} : { ANTHROPIC_BASE_URL: freshEndpoint }),
                 ...(freshApiKey === undefined ? {} : { ANTHROPIC_API_KEY: freshApiKey }),
+                ...(freshAuthToken === undefined ? {} : { ANTHROPIC_AUTH_TOKEN: freshAuthToken }),
               };
             }),
           )

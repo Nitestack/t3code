@@ -9,6 +9,7 @@ import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import { ChildProcessSpawner } from "effect/process";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 
@@ -19,6 +20,7 @@ import {
   mergeClaudeProcessEnvironment,
   resolveClaudeProviderInstanceEnvironment,
   resolveClaudeHomePath,
+  validateClaudeAixSettingsAuth,
 } from "./ClaudeHome.ts";
 
 const aixSecret = "fake-aix-api-key-sentinel";
@@ -58,6 +60,7 @@ const withAixProfiles = <A, E>(
                   AIX_PROFILE: profile,
                   ANTHROPIC_BASE_URL: response?.endpoint,
                   ANTHROPIC_API_KEY: response?.apiKey,
+                  OPENAI_API_KEY: response?.apiKey,
                 }),
               ),
             ),
@@ -72,6 +75,121 @@ const withAixProfiles = <A, E>(
   );
 
 it.layer(NodeServices.layer)("ClaudeHome", (it) => {
+  it.effect(
+    "rejects settings that mask an aix profile's active credential without exposing it",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const homePath = yield* fs.makeTempDirectoryScoped({ prefix: "t3-aix-settings-auth-" });
+        const projectRoot = path.join(homePath, "project");
+        const cwd = path.join(projectRoot, "nested");
+        yield* fs.makeDirectory(path.join(projectRoot, ".git"), { recursive: true });
+        yield* fs.makeDirectory(path.join(projectRoot, ".claude"), { recursive: true });
+        yield* fs.makeDirectory(path.join(cwd, ".claude"), { recursive: true });
+        const config = { homePath };
+        for (const name of ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"] as const) {
+          const environment = {
+            [name]: "active-profile-key",
+            ANTHROPIC_BASE_URL: "https://gateway.example.test",
+          };
+          for (const file of [
+            path.join(homePath, "settings.json"),
+            path.join(projectRoot, ".claude", "settings.json"),
+            path.join(projectRoot, ".claude", "settings.local.json"),
+            path.join(cwd, ".claude", "settings.json"),
+            path.join(cwd, ".claude", "settings.local.json"),
+          ]) {
+            yield* fs.writeFileString(file, JSON.stringify({ env: { [name]: aixSecret } }));
+            const error = yield* Effect.flip(
+              validateClaudeAixSettingsAuth(config, cwd, environment),
+            );
+            expect(error.reason).toBe("settings-auth-conflict");
+            expect(JSON.stringify(error)).not.toContain(aixSecret);
+            yield* fs.remove(file);
+          }
+          const error = yield* Effect.flip(
+            validateClaudeAixSettingsAuth(config, cwd, environment, { [name]: aixSecret }),
+          );
+          expect(error.reason).toBe("settings-auth-conflict");
+          const masked = yield* Effect.flip(
+            validateClaudeAixSettingsAuth(config, cwd, environment, { [name]: "" }),
+          );
+          expect(masked.reason).toBe("settings-auth-conflict");
+          yield* validateClaudeAixSettingsAuth(config, cwd, environment);
+          for (const value of [null, false, 0, {}]) {
+            const file = path.join(homePath, "settings.json");
+            yield* fs.writeFileString(
+              file,
+              JSON.stringify({ env: { ANTHROPIC_BASE_URL: null, [name]: value } }),
+            );
+            const malformed = yield* Effect.flip(
+              validateClaudeAixSettingsAuth(config, cwd, environment),
+            );
+            expect(malformed.reason).toBe("settings-auth-conflict");
+            yield* fs.remove(file);
+          }
+        }
+      }).pipe(Effect.scoped),
+  );
+
+  it.effect("rejects active credentials in managed settings drop-ins", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "t3-aix-managed-auth-" });
+      const dropIns = path.join(directory, "ClaudeCode", "managed-settings.d");
+      yield* fs.makeDirectory(dropIns, { recursive: true });
+      yield* fs.writeFileString(
+        path.join(dropIns, "a.json"),
+        JSON.stringify({ env: { ANTHROPIC_API_KEY: null } }),
+      );
+      yield* fs.writeFileString(
+        path.join(dropIns, "b.json"),
+        JSON.stringify({ env: { ANTHROPIC_AUTH_TOKEN: false } }),
+      );
+      for (const name of ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"] as const) {
+        const error = yield* Effect.flip(
+          validateClaudeAixSettingsAuth({ homePath: directory }, undefined, {
+            PROGRAMDATA: directory,
+            [name]: "selected-profile-key",
+          }).pipe(Effect.provideService(HostProcess.Platform, "win32")),
+        );
+        expect(error.reason).toBe("settings-auth-conflict");
+      }
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("requires TLS for remote Bearer endpoints and permits loopback development", () =>
+    Effect.gen(function* () {
+      for (const endpoint of ["http://hub.example.test:4000", "http://localhost.example.test"]) {
+        const error = yield* withAixProfiles(
+          Effect.flip(
+            resolveClaudeProviderInstanceEnvironment([
+              { name: "T3_AIX_PROFILE", value: "gateway", sensitive: false },
+            ]),
+          ),
+          { gateway: { endpoint, apiKey: aixSecret } },
+        );
+        expect(error.reason).toBe("insecure-endpoint");
+        expect(JSON.stringify(error)).not.toContain(aixSecret);
+      }
+      for (const endpoint of [
+        "http://127.0.0.1:4000",
+        "http://localhost:4000",
+        "http://[::1]:4000",
+      ]) {
+        const resolved = yield* withAixProfiles(
+          resolveClaudeProviderInstanceEnvironment([
+            { name: "T3_AIX_PROFILE", value: "gateway", sensitive: false },
+          ]),
+          { gateway: { endpoint, apiKey: aixSecret } },
+        );
+        expect(resolved.find(({ name }) => name === "ANTHROPIC_AUTH_TOKEN")?.value).toBe(aixSecret);
+      }
+    }),
+  );
+
   describe("Claude home resolution", () => {
     it.effect("resolves configured Claude HOME and stamps continuation/cache keys with it", () =>
       Effect.gen(function* () {
@@ -175,7 +293,11 @@ it.layer(NodeServices.layer)("ClaudeHome", (it) => {
         resolveClaudeProviderInstanceEnvironment(profileReference("personal")),
         profiles,
       );
-      const hostEnvironment = { KEEP: "host-value" };
+      const hostEnvironment = {
+        KEEP: "host-value",
+        ANTHROPIC_AUTH_TOKEN: "stale-host-token",
+        ANTHROPIC_API_KEY: "stale-host-key",
+      };
       const workProcessEnvironment = yield* mergeClaudeProcessEnvironment(
         { homePath: "" },
         work,
@@ -190,19 +312,27 @@ it.layer(NodeServices.layer)("ClaudeHome", (it) => {
       expect(work).toEqual([
         { name: "ANTHROPIC_BASE_URL", value: "https://api.anthropic.com", sensitive: false },
         { name: "ANTHROPIC_API_KEY", value: `${aixSecret}-work`, sensitive: true },
+        { name: "ANTHROPIC_AUTH_TOKEN", value: "", sensitive: false },
       ]);
       expect(personal).toEqual([
         { name: "ANTHROPIC_BASE_URL", value: "https://api.anthropic.com", sensitive: false },
         { name: "ANTHROPIC_API_KEY", value: `${aixSecret}-personal`, sensitive: true },
+        { name: "ANTHROPIC_AUTH_TOKEN", value: "", sensitive: false },
       ]);
       expect(work.some(({ name }) => name === "T3_AIX_PROFILE")).toBe(false);
       expect(workProcessEnvironment).toMatchObject({
         ANTHROPIC_BASE_URL: "https://api.anthropic.com",
         ANTHROPIC_API_KEY: `${aixSecret}-work`,
+        ANTHROPIC_AUTH_TOKEN: "",
       });
       expect(personalProcessEnvironment.ANTHROPIC_API_KEY).toBe(`${aixSecret}-personal`);
+      expect(personalProcessEnvironment.ANTHROPIC_AUTH_TOKEN).toBe("");
       expect(workProcessEnvironment).not.toBe(hostEnvironment);
-      expect(hostEnvironment).toEqual({ KEEP: "host-value" });
+      expect(hostEnvironment).toEqual({
+        KEEP: "host-value",
+        ANTHROPIC_AUTH_TOKEN: "stale-host-token",
+        ANTHROPIC_API_KEY: "stale-host-key",
+      });
     }),
   );
 
@@ -234,19 +364,72 @@ it.layer(NodeServices.layer)("ClaudeHome", (it) => {
     }),
   );
 
-  it.effect("rejects non-Anthropic aix endpoints without exposing profile credentials", () =>
+  it.effect("uses bearer auth for an explicitly selected Claude aix gateway", () =>
     Effect.gen(function* () {
-      const result = yield* Effect.result(
-        withAixProfiles(
-          resolveClaudeProviderInstanceEnvironment([
-            { name: "T3_AIX_PROFILE", value: "gateway", sensitive: false },
-          ]),
-          { gateway: { endpoint: "https://gateway.example.test", apiKey: aixSecret } },
-        ),
+      const profileReference = (profileName: string) => [
+        { name: "T3_AIX_PROFILE", value: profileName, sensitive: false },
+        { name: "ANTHROPIC_AUTH_TOKEN", value: "stale-instance-token", sensitive: true },
+        { name: "ANTHROPIC_API_KEY", value: "stale-instance-key", sensitive: true },
+      ];
+      const [gatewayA, gatewayB] = yield* withAixProfiles(
+        Effect.all([
+          resolveClaudeProviderInstanceEnvironment(profileReference("gateway-a")),
+          resolveClaudeProviderInstanceEnvironment(profileReference("gateway-b")),
+        ]),
+        {
+          "gateway-a": { endpoint: "https://gateway-a.example.test", apiKey: `${aixSecret}-a` },
+          "gateway-b": { endpoint: "https://gateway-b.example.test", apiKey: `${aixSecret}-b` },
+        },
       );
 
-      expect(result._tag).toBe("Failure");
-      expect(JSON.stringify(result)).not.toContain(aixSecret);
+      expect(gatewayA).toEqual([
+        { name: "ANTHROPIC_BASE_URL", value: "https://gateway-a.example.test", sensitive: false },
+        { name: "ANTHROPIC_AUTH_TOKEN", value: `${aixSecret}-a`, sensitive: true },
+        { name: "ANTHROPIC_API_KEY", value: "", sensitive: false },
+      ]);
+      expect(gatewayB).toEqual([
+        { name: "ANTHROPIC_BASE_URL", value: "https://gateway-b.example.test", sensitive: false },
+        { name: "ANTHROPIC_AUTH_TOKEN", value: `${aixSecret}-b`, sensitive: true },
+        { name: "ANTHROPIC_API_KEY", value: "", sensitive: false },
+      ]);
+
+      const hostEnvironment = {
+        ANTHROPIC_AUTH_TOKEN: "stale-host-token",
+        ANTHROPIC_API_KEY: "stale-host-key",
+        KEEP: "host-value",
+      };
+      const launchEnvironmentA = yield* mergeClaudeProcessEnvironment(
+        { homePath: "" },
+        gatewayA,
+        hostEnvironment,
+      );
+      const launchEnvironmentB = yield* mergeClaudeProcessEnvironment(
+        { homePath: "" },
+        gatewayB,
+        hostEnvironment,
+      );
+      expect(launchEnvironmentA).toMatchObject({
+        ANTHROPIC_AUTH_TOKEN: `${aixSecret}-a`,
+        ANTHROPIC_API_KEY: "",
+        ANTHROPIC_BASE_URL: "https://gateway-a.example.test",
+        KEEP: "host-value",
+      });
+      expect(launchEnvironmentB).toMatchObject({
+        ANTHROPIC_AUTH_TOKEN: `${aixSecret}-b`,
+        ANTHROPIC_API_KEY: "",
+        ANTHROPIC_BASE_URL: "https://gateway-b.example.test",
+        KEEP: "host-value",
+      });
+      expect(JSON.stringify(launchEnvironmentA)).not.toContain("stale-host-token");
+      expect(JSON.stringify(launchEnvironmentA)).not.toContain("stale-host-key");
+      expect(launchEnvironmentA.ANTHROPIC_AUTH_TOKEN).not.toBe(
+        launchEnvironmentB.ANTHROPIC_AUTH_TOKEN,
+      );
+      expect(hostEnvironment).toEqual({
+        ANTHROPIC_AUTH_TOKEN: "stale-host-token",
+        ANTHROPIC_API_KEY: "stale-host-key",
+        KEEP: "host-value",
+      });
     }),
   );
 

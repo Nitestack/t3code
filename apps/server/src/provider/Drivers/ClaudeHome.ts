@@ -20,12 +20,15 @@ const AIX_PROFILE_ENVIRONMENT_VARIABLE = "T3_AIX_PROFILE";
 
 class ClaudeAixProfileError extends Schema.TaggedError<ClaudeAixProfileError>()(
   "ClaudeAixProfileError",
-  { reason: Schema.Literals(["invalid-reference", "unsupported-endpoint"]) },
+  { reason: Schema.Literals(["invalid-reference", "settings-auth-conflict", "insecure-endpoint"]) },
 ) {
   override get message(): string {
+    if (this.reason === "insecure-endpoint") {
+      return "Claude aix gateway authentication requires HTTPS outside loopback.";
+    }
     return this.reason === "invalid-reference"
       ? "The configured aix profile reference is invalid."
-      : "The selected aix profile endpoint is not supported by Claude.";
+      : "Remove conflicting Claude settings credentials before using an aix profile.";
   }
 }
 
@@ -47,15 +50,73 @@ export const resolveClaudeProviderInstanceEnvironment = Effect.fn(
   }
 
   const resolved = yield* AixDiscovery.resolveEnvironment(profileReference.value.trim());
-  if (resolved.endpointKind !== "anthropic") {
-    return yield* new ClaudeAixProfileError({ reason: "unsupported-endpoint" });
+  const directAnthropic = resolved.endpointKind === "anthropic";
+  const endpoint = new URL(resolved.endpoint);
+  if (
+    endpoint.protocol === "http:" &&
+    !["localhost", "127.0.0.1", "[::1]"].includes(endpoint.hostname)
+  ) {
+    return yield* new ClaudeAixProfileError({ reason: "insecure-endpoint" });
   }
 
   return [
-    ...(environment ?? []).filter((variable) => variable.name !== AIX_PROFILE_ENVIRONMENT_VARIABLE),
+    ...(environment ?? []).filter(
+      (variable) =>
+        variable.name !== AIX_PROFILE_ENVIRONMENT_VARIABLE &&
+        variable.name !== "ANTHROPIC_BASE_URL" &&
+        variable.name !== "ANTHROPIC_API_KEY" &&
+        variable.name !== "ANTHROPIC_AUTH_TOKEN",
+    ),
     { name: "ANTHROPIC_BASE_URL", value: resolved.endpoint, sensitive: false },
-    { name: "ANTHROPIC_API_KEY", value: resolved.apiKey, sensitive: true },
+    {
+      name: directAnthropic ? "ANTHROPIC_API_KEY" : "ANTHROPIC_AUTH_TOKEN",
+      value: resolved.apiKey,
+      sensitive: true,
+    },
+    {
+      name: directAnthropic ? "ANTHROPIC_AUTH_TOKEN" : "ANTHROPIC_API_KEY",
+      value: "",
+      sensitive: false,
+    },
   ];
+});
+
+export const claudeAixSettingsEnvironment = (
+  environment: NodeJS.ProcessEnv,
+  settingsEnvironment: Readonly<Record<string, string>> = {},
+) => {
+  const retained = Object.fromEntries(
+    Object.entries(settingsEnvironment).filter(
+      ([name]) => name !== "ANTHROPIC_API_KEY" && name !== "ANTHROPIC_AUTH_TOKEN",
+    ),
+  );
+  return {
+    ...retained,
+    ANTHROPIC_BASE_URL: environment.ANTHROPIC_BASE_URL ?? "",
+    ...(environment.ANTHROPIC_AUTH_TOKEN
+      ? { ANTHROPIC_API_KEY: "" }
+      : { ANTHROPIC_AUTH_TOKEN: "" }),
+  };
+};
+
+export const validateClaudeAixSettingsAuth = Effect.fn("validateClaudeAixSettingsAuth")(function* (
+  config: Pick<ClaudeSettings, "homePath">,
+  cwd: string | undefined,
+  environment: NodeJS.ProcessEnv,
+  launchSettingsEnvironment: Readonly<Record<string, string>> = {},
+) {
+  const settings = yield* readClaudeSettingsEnv(config, cwd, environment, {
+    forAixProfile: true,
+  });
+  const activeCredential = environment.ANTHROPIC_AUTH_TOKEN
+    ? "ANTHROPIC_AUTH_TOKEN"
+    : "ANTHROPIC_API_KEY";
+  if (
+    settings[activeCredential] !== undefined ||
+    launchSettingsEnvironment[activeCredential] !== undefined
+  ) {
+    return yield* new ClaudeAixProfileError({ reason: "settings-auth-conflict" });
+  }
 });
 
 export const resolveClaudeHomePath = Effect.fn("resolveClaudeHomePath")(function* (

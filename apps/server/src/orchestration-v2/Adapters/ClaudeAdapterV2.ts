@@ -187,6 +187,8 @@ import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import { spawnAndCollect } from "@t3tools/provider-core/server/snapshotProbe";
 import { signalProcessGroup } from "@t3tools/provider-core/server/processGroup";
 import {
+  claudeAixSettingsEnvironment,
+  validateClaudeAixSettingsAuth,
   claudeSignedOutMessage,
   makeClaudeEnvironment,
   mergeClaudeProcessEnvironment,
@@ -1993,6 +1995,7 @@ export function makeClaudeQueryOptions(input: {
   readonly appendSystemPromptFileText?: string;
   // Flag settings, because a user's settings.json env beats the process env in Claude Code.
   readonly toolSearchOverride?: "true";
+  readonly gatewayEnvironment?: NodeJS.ProcessEnv;
 }): ClaudeAgentSdkQueryOptions {
   const compiledSelection = compileClaudeModelSelection(input.modelSelection, input.modelCatalog);
   const {
@@ -2055,6 +2058,7 @@ export function makeClaudeQueryOptions(input: {
   // A settings file path cannot take extra keys, so it goes through unchanged.
   const effectiveQuerySettings =
     (input.toolSearchOverride === undefined &&
+      input.gatewayEnvironment === undefined &&
       aliasOverrideEnv === undefined &&
       autoCompactWindow === undefined) ||
     typeof compactQuerySettings === "string"
@@ -2062,7 +2066,9 @@ export function makeClaudeQueryOptions(input: {
       : ({
           ...compactQuerySettings,
           env: {
-            ...compactQuerySettings?.env,
+            ...(input.gatewayEnvironment === undefined
+              ? compactQuerySettings?.env
+              : claudeAixSettingsEnvironment(input.gatewayEnvironment, compactQuerySettings?.env)),
             ...aliasOverrideEnv,
             // Claude Code ranks this env var above the autoCompactWindow setting.
             ...(autoCompactWindow === undefined
@@ -12133,6 +12139,28 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             fileSystem,
             path,
           });
+          const processEnvironment =
+            adapterOptions.resolveProcessEnvironment === undefined
+              ? adapterOptions.environment
+              : yield* adapterOptions.resolveProcessEnvironment();
+          if (adapterOptions.resolveProcessEnvironment !== undefined) {
+            yield* validateClaudeAixSettingsAuth(
+              adapterOptions.settings,
+              turnInput.runtimePolicy.cwd ?? undefined,
+              processEnvironment,
+              launchArgSettings?.env,
+            ).pipe(
+              Effect.provideService(FileSystem.FileSystem, fileSystem),
+              Effect.provideService(Path.Path, path),
+              Effect.mapError(
+                () =>
+                  new ClaudeAgentSdkQueryRunnerError({
+                    method: "resolveEnvironment",
+                    cause: new Error("Claude settings contain conflicting authentication values."),
+                  }),
+              ),
+            );
+          }
           const closedExistingNativeThreadId = existing !== null ? existing.nativeThreadId : null;
           clearedNativeSessions.delete(nativeThreadId);
           if (existing !== null) {
@@ -12155,10 +12183,6 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             turnInput.runtimePolicy.cwd,
             launchArgSettings,
           );
-          const processEnvironment =
-            adapterOptions.resolveProcessEnvironment === undefined
-              ? adapterOptions.environment
-              : yield* adapterOptions.resolveProcessEnvironment();
           const queryOptions = makeClaudeQueryOptions({
             modelSelection: turnInput.modelSelection,
             modelCatalog,
@@ -12183,6 +12207,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 : undefined,
               shouldResume,
             ),
+            ...(adapterOptions.resolveProcessEnvironment === undefined
+              ? {}
+              : { gatewayEnvironment: processEnvironment }),
             tools: queryPolicy.tools ?? CLAUDE_CODE_PRESET_TOOLS,
             ...(mcpOverrides.allowedTools === undefined
               ? {}

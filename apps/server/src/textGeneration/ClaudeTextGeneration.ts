@@ -34,8 +34,10 @@ import {
   scopeClaudeModelCatalog,
 } from "../provider/ClaudeModelCatalog.ts";
 import {
+  claudeAixSettingsEnvironment,
   hasClaudeManagedMcpConfig,
   makeClaudeEnvironment,
+  validateClaudeAixSettingsAuth,
 } from "../provider/Drivers/ClaudeHome.ts";
 
 const CLAUDE_TIMEOUT_MS = 180_000;
@@ -192,18 +194,6 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
         : undefined;
     const fastMode =
       fastModeDescriptor?.type === "boolean" ? fastModeDescriptor.currentValue : undefined;
-    const settings = {
-      disableAllHooks: true,
-      ...(typeof thinking === "boolean" ? { alwaysThinkingEnabled: thinking } : {}),
-      ...(fastMode ? { fastMode: true } : {}),
-      ...(typeof ultracode === "boolean" ? { ultracode } : {}),
-    };
-    const settingsJson = yield* encodeJsonForOperation(
-      operation,
-      settings,
-      "Failed to encode Claude CLI settings.",
-    );
-
     const runClaudeCommand = Effect.fn("runClaudeJson.runClaudeCommand")(function* (
       noSessionPersistence: boolean,
     ) {
@@ -223,6 +213,20 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
             ),
           )
         : claudeEnvironment;
+      const settings = {
+        disableAllHooks: true,
+        ...(resolveEnvironment === undefined
+          ? {}
+          : { env: claudeAixSettingsEnvironment(processEnvironment) }),
+        ...(typeof thinking === "boolean" ? { alwaysThinkingEnabled: thinking } : {}),
+        ...(fastMode ? { fastMode: true } : {}),
+        ...(typeof ultracode === "boolean" ? { ultracode } : {}),
+      };
+      const settingsJson = yield* encodeJsonForOperation(
+        operation,
+        settings,
+        "Failed to encode Claude CLI settings.",
+      );
       const workingDirectory =
         operation === "generateThreadTitle"
           ? yield* fileSystem
@@ -233,6 +237,23 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
                 ),
               )
           : cwd;
+      if (resolveEnvironment !== undefined) {
+        yield* validateClaudeAixSettingsAuth(
+          claudeSettings,
+          workingDirectory,
+          processEnvironment,
+        ).pipe(
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          Effect.provideService(Path.Path, path),
+          Effect.mapError(
+            () =>
+              new TextGenerationError({
+                operation,
+                detail: "Claude settings contain conflicting authentication values.",
+              }),
+          ),
+        );
+      }
       const managedMcpConfig = yield* hasClaudeManagedMcpConfig();
       const spawnCommand = yield* resolveSpawnCommand(
         claudeSettings.binaryPath || "claude",

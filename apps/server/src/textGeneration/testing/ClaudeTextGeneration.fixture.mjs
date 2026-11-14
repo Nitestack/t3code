@@ -1,5 +1,9 @@
 import * as NodeFS from "node:fs";
 
+if (process.env.T3_FAKE_CLAUDE_STARTED_FILE) {
+  NodeFS.writeFileSync(process.env.T3_FAKE_CLAUDE_STARTED_FILE, "started", { mode: 0o600 });
+}
+
 const argv = process.argv.slice(2);
 const args = argv.join(" ");
 
@@ -33,8 +37,27 @@ if (process.env.T3_FAKE_CLAUDE_REJECTS_NO_SESSION_PERSISTENCE === "1") {
   fail("text generation must not save a resumable session", 16);
 }
 const settingsIndex = argv.indexOf("--settings");
-if (settingsIndex === -1 || JSON.parse(argv[settingsIndex + 1]).disableAllHooks !== true) {
+const settings = settingsIndex === -1 ? undefined : JSON.parse(argv[settingsIndex + 1]);
+if (settings?.disableAllHooks !== true) {
   fail("text generation must disable hooks", 10);
+}
+if (process.env.T3_FAKE_CLAUDE_CHECK_GATEWAY_ENV === "1") {
+  for (const name of ["ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY"]) {
+    if (process.env[name] !== settings.env?.[name]) {
+      fail(`title process did not apply its configured ${name}`, 18);
+    }
+  }
+  if (Object.hasOwn(settings.env ?? {}, "ANTHROPIC_AUTH_TOKEN")) {
+    fail("title process exposed its active credential in settings", 20);
+  }
+  if (
+    process.env.ANTHROPIC_BASE_URL !== "https://gateway.example.test" ||
+    process.env.ANTHROPIC_API_KEY !== "" ||
+    !process.env.ANTHROPIC_AUTH_TOKEN ||
+    process.env.ANTHROPIC_AUTH_TOKEN === "stale-host-token"
+  ) {
+    fail("title process used stale gateway credentials", 19);
+  }
 }
 const cwdMustNotBe = process.env.T3_FAKE_CLAUDE_CWD_MUST_NOT_BE;
 if (cwdMustNotBe && NodeFS.realpathSync(process.cwd()) === NodeFS.realpathSync(cwdMustNotBe)) {
@@ -80,5 +103,17 @@ if (stderrText) {
   process.stderr.write(stderrText + "\n");
 }
 
-process.stdout.write(process.env.T3_FAKE_CLAUDE_OUTPUT ?? "");
+if (process.env.T3_FAKE_CLAUDE_REPORT_GATEWAY_ROTATION === "1") {
+  process.stdout.write(
+    JSON.stringify({
+      structured_output: {
+        title: process.env.ANTHROPIC_AUTH_TOKEN?.endsWith("-before-rotation")
+          ? "first gateway process"
+          : "next gateway process",
+      },
+    }),
+  );
+} else {
+  process.stdout.write(process.env.T3_FAKE_CLAUDE_OUTPUT ?? "");
+}
 process.exitCode = Number(process.env.T3_FAKE_CLAUDE_EXIT_CODE ?? 0);
