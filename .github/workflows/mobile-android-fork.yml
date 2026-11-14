@@ -145,6 +145,8 @@ jobs:
           expected_cert_sha256="$(keytool -exportcert -keystore "$T3_ANDROID_KEYSTORE_PATH" -alias "$T3_ANDROID_KEY_ALIAS" -storepass "$T3_ANDROID_KEYSTORE_PASSWORD" | sha256sum | cut -d' ' -f1)"
           apk_cert_sha256="$("$build_tools/apksigner" verify --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | tr -d ':' | tr '[:upper:]' '[:lower:]')"
           if [ -z "$apk_cert_sha256" ] || [ "$apk_cert_sha256" != "$expected_cert_sha256" ]; then
+            echo "Expected upload certificate SHA-256: $expected_cert_sha256"
+            echo "APK signer #1 certificate SHA-256: ${apk_cert_sha256:-not found}"
             echo "::error::APK signature does not match the configured upload keystore."
             exit 1
           fi
