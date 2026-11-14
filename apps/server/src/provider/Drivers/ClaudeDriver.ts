@@ -148,10 +148,14 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
               const freshApiKey = freshEnvironment.find(
                 ({ name }) => name === "ANTHROPIC_API_KEY",
               )?.value;
+              const freshAuthToken = freshEnvironment.find(
+                ({ name }) => name === "ANTHROPIC_AUTH_TOKEN",
+              )?.value;
               return {
                 ...processEnv,
                 ...(freshEndpoint === undefined ? {} : { ANTHROPIC_BASE_URL: freshEndpoint }),
                 ...(freshApiKey === undefined ? {} : { ANTHROPIC_API_KEY: freshApiKey }),
+                ...(freshAuthToken === undefined ? {} : { ANTHROPIC_AUTH_TOKEN: freshAuthToken }),
               };
             }),
           )

@@ -65,6 +65,8 @@ function withFakeClaudeEnv<A, E, R>(
     argsMustNotContain?: string;
     stdinMustContain?: string;
     configDirMustBe?: string;
+    checkGatewayEnvironment?: boolean;
+    reportGatewayRotation?: boolean;
     cwdMustNotBe?: string;
     claudeConfig?: Partial<ClaudeSettings>;
     environment?: NodeJS.ProcessEnv;
@@ -92,6 +94,8 @@ function withFakeClaudeEnv<A, E, R>(
       T3_FAKE_CLAUDE_STDIN_MUST_CONTAIN: input.stdinMustContain,
       T3_FAKE_CLAUDE_CWD_MUST_NOT_BE: input.cwdMustNotBe,
       T3_FAKE_CLAUDE_CONFIG_DIR_MUST_BE: input.configDirMustBe,
+      T3_FAKE_CLAUDE_CHECK_GATEWAY_ENV: input.checkGatewayEnvironment ? "1" : undefined,
+      T3_FAKE_CLAUDE_REPORT_GATEWAY_ROTATION: input.reportGatewayRotation ? "1" : undefined,
     };
     const environment: NodeJS.ProcessEnv = {
       ...Object.fromEntries(
@@ -165,6 +169,52 @@ it.layer(layerClaudeTextGenerationTest)("ClaudeTextGeneration", (it) => {
             const error = yield* Effect.flip(textGeneration.generateThreadTitle(request));
             expect(error.detail).toBe("Claude profile credentials could not be refreshed.");
             expect(JSON.stringify(error)).not.toContain("fixture-private-resolution-detail");
+          }),
+      );
+    }),
+  );
+
+  it.effect("routes title processes through the refreshed aix gateway auth", () =>
+    Effect.gen(function* () {
+      let gatewayEnvironment = {
+        ANTHROPIC_BASE_URL: "https://gateway.example.test",
+        ANTHROPIC_API_KEY: "",
+        ANTHROPIC_AUTH_TOKEN: "fixture-gateway-token-before-rotation",
+      };
+
+      return yield* withFakeClaudeEnv(
+        {
+          output: JSON.stringify({ structured_output: { title: "Gateway verified" } }),
+          environment: {
+            ANTHROPIC_BASE_URL: "https://stale.example.test",
+            ANTHROPIC_API_KEY: "stale-instance-key",
+            ANTHROPIC_AUTH_TOKEN: "stale-host-token",
+          },
+          checkGatewayEnvironment: true,
+          reportGatewayRotation: true,
+          resolveEnvironment: (environment) =>
+            Effect.suspend(() => Effect.succeed({ ...environment, ...gatewayEnvironment })),
+        },
+        (textGeneration) =>
+          Effect.gen(function* () {
+            const request = {
+              cwd: process.cwd(),
+              message: "thread title",
+              modelSelection: {
+                instanceId: ProviderInstanceId.make("claudeAgent"),
+                model: SYNTHETIC_CLAUDE_STANDARD_MODEL,
+              },
+            };
+            expect((yield* textGeneration.generateThreadTitle(request)).title).toBe(
+              "first gateway process",
+            );
+            gatewayEnvironment = {
+              ...gatewayEnvironment,
+              ANTHROPIC_AUTH_TOKEN: "fixture-gateway-token-after-rotation",
+            };
+            expect((yield* textGeneration.generateThreadTitle(request)).title).toBe(
+              "next gateway process",
+            );
           }),
       );
     }),

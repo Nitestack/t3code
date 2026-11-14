@@ -11,17 +11,19 @@ Use the [aix setup and profile guide](https://github.com/Nitestack/aix/blob/main
 configure aix itself. This fork does not yet provide a supported T3 control to activate aix
 profiles or select their models. Installing aix alone does not make its profiles available in T3.
 
-Partial aix development work exists, but there is no end-user setup flow. The only credential path
-implemented so far is scoped to direct Anthropic Claude profiles; its fixture coverage does not
-establish a working native T3 Claude CLI flow. LiteLLM profiles and OpenCode are not available as
-aix product features. A Codex probe failed before a tool result or final response, but that single
-result does not establish general incompatibility. The
+Partial aix development work exists, but there is no end-user setup flow. The source supports
+launching an explicitly selected Claude aix profile through Claude Code's Messages interface:
+direct Anthropic endpoints use API-key authentication, and other configured endpoints use Bearer
+authentication by default. This launch support does not establish compatibility for every gateway,
+model, or tool route. LiteLLM profiles and OpenCode are not available as aix product features. A
+Codex probe failed before a tool result or final response, but that single result does not establish
+general incompatibility. The
 [native compatibility report](../fork/t01-native-agent-spike.md) records the tested combinations
 and evidence limits.
 
 The direct Anthropic Claude probe completed a tool call and final response for the requested model.
-It does not validate LiteLLM aliases or arbitrary models. The T3 credential-boundary fixtures are
-offline tests; they are not proof of a live aix profile flow. API keys remain in aix's credential
+No live gateway E2E has verified the Bearer launch path or arbitrary model aliases. T3 credential
+fixtures are offline tests, not proof of a live aix profile flow. API keys remain in aix's credential
 handling and should not be added to T3 settings or Nix configuration.
 
 There is no user-facing aix picker, manual catalog refresh, or stale-catalog behavior. T3's existing

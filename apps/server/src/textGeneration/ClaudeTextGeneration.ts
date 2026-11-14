@@ -34,6 +34,7 @@ import {
   scopeClaudeModelCatalog,
 } from "../provider/ClaudeModelCatalog.ts";
 import {
+  claudeAixSettingsEnvironment,
   hasClaudeManagedMcpConfig,
   makeClaudeEnvironment,
 } from "../provider/Drivers/ClaudeHome.ts";
@@ -192,18 +193,6 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
         : undefined;
     const fastMode =
       fastModeDescriptor?.type === "boolean" ? fastModeDescriptor.currentValue : undefined;
-    const settings = {
-      disableAllHooks: true,
-      ...(typeof thinking === "boolean" ? { alwaysThinkingEnabled: thinking } : {}),
-      ...(fastMode ? { fastMode: true } : {}),
-      ...(typeof ultracode === "boolean" ? { ultracode } : {}),
-    };
-    const settingsJson = yield* encodeJsonForOperation(
-      operation,
-      settings,
-      "Failed to encode Claude CLI settings.",
-    );
-
     const runClaudeCommand = Effect.fn("runClaudeJson.runClaudeCommand")(function* (
       noSessionPersistence: boolean,
     ) {
@@ -223,6 +212,20 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
             ),
           )
         : claudeEnvironment;
+      const settings = {
+        disableAllHooks: true,
+        ...(resolveEnvironment === undefined
+          ? {}
+          : { env: claudeAixSettingsEnvironment(processEnvironment) }),
+        ...(typeof thinking === "boolean" ? { alwaysThinkingEnabled: thinking } : {}),
+        ...(fastMode ? { fastMode: true } : {}),
+        ...(typeof ultracode === "boolean" ? { ultracode } : {}),
+      };
+      const settingsJson = yield* encodeJsonForOperation(
+        operation,
+        settings,
+        "Failed to encode Claude CLI settings.",
+      );
       const workingDirectory =
         operation === "generateThreadTitle"
           ? yield* fileSystem

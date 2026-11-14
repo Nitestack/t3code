@@ -187,6 +187,7 @@ import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import { spawnAndCollect } from "@t3tools/provider-core/server/snapshotProbe";
 import { signalProcessGroup } from "@t3tools/provider-core/server/processGroup";
 import {
+  claudeAixSettingsEnvironment,
   claudeSignedOutMessage,
   makeClaudeEnvironment,
   mergeClaudeProcessEnvironment,
@@ -1993,6 +1994,7 @@ export function makeClaudeQueryOptions(input: {
   readonly appendSystemPromptFileText?: string;
   // Flag settings, because a user's settings.json env beats the process env in Claude Code.
   readonly toolSearchOverride?: "true";
+  readonly gatewayEnvironment?: NodeJS.ProcessEnv;
 }): ClaudeAgentSdkQueryOptions {
   const compiledSelection = compileClaudeModelSelection(input.modelSelection, input.modelCatalog);
   const {
@@ -2055,12 +2057,15 @@ export function makeClaudeQueryOptions(input: {
   // A settings file path cannot take extra keys, so it goes through unchanged.
   const effectiveQuerySettings =
     (input.toolSearchOverride === undefined &&
+      input.gatewayEnvironment === undefined &&
       aliasOverrideEnv === undefined &&
       autoCompactWindow === undefined) ||
-    typeof compactQuerySettings === "string"
+    (typeof compactQuerySettings === "string" && input.gatewayEnvironment === undefined)
       ? compactQuerySettings
       : ({
-          ...compactQuerySettings,
+          ...(typeof compactQuerySettings === "object" && compactQuerySettings !== null
+            ? compactQuerySettings
+            : {}),
           env: {
             ...compactQuerySettings?.env,
             ...aliasOverrideEnv,
@@ -2071,6 +2076,9 @@ export function makeClaudeQueryOptions(input: {
             ...(input.toolSearchOverride === undefined
               ? {}
               : { ENABLE_TOOL_SEARCH: input.toolSearchOverride }),
+            ...(input.gatewayEnvironment === undefined
+              ? {}
+              : claudeAixSettingsEnvironment(input.gatewayEnvironment)),
           },
         } as ClaudeSdkSettings);
   const deviceInstructions = input.mcpServers !== undefined && input.deviceToolsAvailable === true;
@@ -12183,6 +12191,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 : undefined,
               shouldResume,
             ),
+            ...(adapterOptions.resolveProcessEnvironment === undefined
+              ? {}
+              : { gatewayEnvironment: processEnvironment }),
             tools: queryPolicy.tools ?? CLAUDE_CODE_PRESET_TOOLS,
             ...(mcpOverrides.allowedTools === undefined
               ? {}

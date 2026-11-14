@@ -410,6 +410,41 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
     );
   });
 
+  it("pins an aix gateway's per-instance auth above Claude settings env values", () => {
+    const options = ClaudeAdapterV2.makeClaudeQueryOptions({
+      modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+      nativeThreadId: "native-aix-gateway-auth",
+      resume: false,
+      cwd: "/workspace",
+      sdkSettings: {
+        env: {
+          ANTHROPIC_BASE_URL: "https://stale-settings.example.test",
+          ANTHROPIC_AUTH_TOKEN: "stale-settings-token",
+          ANTHROPIC_API_KEY: "stale-settings-key",
+          KEEP: "1",
+        },
+      },
+      environment: {
+        ANTHROPIC_BASE_URL: "https://gateway.example.test",
+        ANTHROPIC_AUTH_TOKEN: "fresh-aix-token",
+        ANTHROPIC_API_KEY: "",
+      },
+      gatewayEnvironment: {
+        ANTHROPIC_BASE_URL: "https://gateway.example.test",
+        ANTHROPIC_AUTH_TOKEN: "fresh-aix-token",
+        ANTHROPIC_API_KEY: "",
+      },
+    });
+
+    assert.deepEqual((options.settings as { env?: Record<string, string> }).env, {
+      ANTHROPIC_BASE_URL: "https://gateway.example.test",
+      ANTHROPIC_AUTH_TOKEN: "fresh-aix-token",
+      ANTHROPIC_API_KEY: "",
+      KEEP: "1",
+    });
+    assert.equal(options.model, CLAUDE_TEST_MODEL_SELECTION.model);
+  });
+
   it("sends a custom model named like a Claude Code alias to the API unchanged", () => {
     const options = ClaudeAdapterV2.makeClaudeQueryOptions({
       modelSelection: { instanceId: CLAUDE_TEST_MODEL_SELECTION.instanceId, model: "opus" },
@@ -3650,16 +3685,17 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     });
   const makeWakeHarness = makeWakeHarnessWithOptions();
 
-  it.effect("resolves a rotated aix credential for the next Claude process only", () =>
+  it.effect("resolves a rotated aix gateway credential for the next Claude process only", () =>
     Effect.gen(function* () {
-      let currentApiKey = "fake-aix-key-before-rotation";
+      let currentAuthToken = "fake-aix-token-before-rotation";
       const harness = yield* makeWakeHarnessWithOptions({
         freshQueueOnReopen: true,
         restartProcessForNewTurn: true,
         resolveProcessEnvironment: () =>
           Effect.succeed({
-            ANTHROPIC_BASE_URL: "https://api.anthropic.com",
-            ANTHROPIC_API_KEY: currentApiKey,
+            ANTHROPIC_BASE_URL: "https://gateway.example.test",
+            ANTHROPIC_API_KEY: "",
+            ANTHROPIC_AUTH_TOKEN: currentAuthToken,
           }),
       });
       const turn = (ordinal: number) =>
@@ -3675,13 +3711,20 @@ describe("ClaudeAdapterV2 background wake turns", () => {
 
       yield* harness.runtime.startTurn(turn(1));
       assert.equal(
-        harness.getOpenedOptions()?.env?.ANTHROPIC_API_KEY,
-        "fake-aix-key-before-rotation",
+        harness.getOpenedOptions()?.env?.ANTHROPIC_AUTH_TOKEN,
+        "fake-aix-token-before-rotation",
       );
-      currentApiKey = "fake-aix-key-after-rotation";
+      assert.equal(harness.getOpenedOptions()?.env?.ANTHROPIC_API_KEY, "");
+      const firstSettings = harness.getOpenedOptions()?.settings;
+      assert.isObject(firstSettings);
       assert.equal(
-        harness.getOpenedOptions()?.env?.ANTHROPIC_API_KEY,
-        "fake-aix-key-before-rotation",
+        (firstSettings as { env?: Record<string, string> }).env?.ANTHROPIC_AUTH_TOKEN,
+        "fake-aix-token-before-rotation",
+      );
+      currentAuthToken = "fake-aix-token-after-rotation";
+      assert.equal(
+        harness.getOpenedOptions()?.env?.ANTHROPIC_AUTH_TOKEN,
+        "fake-aix-token-before-rotation",
       );
       yield* harness.offerAndWait(
         makeResultFrame({
@@ -3693,8 +3736,14 @@ describe("ClaudeAdapterV2 background wake turns", () => {
 
       yield* harness.runtime.startTurn(turn(2));
       assert.equal(
-        harness.getOpenedOptions()?.env?.ANTHROPIC_API_KEY,
-        "fake-aix-key-after-rotation",
+        harness.getOpenedOptions()?.env?.ANTHROPIC_AUTH_TOKEN,
+        "fake-aix-token-after-rotation",
+      );
+      const nextSettings = harness.getOpenedOptions()?.settings;
+      assert.isObject(nextSettings);
+      assert.equal(
+        (nextSettings as { env?: Record<string, string> }).env?.ANTHROPIC_AUTH_TOKEN,
+        "fake-aix-token-after-rotation",
       );
       yield* harness.offerAndWait(
         makeResultFrame({

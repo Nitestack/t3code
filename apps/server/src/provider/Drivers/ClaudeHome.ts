@@ -20,12 +20,10 @@ const AIX_PROFILE_ENVIRONMENT_VARIABLE = "T3_AIX_PROFILE";
 
 class ClaudeAixProfileError extends Schema.TaggedError<ClaudeAixProfileError>()(
   "ClaudeAixProfileError",
-  { reason: Schema.Literals(["invalid-reference", "unsupported-endpoint"]) },
+  { reason: Schema.Literal("invalid-reference") },
 ) {
   override get message(): string {
-    return this.reason === "invalid-reference"
-      ? "The configured aix profile reference is invalid."
-      : "The selected aix profile endpoint is not supported by Claude.";
+    return "The configured aix profile reference is invalid.";
   }
 }
 
@@ -47,15 +45,34 @@ export const resolveClaudeProviderInstanceEnvironment = Effect.fn(
   }
 
   const resolved = yield* AixDiscovery.resolveEnvironment(profileReference.value.trim());
-  if (resolved.endpointKind !== "anthropic") {
-    return yield* new ClaudeAixProfileError({ reason: "unsupported-endpoint" });
-  }
+  const directAnthropic = resolved.endpointKind === "anthropic";
 
   return [
-    ...(environment ?? []).filter((variable) => variable.name !== AIX_PROFILE_ENVIRONMENT_VARIABLE),
+    ...(environment ?? []).filter(
+      (variable) =>
+        variable.name !== AIX_PROFILE_ENVIRONMENT_VARIABLE &&
+        variable.name !== "ANTHROPIC_BASE_URL" &&
+        variable.name !== "ANTHROPIC_API_KEY" &&
+        variable.name !== "ANTHROPIC_AUTH_TOKEN",
+    ),
     { name: "ANTHROPIC_BASE_URL", value: resolved.endpoint, sensitive: false },
-    { name: "ANTHROPIC_API_KEY", value: resolved.apiKey, sensitive: true },
+    {
+      name: directAnthropic ? "ANTHROPIC_API_KEY" : "ANTHROPIC_AUTH_TOKEN",
+      value: resolved.apiKey,
+      sensitive: true,
+    },
+    {
+      name: directAnthropic ? "ANTHROPIC_AUTH_TOKEN" : "ANTHROPIC_API_KEY",
+      value: "",
+      sensitive: false,
+    },
   ];
+});
+
+export const claudeAixSettingsEnvironment = (environment: NodeJS.ProcessEnv) => ({
+  ANTHROPIC_BASE_URL: environment.ANTHROPIC_BASE_URL ?? "",
+  ANTHROPIC_API_KEY: environment.ANTHROPIC_API_KEY ?? "",
+  ANTHROPIC_AUTH_TOKEN: environment.ANTHROPIC_AUTH_TOKEN ?? "",
 });
 
 export const resolveClaudeHomePath = Effect.fn("resolveClaudeHomePath")(function* (
