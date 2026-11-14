@@ -4175,6 +4175,42 @@ it.layer(
       ),
     );
 
+    it.effect("names no update-required models on an aix-managed Claude instance", () =>
+      Effect.gen(function* () {
+        const status = yield* checkClaudeProviderStatus(
+          defaultClaudeSettings,
+          claudeCapabilities({
+            tokenSource: "none",
+            apiKeySource: "none",
+            apiProvider: "firstParty",
+          }),
+          { ANTHROPIC_BASE_URL: "" },
+          undefined,
+          {
+            models: [
+              {
+                model: { slug: "claude-next", name: "Next", isCustom: false, capabilities: null },
+                runtime: {},
+                compatibility: { minVersion: "1.1.0" },
+              },
+            ],
+          },
+          undefined,
+          undefined,
+          true,
+        );
+        assert.deepStrictEqual(status.updateRequiredModels ?? [], []);
+      }).pipe(
+        Effect.provide(
+          layerMockSpawner((args) => {
+            const joined = args.join(" ");
+            if (joined === "--version") return { stdout: "1.0.0\n", stderr: "", code: 0 };
+            throw new Error(`Unexpected args: ${joined}`);
+          }),
+        ),
+      ),
+    );
+
     it.effect.each([
       { source: "inherited HTTPS endpoint", baseUrl: "https://proxy.example/api", overrides: [] },
       {

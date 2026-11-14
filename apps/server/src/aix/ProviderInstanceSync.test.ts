@@ -21,6 +21,7 @@ import {
   aixInstanceId,
   planAixInstanceSync,
   routeAixModels,
+  syncAixOnStartup,
   syncAixProviderInstances,
 } from "./ProviderInstanceSync.ts";
 
@@ -371,13 +372,83 @@ describe("syncAixProviderInstances", () => {
       ]);
     });
 
-    it("driver decoding drops the marker without rejecting, so ownership is read from stored settings", () => {
-      const decoded = decodeCodexSettings(codexInstance("work").config);
+    it("keeps the marker in the config each driver decodes from persisted settings", () => {
+      const claudeInstance = must(
+        aixDesiredInstances([
+          {
+            name: "claude",
+            label: "Claude",
+            routes: routeAixModels("anthropic", [{ id: "claude-opus-5-5", displayName: "Opus" }]),
+          },
+        ]).get(ProviderInstanceId.make("aix-claudeAgent-claude")),
+      );
+      const persisted = decodePersisted(
+        encodePersisted(
+          decodePersisted({
+            "aix-codex-work": codexInstance("work"),
+            "aix-claudeAgent-claude": claudeInstance,
+          }),
+        ),
+      );
 
-      expect(decoded).not.toHaveProperty("aixProfile");
-      expect(decoded.customModels).toHaveLength(1);
+      expect(
+        decodeCodexSettings(must(persisted[ProviderInstanceId.make("aix-codex-work")]).config)
+          .aixProfile,
+      ).toBe("work");
+      expect(
+        decodeClaudeSettings(
+          must(persisted[ProviderInstanceId.make("aix-claudeAgent-claude")]).config,
+        ).aixProfile,
+      ).toBe("claude");
     });
   });
+
+  effectIt.effect(
+    "leaves a manual instance that takes a managed id during the catalog read unchanged",
+    () =>
+      Effect.gen(function* () {
+        const settings = yield* ServerSettingsService;
+        const id = ProviderInstanceId.make("aix-codex-work");
+        yield* settings.updateProviderInstance({
+          operation: "create",
+          instanceId: id,
+          instance: { ...codexInstance("work"), displayName: "Stale" },
+        });
+
+        yield* syncAixProviderInstances({
+          enabled: true,
+          source: sourceFor({
+            fetchLiteLlmCatalog: () =>
+              settings
+                .updateProviderInstance({
+                  operation: "upsert",
+                  instanceId: id,
+                  instance: manualCodex(),
+                })
+                .pipe(Effect.orDie, Effect.as({ models: LITELLM_MODELS })),
+          }),
+        });
+
+        expect((yield* settings.getSettings).providerInstances[id]).toMatchObject({
+          displayName: "My Codex",
+        });
+      }).pipe(Effect.provide(ServerSettingsService.layerTest())),
+  );
+
+  effectIt.effect("reads aix profiles at startup only when T3CODE_AIX is 1", () =>
+    Effect.gen(function* () {
+      const listings = yield* Ref.make(0);
+      const source = sourceFor({
+        listProfiles: Ref.update(listings, (count) => count + 1).pipe(Effect.as([])),
+      });
+
+      yield* syncAixOnStartup({}, source);
+      expect(yield* Ref.get(listings)).toBe(0);
+
+      yield* syncAixOnStartup({ T3CODE_AIX: "1" }, source);
+      expect(yield* Ref.get(listings)).toBe(1);
+    }).pipe(Effect.provide(ServerSettingsService.layerTest())),
+  );
 
   effectIt.effect("with aix off and no managed instance, writes nothing", () =>
     Effect.gen(function* () {

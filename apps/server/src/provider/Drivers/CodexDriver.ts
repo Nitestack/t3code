@@ -168,6 +168,8 @@ export const CodexDriver: ProviderDriver<
     config,
   }) {
     const aixProfiles = environment.filter(({ name }) => name === "T3_AIX_PROFILE");
+    // Ownership comes from the sync marker, not the env: a manual instance that sets the env keeps built-in models.
+    const aixManaged = config.aixProfile !== undefined;
     if (
       aixProfiles.length > 1 ||
       aixProfiles.some(
@@ -295,15 +297,9 @@ export const CodexDriver: ProviderDriver<
     const checkProvider = modelCatalog.refreshInBackground.pipe(
       Effect.andThen(
         Effect.zipWith(
-          checkCodexProviderStatus(
-            effectiveConfig,
-            undefined,
-            processEnv,
-            undefined,
-            aixProfiles.length > 0,
-          ),
+          checkCodexProviderStatus(effectiveConfig, undefined, processEnv, undefined, aixManaged),
           currentCatalog,
-          (draft, catalog) => stampIdentity(applyCodexModelCatalog(draft, catalog)),
+          (draft, catalog) => stampIdentity(applyCodexModelCatalog(draft, catalog, aixManaged)),
           { concurrent: true },
         ),
       ),
@@ -319,9 +315,9 @@ export const CodexDriver: ProviderDriver<
       haveSettingsChanged: haveProviderSnapshotSettingsChanged,
       initialSnapshot: (settings) =>
         Effect.zipWith(
-          makePendingCodexProvider(settings.provider, aixProfiles.length > 0),
+          makePendingCodexProvider(settings.provider, aixManaged),
           currentCatalog,
-          (draft, catalog) => stampIdentity(applyCodexModelCatalog(draft, catalog)),
+          (draft, catalog) => stampIdentity(applyCodexModelCatalog(draft, catalog, aixManaged)),
         ),
       checkProvider,
       enrichSnapshot: ({ settings, snapshot, publishSnapshot }) =>

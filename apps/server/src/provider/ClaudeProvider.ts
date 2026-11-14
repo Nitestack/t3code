@@ -730,7 +730,13 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     });
   }
 
-  const updateRequiredModels = resolveClaudeUpdateRequiredModels(modelCatalog, parsedVersion);
+  const syncedSlugs = new Set(
+    readCustomModelEntries(claudeSettings.customModels).map((entry) => entry.slug),
+  );
+  const updateRequiredModels = resolveClaudeUpdateRequiredModels(
+    modelCatalog,
+    parsedVersion,
+  ).filter((model) => !aixManaged || syncedSlugs.has(model.slug));
   const versionUpgradeMessage = formatClaudeVersionUpgradeMessage(modelCatalog, parsedVersion);
 
   const probeResult = resolveCapabilities

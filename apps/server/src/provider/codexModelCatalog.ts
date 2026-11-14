@@ -39,11 +39,13 @@ function codexUpdateRequiredModels(
   });
 }
 
+/** An aix-managed instance offers only synced models, and discovery already excludes their families. */
 export function applyCodexModelCatalog(
   draft: ServerProviderDraft,
   catalog: ModelCatalog.ProviderCatalog | undefined,
+  aixManaged = false,
 ): ServerProviderDraft {
-  const updateRequiredModels = codexUpdateRequiredModels(catalog, draft);
+  const updateRequiredModels = aixManaged ? [] : codexUpdateRequiredModels(catalog, draft);
   return {
     ...ModelCatalog.applyModelCatalog(draft, catalog, CODEX_MATCHING),
     ...(updateRequiredModels.length > 0 ? { updateRequiredModels } : {}),

@@ -218,7 +218,6 @@ const observeProfile = Effect.fn("AixProviderInstanceSync.observeProfile")(funct
 export const syncAixProviderInstances = Effect.fn("AixProviderInstanceSync.sync")(
   function* (input: { readonly enabled: boolean; readonly source: AixSyncSource }) {
     const settings = yield* ServerSettingsService;
-    const current = (yield* settings.getSettings).providerInstances;
     const unavailableProfiles = new Set<string>();
     const observedProfiles: Array<AixObservedProfile> = [];
 
@@ -241,6 +240,8 @@ export const syncAixProviderInstances = Effect.fn("AixProviderInstanceSync.sync"
       }
     }
 
+    // Read after the slow aix and catalog calls, so a manual instance that appeared meanwhile is seen.
+    const current = (yield* settings.getSettings).providerInstances;
     const mutations = planAixInstanceSync({
       current,
       desired: aixDesiredInstances(observedProfiles),
@@ -278,15 +279,23 @@ const liveSource = Effect.gen(function* () {
   } satisfies AixSyncSource;
 });
 
+/** Startup gate: aix profiles are listed only when the host opts in with `T3CODE_AIX=1`. */
+export const syncAixOnStartup = Effect.fn("AixProviderInstanceSync.syncOnStartup")(function* (
+  environment: Readonly<Record<string, string | undefined>>,
+  source: AixSyncSource,
+) {
+  yield* syncAixProviderInstances({
+    enabled: environment[AIX_ENABLED_ENVIRONMENT_VARIABLE] === "1",
+    source,
+  });
+});
+
 /** Syncs once at startup in the background; a later refresh should call the same effect. */
 export const layer = Layer.effectDiscard(
   Effect.gen(function* () {
     const environment = yield* HostProcess.Environment;
     const source = yield* liveSource;
-    yield* syncAixProviderInstances({
-      enabled: environment[AIX_ENABLED_ENVIRONMENT_VARIABLE] === "1",
-      source,
-    }).pipe(
+    yield* syncAixOnStartup(environment, source).pipe(
       Effect.catchCause((cause) => Effect.logError("aix provider instance sync failed", cause)),
       Effect.forkScoped,
     );
