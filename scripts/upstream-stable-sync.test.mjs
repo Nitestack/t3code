@@ -120,7 +120,7 @@ if (args[0] === "api" && args.some((arg) => arg.includes("/releases?"))) {
         prerelease: release?.prerelease ?? null,
       })),
     );
-    const response = projectedPages.map((page) => JSON.stringify(page)).join("\\n");
+    const response = projectedPages.map((page) => JSON.stringify(page)).join("\\n") + "\\n";
     state.releaseProjection = {
       pages: projectedPages,
       outputBytes: Buffer.byteLength(response),
