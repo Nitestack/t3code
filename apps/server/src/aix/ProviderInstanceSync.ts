@@ -4,20 +4,25 @@ import {
   type ProviderInstanceConfig,
   type ProviderInstanceConfigMap,
   type ProviderInstanceMutation,
+  type ServerProvider,
 } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as NodeUtil from "node:util";
 import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
-import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
+import * as Digest from "effect/crypto/Digest";
+import * as Hex from "effect/encoding/Hex";
 import { HttpClient } from "effect/http";
 import { ChildProcessSpawner } from "effect/process";
 
 import * as AixDiscovery from "../provider/AixDiscovery.ts";
+import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import * as AixCatalogCache from "./AixCatalogCache.ts";
 import {
@@ -193,8 +198,8 @@ const litellmApiBaseUrl = (endpoint: string) => `${endpoint.replace(/\/+$/u, "")
 const observeProfile = Effect.fn("AixProviderInstanceSync.observeProfile")(function* (
   source: AixSyncSource,
   profile: { readonly name: string },
+  environment: AixDiscovery.ResolvedEnvironment,
 ) {
-  const environment = yield* source.resolveEnvironment(profile.name);
   if (environment.endpointKind === "anthropic") {
     const listed = yield* source.listModels(profile.name);
     return routeAixModels(
@@ -219,13 +224,45 @@ type AixProfileListing = ReadonlyArray<{ readonly name: string; readonly label: 
 export interface AixSyncCache {
   readonly profiles: AixCatalogCache.CatalogCache<AixProfileListing>;
   readonly routes: AixCatalogCache.CatalogCache<AixObservedProfile["routes"]>;
+  readonly staleByProfile: Ref.Ref<ReadonlyMap<string, AixCatalogCache.StaleMarker>>;
+  readonly routeKeys: Ref.Ref<ReadonlyMap<string, string>>;
 }
+
+export const withAixCatalogStatus = (
+  provider: ServerProvider,
+  stale: AixCatalogCache.StaleMarker | undefined,
+): ServerProvider =>
+  stale === undefined
+    ? provider
+    : {
+        ...provider,
+        status: "warning",
+        message: `aix catalog stale since ${DateTime.formatIso(DateTime.makeUnsafe(stale.since))} (${stale.code}).`,
+      };
 
 export const makeAixSyncCache: Effect.Effect<AixSyncCache> = Effect.gen(function* () {
   return {
     profiles: yield* AixCatalogCache.make<AixProfileListing>(),
     routes: yield* AixCatalogCache.make<AixObservedProfile["routes"]>(),
+    staleByProfile: yield* Ref.make<ReadonlyMap<string, AixCatalogCache.StaleMarker>>(new Map()),
+    routeKeys: yield* Ref.make<ReadonlyMap<string, string>>(new Map()),
   };
+});
+
+const routeCacheKey = Effect.fn("AixProviderInstanceSync.routeCacheKey")(function* (
+  profileName: string,
+  environment: AixDiscovery.ResolvedEnvironment,
+  digest: Digest.Digest["Service"],
+) {
+  const fingerprint = yield* digest.digest(
+    Digest.sha256,
+    new TextEncoder().encode(
+      [environment.endpointKind, environment.endpoint, environment.apiKey]
+        .map((value) => `${value.length}:${value}`)
+        .join(""),
+    ),
+  );
+  return `${profileName}\0${Hex.encode(fingerprint)}`;
 });
 
 /** Only the reason and HTTP status: aix and LiteLLM error bodies can echo credentials. */
@@ -263,9 +300,47 @@ export const syncAixProviderInstances = Effect.fn("AixProviderInstanceSync.sync"
           `aix profile listing stale (${listing.success.stale.code}); using the last valid list`,
         );
       }
+      const digest = yield* Digest.Digest;
+      const listedProfiles = new Set(listing.success.value.map(({ name }) => name));
+      yield* cache.routes.retain((key) =>
+        [...listedProfiles].some((profileName) => key.startsWith(`${profileName}\0`)),
+      );
+      const previousRouteKeys = yield* Ref.get(cache.routeKeys);
+      yield* Ref.set(
+        cache.routeKeys,
+        new Map([...previousRouteKeys].filter(([profileName]) => listedProfiles.has(profileName))),
+      );
+      const staleByProfile = new Map<string, AixCatalogCache.StaleMarker>();
       for (const profile of listing.success.value) {
+        const environment = yield* input.source
+          .resolveEnvironment(profile.name)
+          .pipe(Effect.result);
+        if (Result.isFailure(environment)) {
+          unavailableProfiles.add(profile.name);
+          const previousKey = previousRouteKeys.get(profile.name);
+          if (previousKey !== undefined) {
+            const routes = yield* cache.routes
+              .read(previousKey, Effect.fail(environment.failure), {
+                force: true,
+                failureCode,
+              })
+              .pipe(Effect.result);
+            if (Result.isSuccess(routes) && routes.success.stale !== undefined) {
+              staleByProfile.set(profile.name, routes.success.stale);
+            }
+          }
+          continue;
+        }
+        const key = yield* routeCacheKey(profile.name, environment.success, digest);
+        const previousKey = previousRouteKeys.get(profile.name);
         const routes = yield* cache.routes
-          .read(profile.name, observeProfile(input.source, profile), { force, failureCode })
+          .read(key, observeProfile(input.source, profile, environment.success), {
+            force,
+            failureCode,
+            ...(previousKey !== undefined && previousKey !== key
+              ? { fallbackKey: previousKey }
+              : {}),
+          })
           .pipe(Effect.result);
         if (Result.isFailure(routes)) {
           unavailableProfiles.add(profile.name);
@@ -274,17 +349,24 @@ export const syncAixProviderInstances = Effect.fn("AixProviderInstanceSync.sync"
           );
           continue;
         }
+        yield* Ref.update(cache.routeKeys, (keys) => new Map(keys).set(profile.name, key));
+        yield* cache.routes.retain(
+          (candidate) => !candidate.startsWith(`${profile.name}\0`) || candidate === key,
+        );
         if (routes.success.stale !== undefined) {
           yield* Effect.logWarning(
             `aix profile ${profile.name} catalog stale (${routes.success.stale.code}); using the last valid catalog`,
           );
         }
+        const stale = listing.success.stale ?? routes.success.stale;
+        if (stale !== undefined) staleByProfile.set(profile.name, stale);
         observedProfiles.push({
           name: profile.name,
           label: profile.label,
           routes: routes.success.value,
         });
       }
+      yield* Ref.set(cache.staleByProfile, staleByProfile);
     }
 
     // Read after the slow aix and catalog calls, so a manual instance that appeared meanwhile is seen.
@@ -346,12 +428,25 @@ export class AixProviderInstanceSync extends Context.Service<
   {
     /** `force` bypasses the catalog TTL; explicit user refreshes set it. */
     readonly refresh: (input: { readonly force: boolean }) => Effect.Effect<void>;
+    readonly getProfileStatus: (
+      profileName: string,
+    ) => Effect.Effect<AixCatalogCache.StaleMarker | undefined>;
   }
 >()("t3/aix/ProviderInstanceSync/AixProviderInstanceSync") {}
+
+export const getAixProfileStatus = (profileName: string) =>
+  Effect.serviceOption(AixProviderInstanceSync).pipe(
+    Effect.map(Option.getOrUndefined),
+    Effect.flatMap((service) =>
+      service === undefined ? Effect.undefined : service.getProfileStatus(profileName),
+    ),
+  );
 
 const make = Effect.gen(function* () {
   const environment = yield* HostProcess.Environment;
   const settings = yield* ServerSettingsService;
+  const digest = yield* Digest.Digest;
+  const backgroundPolicy = yield* BackgroundPolicy.BackgroundPolicy;
   const source = yield* liveSource;
   const cache = yield* makeAixSyncCache;
 
@@ -359,18 +454,29 @@ const make = Effect.gen(function* () {
     readonly force: boolean;
   }) {
     yield* syncAixFromEnvironment(environment, source, { cache, force: input.force }).pipe(
+      Effect.provideService(Digest.Digest, digest),
       Effect.catchCause((cause) => Effect.logError("aix provider instance sync failed", cause)),
       Effect.provideService(ServerSettingsService, settings),
     );
   });
 
-  // Reads at once, then every TTL; within the TTL the cache answers without touching aix.
-  yield* refresh({ force: false }).pipe(
-    Effect.repeat(Schedule.spaced(AixCatalogCache.CATALOG_TTL)),
-    Effect.forkScoped,
-  );
+  yield* refresh({ force: false }).pipe(Effect.forkScoped);
+  yield* Effect.forever(
+    Effect.sleep(AixCatalogCache.CATALOG_TTL).pipe(
+      Effect.andThen(backgroundPolicy.shouldRunScopeWork({ type: "provider-status" })),
+      Effect.flatMap((shouldRun) => (shouldRun ? refresh({ force: false }) : Effect.void)),
+      Effect.ignoreCause({ log: true }),
+    ),
+  ).pipe(Effect.forkScoped);
 
-  return AixProviderInstanceSync.of({ refresh });
+  return AixProviderInstanceSync.of({
+    refresh,
+    getProfileStatus: Effect.fn("AixProviderInstanceSync.getProfileStatus")(
+      function* (profileName) {
+        return (yield* Ref.get(cache.staleByProfile)).get(profileName);
+      },
+    ),
+  });
 });
 
 export const layer = Layer.effect(AixProviderInstanceSync, make);

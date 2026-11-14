@@ -23,6 +23,7 @@ export interface CatalogRead<A> {
 export interface CatalogReadOptions<E> {
   readonly force: boolean;
   readonly failureCode: (error: E) => string;
+  readonly fallbackKey?: string | undefined;
 }
 
 export interface CatalogCache<A> {
@@ -31,6 +32,7 @@ export interface CatalogCache<A> {
     load: Effect.Effect<A, E>,
     options: CatalogReadOptions<E>,
   ) => Effect.Effect<CatalogRead<A>, E>;
+  readonly retain: (keep: (key: string) => boolean) => Effect.Effect<void>;
 }
 
 interface Entry<A> {
@@ -81,14 +83,26 @@ export const make = Effect.fn("AixCatalogCache.make")(function* <A>() {
           });
           return { value: loaded.success, stale: undefined };
         }
-        if (current === undefined) return yield* Effect.fail(loaded.failure);
-
         const stale = { since: finishedAt, code: options.failureCode(loaded.failure) };
-        entries.set(key, { ...current, stale });
-        return { value: current.value, stale };
+        const fallback =
+          current ??
+          (options.fallbackKey === undefined ? undefined : entries.get(options.fallbackKey));
+        if (fallback === undefined) return yield* Effect.fail(loaded.failure);
+        entries.set(key, { ...fallback, stale });
+        return { value: fallback.value, stale };
       }),
     );
   });
 
-  return { read } satisfies CatalogCache<A>;
+  const retain = Effect.fn("AixCatalogCache.retain")(function* (keep: (key: string) => boolean) {
+    yield* lock.withPermits(1)(
+      Effect.sync(() => {
+        for (const key of entries.keys()) {
+          if (!keep(key)) entries.delete(key);
+        }
+      }),
+    );
+  });
+
+  return { read, retain } satisfies CatalogCache<A>;
 });

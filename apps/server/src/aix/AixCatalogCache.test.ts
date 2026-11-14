@@ -145,4 +145,24 @@ describe("AixCatalogCache", () => {
       expect(other.value).toBe("c");
     }),
   );
+
+  effectIt.effect("drops entries for profiles that are no longer listed", () =>
+    Effect.gen(function* () {
+      const cache = yield* AixCatalogCache.make<string>();
+      yield* cache.read("removed-profile\0endpoint", Effect.succeed("old"), {
+        force: false,
+        failureCode,
+      });
+      yield* cache.retain((key) => key.startsWith("active-profile\0"));
+
+      const missing = yield* cache
+        .read("removed-profile\0endpoint", Effect.fail({ code: "status-503" }), {
+          force: true,
+          failureCode,
+        })
+        .pipe(Effect.result);
+
+      expect(Result.isFailure(missing)).toBe(true);
+    }),
+  );
 });

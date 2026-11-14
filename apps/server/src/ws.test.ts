@@ -852,7 +852,7 @@ const layerUnusedConfigRpcServices = Layer.mergeAll(
   Layer.mock(ReviewService.ReviewService)({}),
   Layer.mock(ScheduledTasks.ScheduledTaskService)({}),
   Layer.mock(SecretRequests.SecretRequests)({}),
-  Layer.mock(SecretResolver.SecretResolver)({}),
+  Layer.mock(SecretResolver.SecretResolver)({ invalidate: () => Effect.void }),
   Layer.mock(GuestShareService.GuestShareService)({}),
   Layer.mock(ServerLifecycleEvents.ServerLifecycleEvents)({}),
   Layer.mock(ServerRuntimeStartup.ServerRuntimeStartup)({}),
@@ -1301,6 +1301,7 @@ it.effect("on-demand clients get provider config without workspace snapshots", (
     const providerChanges = yield* Queue.unbounded<ReadonlyArray<ServerProvider>>();
     const pulled = yield* Queue.unbounded<void>();
     const responses = yield* Queue.unbounded<unknown>();
+    const aixRefreshForces: Array<boolean> = [];
     const configRpcServices = Layer.mergeAll(
       layerUnusedConfigRpcServices,
       Layer.mock(ExternalLauncher.ExternalLauncher)({
@@ -1313,6 +1314,8 @@ it.effect("on-demand clients get provider config without workspace snapshots", (
           Stream.tap(() => Queue.offer(pulled, undefined)),
         ),
         refresh: () => Effect.sync(() => registryProviders),
+        reloadSecretsAndRefresh: () => Effect.sync(() => registryProviders),
+        invalidateModelCaches: () => Effect.void,
         refreshWorkspaceSnapshot: () => Effect.sync(() => registryProviders),
       }),
       Layer.mock(ProjectService.ProjectService)({
@@ -1332,7 +1335,9 @@ it.effect("on-demand clients get provider config without workspace snapshots", (
                 : { instanceId }) as never,
           ),
       }),
-      Layer.mock(AixProviderInstanceSync.AixProviderInstanceSync)({ refresh: () => Effect.void }),
+      Layer.mock(AixProviderInstanceSync.AixProviderInstanceSync)({
+        refresh: ({ force }) => Effect.sync(() => void aixRefreshForces.push(force)),
+      }),
       Layer.mock(UsageLimitSources.UsageLimitSources)({
         current: Effect.succeed([]),
         streamChanges: Stream.make([]),
@@ -1579,6 +1584,27 @@ it.effect("on-demand clients get provider config without workspace snapshots", (
       headers: Headers.empty,
     });
     assert.deepEqual(yield* Queue.take(responses), { providers: [] });
+    assert.deepEqual(aixRefreshForces, [false]);
+
+    yield* server.write(0, {
+      _tag: "Request",
+      id: RpcMessage.RequestId("refresh-models"),
+      tag: WS_METHODS.serverRefreshProviders,
+      payload: { refreshModels: true, omitProviders: true },
+      headers: Headers.empty,
+    });
+    assert.deepEqual(yield* Queue.take(responses), { providers: [] });
+    assert.deepEqual(aixRefreshForces, [false, true]);
+
+    yield* server.write(0, {
+      _tag: "Request",
+      id: RpcMessage.RequestId("reload-secrets"),
+      tag: WS_METHODS.serverRefreshProviders,
+      payload: { reloadSecrets: true, omitProviders: true },
+      headers: Headers.empty,
+    });
+    assert.deepEqual(yield* Queue.take(responses), { providers: [] });
+    assert.deepEqual(aixRefreshForces, [false, true, true]);
 
     // The cwd snapshot brings the lists the digest stands for, under the same digest.
     yield* server.write(0, {
