@@ -142,18 +142,17 @@ describe("resolveOpenCodeAixEnvironment", () => {
       Effect.gen(function* () {
         const path = yield* Path.Path;
         const stateDir = yield* stateDirEffect;
-        const work = yield* resolveOpenCodeAixEnvironment({
-          profileName: "work",
-          models,
-          environment: { PATH: "/usr/bin" },
-          stateDir,
-        });
-        const home = yield* resolveOpenCodeAixEnvironment({
-          profileName: "home",
-          models,
-          environment: { PATH: "/usr/bin" },
-          stateDir,
-        });
+        const [work, home] = yield* Effect.all(
+          ["work", "home"].map((profileName) =>
+            resolveOpenCodeAixEnvironment({
+              profileName,
+              models,
+              environment: { PATH: "/usr/bin" },
+              stateDir,
+            }),
+          ),
+          { concurrency: "unbounded" },
+        );
 
         expect(work.environment.T3_AIX_API_KEY).toBe(sentinelA);
         expect(home.environment.T3_AIX_API_KEY).toBe(sentinelB);
@@ -275,6 +274,92 @@ type RuntimeService = Pick<
 type StartInput = Parameters<RuntimeService["startOpenCodeServerProcess"]>[0];
 
 describe("withOpenCodeAixRuntime", () => {
+  it.effect("keeps concurrent profile launches on their own key, config, and data roots", () =>
+    run(
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const stateDir = yield* stateDirEffect;
+        const started: Array<StartInput> = [];
+        const base: RuntimeService = {
+          startOpenCodeServerProcess: (input) =>
+            Effect.sync(() => {
+              started.push(input);
+              return {
+                url: "http://127.0.0.1:4096",
+                version: "2.2.5",
+                isRunning: Effect.succeed(true),
+                exitCode: Effect.succeed(0),
+              };
+            }),
+          connectToOpenCodeServer: () => Effect.die("unused"),
+        };
+        const [work, home] = yield* Effect.all(
+          ["work", "home"].map((profileName) =>
+            withOpenCodeAixRuntime(base, { profileName, models, stateDir }),
+          ),
+          { concurrency: "unbounded" },
+        );
+
+        yield* Effect.all(
+          [work, home].map((runtime) =>
+            runtime.startOpenCodeServerProcess({
+              binaryPath: "opencode",
+              directory: "/tmp",
+              environment: { PATH: "/usr/bin" },
+            }),
+          ),
+          { concurrency: "unbounded" },
+        );
+
+        const byKey = new Map(
+          started.map((input) => [input.environment?.T3_AIX_API_KEY, input.environment]),
+        );
+        for (const [profile, key, port] of [
+          ["work", sentinelA, 4000],
+          ["home", sentinelB, 4001],
+        ] as const) {
+          const environment = byKey.get(key);
+          expect(environment).toBeDefined();
+          expect(environment?.XDG_DATA_HOME).toBe(
+            path.join(stateDir, "providers", "opencode", "aix", profile, "data"),
+          );
+          expect(environment?.OPENCODE_CONFIG_CONTENT).toContain(`http://127.0.0.1:${port}/v1`);
+          expect(environment?.OPENCODE_CONFIG_CONTENT).not.toContain(
+            profile === "work" ? sentinelB : sentinelA,
+          );
+        }
+        expect(started).toHaveLength(2);
+      }),
+    ),
+  );
+
+  it.effect("uses the server process environment when the runtime receives no explicit env", () =>
+    run(
+      Effect.gen(function* () {
+        const stateDir = yield* stateDirEffect;
+        let captured: StartInput | undefined;
+        const base: RuntimeService = {
+          startOpenCodeServerProcess: (input) => {
+            captured = input;
+            return Effect.die("test capture");
+          },
+          connectToOpenCodeServer: () => Effect.die("unused"),
+        };
+        const runtime = yield* withOpenCodeAixRuntime(base, {
+          profileName: "work",
+          models,
+          stateDir,
+        });
+        yield* runtime
+          .startOpenCodeServerProcess({ binaryPath: "opencode", directory: "/tmp" })
+          .pipe(Effect.exit);
+
+        expect(captured?.environment?.PATH).toBe(process.env.PATH);
+        expect(captured?.environment?.HOME).toBe(process.env.HOME);
+      }),
+    ),
+  );
+
   it.effect(
     "starts the local server with the resolved environment and a password for this start",
     () =>

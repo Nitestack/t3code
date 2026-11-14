@@ -144,7 +144,7 @@ export const resolveOpenCodeAixEnvironment = Effect.fn("OpenCodeAixLaunch.resolv
     readonly environment: NodeJS.ProcessEnv;
     readonly stateDir: string;
   }): Effect.fn.Return<
-    { readonly environment: NodeJS.ProcessEnv },
+    { readonly environment: NodeJS.ProcessEnv; readonly apiKey: string },
     OpenCodeAixLaunchError,
     ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
   > {
@@ -193,7 +193,7 @@ export const resolveOpenCodeAixEnvironment = Effect.fn("OpenCodeAixLaunch.resolv
     environment.XDG_DATA_HOME = path.join(profileRoot, "data");
     environment.XDG_STATE_HOME = path.join(profileRoot, "state");
     environment.XDG_CACHE_HOME = path.join(profileRoot, "cache");
-    return { environment };
+    return { environment, apiKey: resolved.apiKey };
   },
 );
 
@@ -226,7 +226,7 @@ export const withOpenCodeAixRuntime = Effect.fn("OpenCodeAixLaunch.withRuntime")
       const resolved = yield* resolveOpenCodeAixEnvironment({
         profileName: input.profileName,
         models: input.models,
-        environment: startInput.environment ?? {},
+        environment: startInput.environment ?? process.env,
         stateDir: input.stateDir,
       }).pipe(
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
@@ -255,7 +255,7 @@ export const withOpenCodeAixRuntime = Effect.fn("OpenCodeAixLaunch.withRuntime")
             (error) =>
               new OpenCodeRuntimeModule.OpenCodeRuntimeError({
                 operation: error.operation,
-                detail: error.detail.split(resolved.environment[API_KEY_ENV]!).join("[redacted]"),
+                detail: error.detail.split(resolved.apiKey).join("[redacted]"),
               }),
           ),
         );
@@ -263,36 +263,38 @@ export const withOpenCodeAixRuntime = Effect.fn("OpenCodeAixLaunch.withRuntime")
 
   return {
     startOpenCodeServerProcess,
-    connectToOpenCodeServer: (connectInput) => {
-      if (connectInput.serverUrl?.trim()) {
-        return Effect.fail(
-          new OpenCodeRuntimeModule.OpenCodeRuntimeError({
+    connectToOpenCodeServer: Effect.fn("OpenCodeAixLaunch.connectToOpenCodeServer")(
+      function* (connectInput) {
+        if (connectInput.serverUrl?.trim()) {
+          return yield* new OpenCodeRuntimeModule.OpenCodeRuntimeError({
             operation: "connectToOpenCodeServer",
             detail: `An OpenCode aix profile starts its own server; remove the Server URL to use profile ${input.profileName}.`,
-          }),
+          });
+        }
+        return yield* startOpenCodeServerProcess({
+          binaryPath: connectInput.binaryPath,
+          directory: connectInput.directory,
+          ...(connectInput.serverPassword !== undefined
+            ? { serverPassword: connectInput.serverPassword }
+            : {}),
+          ...(connectInput.environment !== undefined
+            ? { environment: connectInput.environment }
+            : {}),
+          ...(connectInput.port !== undefined ? { port: connectInput.port } : {}),
+          ...(connectInput.hostname !== undefined ? { hostname: connectInput.hostname } : {}),
+          ...(connectInput.timeoutMs !== undefined ? { timeoutMs: connectInput.timeoutMs } : {}),
+        }).pipe(
+          Effect.map((server) => ({
+            url: server.url,
+            ...(server.serverPassword !== undefined
+              ? { serverPassword: server.serverPassword }
+              : {}),
+            version: server.version,
+            exitCode: server.exitCode,
+            external: false,
+          })),
         );
-      }
-      return startOpenCodeServerProcess({
-        binaryPath: connectInput.binaryPath,
-        directory: connectInput.directory,
-        ...(connectInput.serverPassword !== undefined
-          ? { serverPassword: connectInput.serverPassword }
-          : {}),
-        ...(connectInput.environment !== undefined
-          ? { environment: connectInput.environment }
-          : {}),
-        ...(connectInput.port !== undefined ? { port: connectInput.port } : {}),
-        ...(connectInput.hostname !== undefined ? { hostname: connectInput.hostname } : {}),
-        ...(connectInput.timeoutMs !== undefined ? { timeoutMs: connectInput.timeoutMs } : {}),
-      }).pipe(
-        Effect.map((server) => ({
-          url: server.url,
-          ...(server.serverPassword !== undefined ? { serverPassword: server.serverPassword } : {}),
-          version: server.version,
-          exitCode: server.exitCode,
-          external: false,
-        })),
-      );
-    },
+      },
+    ),
   };
 });

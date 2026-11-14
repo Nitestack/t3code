@@ -497,6 +497,7 @@ export const openCodeUsageReader: ProviderUsageReader<OpenCodeSettings, OpenCode
   }) {
     const roots = new Set<string>();
     for (const instance of instances) {
+      if (instance.config?.aixProfile !== undefined) continue;
       for (const root of yield* resolveOpenCodeDataDirs(instance.environment)) roots.add(root);
     }
     return yield* Effect.forEach(
