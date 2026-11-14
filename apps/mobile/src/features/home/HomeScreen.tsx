@@ -100,6 +100,7 @@ import { holdLaunchSplashForHomeRows, settleLaunchSplashHomeRows } from "./home-
 import { useWorkspaceTabs } from "../layout/workspace/WorkspaceTabsContext";
 import { ThreadListFilters } from "./ThreadListFilters";
 import { deriveHomeEmptyState } from "./home-empty-state";
+import { useMobileEnvironmentScope } from "../environment-scope/useMobileEnvironmentScope";
 
 interface HomeScreenProps {
   /** Whether this list is the one on screen; see `useHomeRouteVisible`. */
@@ -268,6 +269,20 @@ export function HomeScreen(props: HomeScreenProps) {
   };
   const onFabScroll = useFabScroll();
   const listRef = useRef<LegendListRef>(null);
+  const mobileEnvironmentScope = useMobileEnvironmentScope();
+  const previousEnvironmentScope = useRef(mobileEnvironmentScope.activeScope);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- discard a swipe and old list anchor when the visible environment set changes
+  useEffect(() => {
+    if (
+      !mobileEnvironmentScope.enabled ||
+      previousEnvironmentScope.current === mobileEnvironmentScope.activeScope
+    )
+      return;
+    previousEnvironmentScope.current = mobileEnvironmentScope.activeScope;
+    openSwipeableRef.current?.close();
+    openSwipeableRef.current = null;
+    void listRef.current?.scrollToOffset({ offset: 0, animated: false });
+  }, [mobileEnvironmentScope.activeScope, mobileEnvironmentScope.enabled]);
   const searchMode = workspace?.state.tabs.threads.searchMode;
   const restoredOffset = workspace?.state.tabs.threads.scrollOffset;
   useSearchScrollRestoration(searchMode, () => {

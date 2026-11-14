@@ -2,7 +2,7 @@ import { ActiveNewTaskContext } from "../../state/active-new-task";
 import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
 import { useNowMinuteMs } from "../../lib/clock";
 import * as Dialog from "../../components/ui/Dialog";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 
 import type {
   EnvironmentId,
@@ -84,6 +84,8 @@ import {
   type HomeProjectScope,
 } from "../home/homeThreadList";
 import { useMobileProjectGroupingSettings } from "../../state/project-grouping";
+import { routeEnvironmentScope } from "../environment-scope/mobile-environment-scope";
+import { useMobileEnvironmentScope } from "../environment-scope/useMobileEnvironmentScope";
 import {
   resolveNewTaskDraftWorkspace,
   resolveNewTaskBranchWorktreePath,
@@ -225,14 +227,18 @@ export function NewTaskFlowProvider(
     routeDraftId?: string;
   }>,
 ) {
-  const projects = useProjects();
-  const threads = useThreadShells();
+  const allProjects = useProjects();
+  const mobileScope = useMobileEnvironmentScope();
+  const { activeScope, setActiveScope, filter: filterScope } = mobileScope;
+  const scopedProjects = useMemo(() => filterScope(allProjects), [allProjects, filterScope]);
+  const allThreads = useThreadShells();
+  const threads = useMemo(() => filterScope(allThreads), [allThreads, filterScope]);
   const { savedConnectionsById } = useSavedRemoteConnections();
   const groupingSettings = useMobileProjectGroupingSettings();
 
   const projectScopes = sortHomeProjectScopes({
     scopes: buildHomeProjectScopes({
-      projects,
+      projects: scopedProjects,
       environmentId: null,
       projectGroupingMode: groupingSettings.sidebarProjectGroupingMode,
     }),
@@ -275,7 +281,7 @@ export function NewTaskFlowProvider(
       routeDraftId: props.routeDraftId,
       draftsLoaded: loaded,
       stamp,
-      projects,
+      projects: allProjects,
       stampedEnvironmentLoading,
     });
   const routeDraftResolution = resolveRoute(storedFlowState, draftsLoaded, routeDraft.project);
@@ -288,6 +294,25 @@ export function NewTaskFlowProvider(
     submitting,
     expandedProvider,
   } = flowState;
+  const selectableProjects =
+    props.routeDraftId !== undefined || activeDraftKey !== null ? allProjects : scopedProjects;
+  const routeScope = routeEnvironmentScope({
+    enabled: props.routeDraftId !== undefined && mobileScope.enabled,
+    environmentId:
+      props.routeDraftId === undefined
+        ? null
+        : (routeDraft.project?.environmentId ?? selectedEnvironmentIdOverride),
+    assignments: mobileScope.assignments,
+  });
+  const syncEnvironmentScopeToDraft = useEffectEvent(
+    (scope: ReturnType<typeof routeEnvironmentScope>) => {
+      if (scope !== null && scope !== activeScope) setActiveScope(scope);
+    },
+  );
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- opening a saved task draft selects the local view for its stamped environment
+  useEffect(() => {
+    if (props.routeDraftId !== undefined) syncEnvironmentScopeToDraft(routeScope);
+  }, [props.routeDraftId, routeScope]);
   // Continuations read the flow at use time, with the route's draft applied.
   const readFlow = (): NewTaskFlowState => {
     const stored = readNewTaskFlowState(flowKey);
@@ -306,11 +331,11 @@ export function NewTaskFlowProvider(
     updateNewTaskFlowState(flowKey, { ...readFlow(), ...patch });
   const selectedEnvironmentId =
     selectedEnvironmentIdOverride !== null &&
-    projects.some((project) => project.environmentId === selectedEnvironmentIdOverride)
+    selectableProjects.some((project) => project.environmentId === selectedEnvironmentIdOverride)
       ? selectedEnvironmentIdOverride
-      : (projects[0]?.environmentId ?? null);
+      : (selectableProjects[0]?.environmentId ?? null);
   const projectsForEnvironment = pipe(
-    projects,
+    selectableProjects,
     Arr.filter((project) => project.environmentId === selectedEnvironmentId),
   );
 
@@ -324,6 +349,17 @@ export function NewTaskFlowProvider(
         ) ??
         projectsForEnvironment[0] ??
         null);
+  const pickerProjects = useMemo(() => {
+    const includedEnvironments = new Set(scopedProjects.map((project) => project.environmentId));
+    return [
+      ...scopedProjects,
+      ...selectableProjects.filter(
+        (project) =>
+          project.environmentId === selectedEnvironmentId &&
+          !includedEnvironments.has(project.environmentId),
+      ),
+    ];
+  }, [scopedProjects, selectableProjects, selectedEnvironmentId]);
 
   const linkedEnvironments = useLinkedEnvironments(selectedProject?.environmentId ?? null);
   const storedStickyModelSelection = useStickyComposerModelSelection();
@@ -583,7 +619,7 @@ export function NewTaskFlowProvider(
 
   const selectEnvironment = (environmentId: EnvironmentId) => {
     const match = resolveEnvironmentProjectMatch(
-      projects.filter((project) => project.environmentId === environmentId),
+      selectableProjects.filter((project) => project.environmentId === environmentId),
       selectedProject,
     );
     updateFlow({
@@ -798,7 +834,19 @@ export function NewTaskFlowProvider(
     };
   };
 
-  const scratchEnvironments = connectedEnvironments.filter(
+  const selectableEnvironments = useMemo(() => {
+    const scoped = filterScope(connectedEnvironments);
+    const includedEnvironments = new Set(scoped.map((environment) => environment.environmentId));
+    return [
+      ...scoped,
+      ...connectedEnvironments.filter(
+        (environment) =>
+          environment.environmentId === selectedEnvironmentId &&
+          !includedEnvironments.has(environment.environmentId),
+      ),
+    ];
+  }, [connectedEnvironments, filterScope, selectedEnvironmentId]);
+  const scratchEnvironments = selectableEnvironments.filter(
     (environment) =>
       availableScratchWorkspaceRoot(
         environment.connectionState,
@@ -839,7 +887,7 @@ export function NewTaskFlowProvider(
         (selectedProjectTitle !== null && project.title === selectedProjectTitle)
       );
     };
-    for (const project of projects) {
+    for (const project of pickerProjects) {
       if (!hostsSelectedRepository(project)) {
         continue;
       }

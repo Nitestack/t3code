@@ -38,18 +38,25 @@ import { useSelectWorkspaceDetail } from "../layout/workspace/useSelectWorkspace
 import { WorkspaceListEmptyDetail } from "../layout/workspace/WorkspaceListEmptyDetail";
 import { WorkspaceListHeader } from "../layout/workspace/WorkspaceListHeader";
 import { buildHomeListFilterMenuItems } from "./home-list-filter-menu";
+import { EnvironmentScopeSwitcher } from "../environment-scope/EnvironmentScopeSwitcher";
+import { useMobileEnvironmentScope } from "../environment-scope/useMobileEnvironmentScope";
 
 export function HomeRouteScreen() {
   const nativePrimaryColumn = use(NativePrimaryColumnContext);
   const { layout, setPrimarySidebarSearchQuery, startNewTask } = useAdaptiveWorkspaceLayout();
   const { primarySidebarSearchQuery } = useWorkspacePaneState();
   const selectDetail = useSelectWorkspaceDetail();
-  const projects = useProjects();
+  const allProjects = useProjects();
   // Stop rebuilding the streaming thread list while Thread covers Home.
   const visible = useHomeRouteVisible();
-  const threads = useLaunchingThreads(
+  const allThreads = useLaunchingThreads(
     useAtomValueWhileVisible(steadyNavigationThreadShellsAtom, visible),
   );
+  const pendingTasks = usePendingNewTasks();
+  const { filter: filterScope } = useMobileEnvironmentScope();
+  const projects = filterScope(allProjects);
+  const threads = filterScope(allThreads);
+  const scopedPendingTasks = filterScope(pendingTasks);
   const { environments: workspaceEnvironments, state: catalogState } = useWorkspaceState();
   const { savedConnectionsById } = useSavedRemoteConnections();
   const navigation = useNavigation();
@@ -101,7 +108,6 @@ export function HomeRouteScreen() {
     regenerateThreadTitle,
     unsettleThread,
   } = useThreadListActions();
-  const pendingTasks = usePendingNewTasks();
   const { openPendingTask, confirmDeletePendingTask } =
     usePendingTaskListActions(selectThreadRoute);
   const connectionStateByEnvironmentId = new Map(
@@ -109,7 +115,7 @@ export function HomeRouteScreen() {
       (environment) => [environment.environmentId, environment.connectionState] as const,
     ),
   );
-  const environments = Arr.sort(
+  const allEnvironments = Arr.sort(
     Object.values(savedConnectionsById).map((connection) => ({
       environmentId: connection.environmentId,
       label: connection.environmentLabel,
@@ -117,6 +123,7 @@ export function HomeRouteScreen() {
     })),
     Order.mapInput(Order.String, (environment: { readonly label: string }) => environment.label),
   );
+  const environments = filterScope(allEnvironments);
   const availableEnvironmentIds = useMemo(
     () => new Set(environments.map((environment) => environment.environmentId)),
     [environments],
@@ -182,6 +189,14 @@ export function HomeRouteScreen() {
           }}
         />
 
+        <EnvironmentScopeSwitcher
+          environments={allEnvironments}
+          onScopeChange={() => {
+            setSelectedEnvironmentId(null);
+            setSelectedProjectKey(null);
+          }}
+        />
+
         <HomeScreen
           catalogState={catalogState}
           environments={environments}
@@ -217,7 +232,7 @@ export function HomeRouteScreen() {
             });
           }}
           onStartNewTask={startNewTask}
-          pendingTasks={pendingTasks}
+          pendingTasks={scopedPendingTasks}
           projectGroupingMode={listOptions.projectGroupingMode}
           projects={projects}
           projectSortOrder={listOptions.projectSortOrder}

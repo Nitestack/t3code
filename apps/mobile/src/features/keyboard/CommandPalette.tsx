@@ -55,6 +55,7 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { serverEnvironment } from "../../state/server";
 import { useWorkspaceEnvironments } from "../../state/workspace";
 import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
+import { useMobileEnvironmentScope } from "../environment-scope/useMobileEnvironmentScope";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import { ThreadSearchMatchExcerpt } from "../threads/thread-search-match";
 import { pickTriageEnvironment } from "../triage/triageTarget";
@@ -225,12 +226,13 @@ export function CommandPalette(props: {
   const { themeVariables } = useAppearancePreferences();
   const selectDetail = useSelectWorkspaceDetail();
   const runCommand = props.onCommand;
-  const projects = useProjects();
-  const threads = useVisibleThreadShells();
+  const { filter: filterScope } = useMobileEnvironmentScope();
+  const projects = filterScope(useProjects());
+  const threads = filterScope(useVisibleThreadShells());
   const activeThreadRef = parseActiveThreadPath(props.pathname);
   const activeThread = useThreadShell(activeThreadRef);
   const visitThread = useAtomCommand(threadEnvironment.visit, { reportFailure: false });
-  const environments = useWorkspaceEnvironments();
+  const environments = filterScope(useWorkspaceEnvironments());
   const { savedConnectionsById } = useSavedRemoteConnections();
   const [query, setQuery] = useState("");
   // Ranking is relative to when the palette opened, so rows do not reorder as time passes.

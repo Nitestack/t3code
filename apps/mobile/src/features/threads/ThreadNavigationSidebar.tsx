@@ -1,7 +1,10 @@
 import { useActiveNewTask } from "../../state/active-new-task";
 import { ThreadUndoNotice } from "../home/ThreadUndoNotice";
+import { EnvironmentScopeSwitcher } from "../environment-scope/EnvironmentScopeSwitcher";
+import { useMobileEnvironmentScope } from "../environment-scope/useMobileEnvironmentScope";
 import { useAndroidControlSizing } from "../../components/ui/useAndroidControlSizing";
 import { pickableProjectGroups } from "@t3tools/client-runtime/state/project-grouping";
+import type { LegendListRef } from "@legendapp/list/react-native";
 import {
   useAppearancePreferences,
   useAndroidFloatingTabs,
@@ -118,12 +121,16 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
 
   const insets = useSafeAreaInsets();
   const { fabClearance, fabSize } = useAndroidControlSizing();
-  const projects = useProjects();
-  const threads = useAtomValue(steadyNavigationThreadShellsAtom);
+  const allProjects = useProjects();
+  const allThreads = useAtomValue(steadyNavigationThreadShellsAtom);
+  const { filter: filterScope } = useMobileEnvironmentScope();
+  const projects = filterScope(allProjects);
+  const threads = filterScope(allThreads);
   const { environments: workspaceEnvironments, state: catalogState } = useWorkspaceState();
   const { savedConnectionsById } = useSavedRemoteConnections();
   const openSwipeableRef = useRef<SwipeableMethods | null>(null);
   const sidebarScrollGesture = useNativeGesture();
+  const listRef = useRef<LegendListRef>(null);
   const {
     archiveThread,
     confirmDeleteThread,
@@ -138,7 +145,8 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
     renameThread,
     regenerateThreadTitle,
   } = useThreadListActions();
-  const pendingTasks = usePendingNewTasks();
+  const allPendingTasks = usePendingNewTasks();
+  const pendingTasks = filterScope(allPendingTasks);
   const launchingThreads = useLaunchingThreads(threads);
   const activeNewTask = useActiveNewTask();
   const queuedThreadKeys = useQueuedThreadKeys();
@@ -146,12 +154,13 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
   const { confirmDeletePendingTask } = usePendingTaskListActions((params) =>
     selectDetail({ name: "Thread", params }),
   );
-  const environments = Object.values(savedConnectionsById)
+  const allEnvironments = Object.values(savedConnectionsById)
     .map((connection) => ({
       environmentId: connection.environmentId,
       label: connection.environmentLabel,
     }))
     .sort((left, right) => left.label.localeCompare(right.label));
+  const environments = filterScope(allEnvironments);
   const availableEnvironmentIds = new Set(
     environments.map((environment) => environment.environmentId),
   );
@@ -645,6 +654,16 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
           overflow: "hidden",
         }}
       >
+        <EnvironmentScopeSwitcher
+          environments={allEnvironments}
+          onScopeChange={() => {
+            openSwipeableRef.current?.close();
+            openSwipeableRef.current = null;
+            void listRef.current?.scrollToOffset({ offset: 0, animated: false });
+            setSelectedEnvironmentId(null);
+            setSelectedProjectKey(null);
+          }}
+        />
         {listItems.length === 0 ? (
           <View className="flex-1 items-center justify-center">{listEmpty}</View>
         ) : (
@@ -652,6 +671,7 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
             <GestureDetector gesture={sidebarScrollGesture}>
               {/* oxlint-disable-next-line t3code/require-registered-list-scroll -- The Android sidebar has no native header to register with. */}
               <AnimatedLegendList
+                ref={listRef}
                 itemLayoutAnimation={THREAD_SIDEBAR_ROW_LAYOUT}
                 data={listItems}
                 drawDistance={500}

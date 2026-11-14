@@ -1,5 +1,7 @@
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useSelectWorkspaceDetail } from "../layout/workspace/useSelectWorkspaceDetail";
+import { routeEnvironmentScope } from "../environment-scope/mobile-environment-scope";
+import { useMobileEnvironmentScope } from "../environment-scope/useMobileEnvironmentScope";
 import * as Dialog from "../../components/ui/Dialog";
 import { AppActivityIndicator } from "../../components/ui/AppActivityIndicator";
 import { NavigationRow } from "../../components/ui/NavigationRow";
@@ -68,7 +70,7 @@ import {
   type ParamListBase,
 } from "@react-navigation/native";
 import { SymbolView } from "../../components/ui/AppSymbol";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from "react";
 import { Platform, Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Arr from "effect/Array";
@@ -393,11 +395,18 @@ function useBrowsePathInput(
 function useEnvironmentOptions(
   selectedEnvironmentId: EnvironmentId | null = null,
 ): ReadonlyArray<EnvironmentOption> {
+  const {
+    enabled: scopeEnabled,
+    activeScope,
+    assignments,
+    setActiveScope,
+    filter: filterScope,
+  } = useMobileEnvironmentScope();
   const serverConfigByEnvironmentId = useServerConfigs();
   const { savedConnectionsById } = useSavedRemoteConnections();
   const { connectedEnvironments } = useRemoteConnectionStatus();
 
-  return ((): ReadonlyArray<EnvironmentOption> => {
+  const options = ((): ReadonlyArray<EnvironmentOption> => {
     const runtimeByEnvironmentId = new Map(
       connectedEnvironments.map((environment) => [environment.environmentId, environment] as const),
     );
@@ -418,8 +427,9 @@ function useEnvironmentOptions(
         offeredSourceControlProviders: config?.settings.offeredSourceControlProviders,
       };
     });
+    const scoped = filterScope(options);
     return Arr.sort(
-      options.filter(
+      scoped.filter(
         (environment) =>
           canCreateProjectInEnvironment(environment.connectionState) ||
           environment.environmentId === selectedEnvironmentId,
@@ -427,6 +437,23 @@ function useEnvironmentOptions(
       environmentOptionOrder,
     );
   })();
+  const targetScope = routeEnvironmentScope({
+    enabled: scopeEnabled,
+    environmentId: selectedEnvironmentId,
+    assignments,
+  });
+  const syncEnvironmentScopeToRoute = useEffectEvent(
+    (environmentId: EnvironmentId | null, scope: ReturnType<typeof routeEnvironmentScope>) => {
+      if (environmentId !== null && scope !== null && scope !== activeScope) {
+        setActiveScope(scope);
+      }
+    },
+  );
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- an explicitly addressed environment selects its local view when an Add Project route opens
+  useEffect(() => {
+    syncEnvironmentScopeToRoute(selectedEnvironmentId, targetScope);
+  }, [selectedEnvironmentId, targetScope]);
+  return options;
 }
 
 function useSelectedEnvironment(requestedEnvironmentId: EnvironmentId | null): {
@@ -823,8 +850,8 @@ function useCreateProject(environment: EnvironmentOption | null) {
 function useEnvironmentFromParam(
   environmentIdParam: string | string[] | undefined,
 ): EnvironmentOption | null {
-  const environmentOptions = useEnvironmentOptions();
   const environmentId = stringParam(environmentIdParam) as EnvironmentId | null;
+  const environmentOptions = useEnvironmentOptions(environmentId);
   return resolveAddProjectEnvironment(environmentOptions, environmentId);
 }
 
@@ -1041,13 +1068,18 @@ function FolderBrowser(props: {
 export function AddProjectNewScreen(props: { readonly environmentId?: string | string[] }) {
   const openNewTaskDraft = useOpenNewTaskDraft();
   const navigation = useNavigation();
-  const environmentOptions = useEnvironmentOptions().filter(
-    (option) => option.newProjectsRoot !== null,
-  );
   const [selectedEnvironmentId, setSelectedEnvironmentId] = useState(
     () => stringParam(props.environmentId) as EnvironmentId | null,
   );
-  const environment = resolveAddProjectEnvironment(environmentOptions, selectedEnvironmentId);
+  const environmentOptions = useEnvironmentOptions(selectedEnvironmentId).filter(
+    (option) => option.newProjectsRoot !== null,
+  );
+  const environment = resolveAddProjectEnvironment(
+    environmentOptions,
+    environmentOptions.some((option) => option.environmentId === selectedEnvironmentId)
+      ? selectedEnvironmentId
+      : null,
+  );
   const createNew = useAtomCommand(projectEnvironment.createNew, { reportFailure: false });
   const checkPublishedAppAccess = useAtomCommand(sourceControlEnvironment.checkAppAccess, {
     reportFailure: false,
