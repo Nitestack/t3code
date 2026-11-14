@@ -707,10 +707,10 @@ jobs:
           if [ -r "$memory_events" ]; then
             echo "::group::Runner cgroup memory before web tests"
             echo "memory.events"
-            cat "$memory_events"
+            cat "$memory_events" 2>/dev/null || echo "memory.events unavailable"
             if [ -r "$memory_peak" ]; then
               echo "memory.peak bytes"
-              cat "$memory_peak"
+              cat "$memory_peak" 2>/dev/null || echo "memory.peak unavailable"
             fi
             echo "::endgroup::"
           else
@@ -725,10 +725,10 @@ jobs:
           if [ -r "$memory_events" ]; then
             echo "::group::Runner cgroup memory after web tests"
             echo "memory.events"
-            cat "$memory_events"
+            cat "$memory_events" 2>/dev/null || echo "memory.events unavailable"
             if [ -r "$memory_peak" ]; then
               echo "memory.peak bytes"
-              cat "$memory_peak"
+              cat "$memory_peak" 2>/dev/null || echo "memory.peak unavailable"
             fi
             echo "::endgroup::"
           fi
