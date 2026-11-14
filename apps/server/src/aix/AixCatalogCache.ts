@@ -84,11 +84,14 @@ export const make = Effect.fn("AixCatalogCache.make")(function* <A>() {
           });
           return { value: loaded.success, stale: undefined };
         }
-        const stale = { since: finishedAt, code: options.failureCode(loaded.failure) };
         const fallback =
           current ??
           (options.fallbackKey === undefined ? undefined : entries.get(options.fallbackKey));
         if (fallback === undefined) return yield* Effect.fail(loaded.failure);
+        const stale = {
+          since: fallback.stale?.since ?? finishedAt,
+          code: options.failureCode(loaded.failure),
+        };
         entries.set(key, { ...fallback, stale });
         return { value: fallback.value, stale };
       }),

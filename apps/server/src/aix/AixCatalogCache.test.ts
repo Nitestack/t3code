@@ -120,6 +120,10 @@ describe("AixCatalogCache", () => {
       expect(kept.value).toBe("valid");
       expect(kept.stale?.code).toBe("status-503");
       expect(kept.stale?.since).toBe(25 * 60 * 60 * 1000);
+
+      yield* TestClock.adjust("1 hour");
+      const stillStale = yield* cache.read("work", failing, { force: false, failureCode });
+      expect(stillStale.stale?.since).toBe(25 * 60 * 60 * 1000);
     }),
   );
 
