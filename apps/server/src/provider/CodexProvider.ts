@@ -34,6 +34,7 @@ import {
   codexModelFamily,
   createModelCapabilities,
   formatCodexModelName,
+  readCustomModelEntries,
 } from "@t3tools/shared/model";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import { codexAppServerArgs, resolveCodexLaunchArgs } from "./codexLaunchArgs.ts";
@@ -472,9 +473,14 @@ function applyConfiguredCodexCyberAccess(
 function appendCustomCodexModels(
   models: ReadonlyArray<ServerProviderModel>,
   customModels: ReadonlyArray<CustomModelSetting>,
+  aixManaged = false,
 ): ReadonlyArray<ServerProviderModel> {
   const fallbackCapabilities = models.find((model) => model.capabilities)?.capabilities ?? null;
-  return providerModelsFromSettings(models, customModels, fallbackCapabilities);
+  const withCustom = providerModelsFromSettings(models, customModels, fallbackCapabilities);
+  if (!aixManaged) return withCustom;
+  // An aix instance routes only through verified pairs, so built-ins it never verified are hidden.
+  const synced = new Set(readCustomModelEntries(customModels).map((entry) => entry.slug));
+  return withCustom.filter((model) => synced.has(model.slug));
 }
 
 function parseCodexSkillsListResponse(
@@ -852,14 +858,17 @@ export const probeCodexSkillsForCwd = Effect.fn("probeCodexSkillsForCwd")(functi
   return parseCodexSkillsListResponse(skillsResponse, input.cwd);
 });
 
-const emptyCodexModelsFromSettings = (codexSettings: CodexSettings): ServerProvider["models"] =>
-  appendCustomCodexModels([], codexSettings.customModels);
+const emptyCodexModelsFromSettings = (
+  codexSettings: CodexSettings,
+  aixManaged = false,
+): ServerProvider["models"] => appendCustomCodexModels([], codexSettings.customModels, aixManaged);
 
 const makePendingCodexProvider = Effect.fn("CodexProvider.makePendingCodexProvider")(function* (
   codexSettings: CodexSettings,
+  aixManaged = false,
 ): Effect.fn.Return<ServerProviderDraft> {
   const checkedAt = yield* Effect.map(DateTime.now, DateTime.formatIso);
-  const models = emptyCodexModelsFromSettings(codexSettings);
+  const models = emptyCodexModelsFromSettings(codexSettings, aixManaged);
 
   if (!codexSettings.enabled) {
     return buildServerProvider({
@@ -953,6 +962,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
   > = probeCodexAppServerProvider,
   environment?: NodeJS.ProcessEnv,
   managedAuth?: ServerProvider["auth"],
+  aixManaged = false,
 ): Effect.fn.Return<
   ServerProviderDraft,
   ServerSettingsError,
@@ -960,7 +970,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
 > {
   const resolvedEnvironment = providerProbeEnvironment(environment ?? process.env);
   const checkedAt = DateTime.formatIso(yield* DateTime.now);
-  const emptyModels = emptyCodexModelsFromSettings(codexSettings);
+  const emptyModels = emptyCodexModelsFromSettings(codexSettings, aixManaged);
 
   if (!codexSettings.enabled) {
     return buildServerProvider({
@@ -1080,7 +1090,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
     enabled: codexSettings.enabled,
     checkedAt,
     models: pipe(
-      appendCustomCodexModels(snapshot.models ?? [], codexSettings.customModels),
+      appendCustomCodexModels(snapshot.models ?? [], codexSettings.customModels, aixManaged),
       applyPreferredCodexDefaultModel,
       (models) => applyConfiguredCodexServiceTier(models, snapshot.serviceTier),
       (models) => applyConfiguredCodexCyberAccess(models, snapshot),

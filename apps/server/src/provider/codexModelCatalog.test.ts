@@ -58,6 +58,7 @@ describe("applyCodexModelCatalog", () => {
       applyCodexModelCatalog(draft("1.2.0"), catalog),
       applyCodexModelCatalog(draft("1.1.9", [model({ slug: "openai.gpt-next" })]), catalog),
       applyCodexModelCatalog(draft(null), catalog),
+      applyCodexModelCatalog(draft("1.1.9"), catalog, true),
       applyCodexModelCatalog(draft("1.1.9", [model({ slug: "gpt-next" })]), {
         ...catalog,
         models: [{ ...catalog.models[0]!, slug: "openai.gpt-next" }],

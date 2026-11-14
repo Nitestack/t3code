@@ -17,7 +17,7 @@ import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
-import { createModelCapabilities } from "@t3tools/shared/model";
+import { createModelCapabilities, readCustomModelEntries } from "@t3tools/shared/model";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import {
   query as claudeQuery,
@@ -79,14 +79,19 @@ const DEFAULT_CLAUDE_MODEL_CAPABILITIES: ModelCapabilities = createModelCapabili
 function claudeProviderModels(
   builtInModels: ReadonlyArray<ServerProviderModel>,
   customModels: ClaudeSettings["customModels"],
+  aixManaged: boolean,
 ): ReadonlyArray<ServerProviderModel> {
-  return providerModelsFromSettings(
+  const models = providerModelsFromSettings(
     builtInModels,
     customModels,
     DEFAULT_CLAUDE_MODEL_CAPABILITIES,
   ).map((model) =>
     model.isCustom ? { ...model, capabilities: withUltracodeToggle(model.capabilities) } : model,
   );
+  if (!aixManaged) return models;
+  // An aix instance routes only through verified pairs, so built-ins it never verified are hidden.
+  const synced = new Set(readCustomModelEntries(customModels).map((entry) => entry.slug));
+  return models.filter((model) => synced.has(model.slug));
 }
 
 const CLAUDE_PRESENTATION = {
@@ -621,6 +626,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   /** Shared with the adapter so turn events reuse the scoped-bucket names this probe saw. */
   scopedLimitNames?: Ref.Ref<ClaudeScopedLimitNames>,
   resolveResetCredits?: (version: string) => Effect.Effect<ServerProviderResetCredits | undefined>,
+  aixManaged = false,
 ): Effect.fn.Return<
   ServerProviderDraft,
   never,
@@ -631,6 +637,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   const allModels = claudeProviderModels(
     modelCatalog.models.map((entry) => entry.model),
     claudeSettings.customModels,
+    aixManaged,
   );
 
   if (!claudeSettings.enabled) {
@@ -723,7 +730,13 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     });
   }
 
-  const updateRequiredModels = resolveClaudeUpdateRequiredModels(modelCatalog, parsedVersion);
+  const syncedSlugs = new Set(
+    readCustomModelEntries(claudeSettings.customModels).map((entry) => entry.slug),
+  );
+  const updateRequiredModels = resolveClaudeUpdateRequiredModels(
+    modelCatalog,
+    parsedVersion,
+  ).filter((model) => !aixManaged || syncedSlugs.has(model.slug));
   const versionUpgradeMessage = formatClaudeVersionUpgradeMessage(modelCatalog, parsedVersion);
 
   const probeResult = resolveCapabilities
@@ -741,6 +754,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
         ...claudeReportedModels(modelCatalog, claudeSettings.customModels, capabilities?.models),
       ],
       claudeSettings.customModels,
+      aixManaged,
     ),
     capabilities?.effortCapSources ?? [],
   );
@@ -861,11 +875,13 @@ export const makePendingClaudeProvider = Effect.fn("ClaudeProvider.makePendingCl
   function* (
     claudeSettings: ClaudeSettings,
     modelCatalog: ClaudeModelCatalog = BUNDLED_CLAUDE_MODEL_CATALOG,
+    aixManaged = false,
   ): Effect.fn.Return<ServerProviderDraft> {
     const checkedAt = yield* nowIso;
     const models = claudeProviderModels(
       modelCatalog.models.map((entry) => entry.model),
       claudeSettings.customModels,
+      aixManaged,
     );
 
     if (!claudeSettings.enabled) {

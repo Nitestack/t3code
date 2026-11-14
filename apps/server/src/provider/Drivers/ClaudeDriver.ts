@@ -131,6 +131,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
       process.env,
     );
     const resolvesAixProfile = environment.some(({ name }) => name === "T3_AIX_PROFILE");
+    // Ownership comes from the sync marker, not the env: a manual instance that sets the env keeps built-in models.
+    const aixManaged = config.aixProfile !== undefined;
     if (resolvesAixProfile) {
       yield* validateClaudeAixSettingsAuth(config, undefined, processEnv).pipe(
         Effect.mapError(
@@ -325,6 +327,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
                   Effect.provideService(FileSystem.FileSystem, fileSystem),
                   Effect.provideService(Path.Path, path),
                 ),
+              aixManaged,
             ),
           ),
           Effect.tap((provider) =>
@@ -348,7 +351,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
       haveSettingsChanged: haveProviderSnapshotSettingsChanged,
       initialSnapshot: (settings) =>
         modelCatalog.pipe(
-          Effect.flatMap((catalog) => makePendingClaudeProvider(settings.provider, catalog)),
+          Effect.flatMap((catalog) =>
+            makePendingClaudeProvider(settings.provider, catalog, aixManaged),
+          ),
           Effect.map(stampIdentity),
         ),
       checkProvider,
