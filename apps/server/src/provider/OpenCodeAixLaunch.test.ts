@@ -23,6 +23,7 @@ import {
 
 const sentinelA = "sk-t08-sentinel-profile-a";
 const sentinelB = "sk-t08-sentinel-profile-b";
+const inheritedEnvironment = process.env;
 const models = [
   { id: "google/gemma-4-31b-it", name: "Gemma 4 31B IT" },
   { id: "gpt-oss-120b", name: "GPT-OSS 120B" },
@@ -142,15 +143,21 @@ describe("resolveOpenCodeAixEnvironment", () => {
       Effect.gen(function* () {
         const path = yield* Path.Path;
         const stateDir = yield* stateDirEffect;
-        const [work, home] = yield* Effect.all(
-          ["work", "home"].map((profileName) =>
-            resolveOpenCodeAixEnvironment({
-              profileName,
+        const { work, home } = yield* Effect.all(
+          {
+            work: resolveOpenCodeAixEnvironment({
+              profileName: "work",
               models,
               environment: { PATH: "/usr/bin" },
               stateDir,
             }),
-          ),
+            home: resolveOpenCodeAixEnvironment({
+              profileName: "home",
+              models,
+              environment: { PATH: "/usr/bin" },
+              stateDir,
+            }),
+          },
           { concurrency: "unbounded" },
         );
 
@@ -293,21 +300,27 @@ describe("withOpenCodeAixRuntime", () => {
             }),
           connectToOpenCodeServer: () => Effect.die("unused"),
         };
-        const [work, home] = yield* Effect.all(
-          ["work", "home"].map((profileName) =>
-            withOpenCodeAixRuntime(base, { profileName, models, stateDir }),
-          ),
+        const { work, home } = yield* Effect.all(
+          {
+            work: withOpenCodeAixRuntime(base, { profileName: "work", models, stateDir }),
+            home: withOpenCodeAixRuntime(base, { profileName: "home", models, stateDir }),
+          },
           { concurrency: "unbounded" },
         );
 
         yield* Effect.all(
-          [work, home].map((runtime) =>
-            runtime.startOpenCodeServerProcess({
+          [
+            work.startOpenCodeServerProcess({
               binaryPath: "opencode",
               directory: "/tmp",
               environment: { PATH: "/usr/bin" },
             }),
-          ),
+            home.startOpenCodeServerProcess({
+              binaryPath: "opencode",
+              directory: "/tmp",
+              environment: { PATH: "/usr/bin" },
+            }),
+          ],
           { concurrency: "unbounded" },
         );
 
@@ -354,8 +367,8 @@ describe("withOpenCodeAixRuntime", () => {
           .startOpenCodeServerProcess({ binaryPath: "opencode", directory: "/tmp" })
           .pipe(Effect.exit);
 
-        expect(captured?.environment?.PATH).toBe(process.env.PATH);
-        expect(captured?.environment?.HOME).toBe(process.env.HOME);
+        expect(captured?.environment?.PATH).toBe(inheritedEnvironment.PATH);
+        expect(captured?.environment?.HOME).toBe(inheritedEnvironment.HOME);
       }),
     ),
   );

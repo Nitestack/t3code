@@ -189,10 +189,21 @@ it.effect("passes the aix profile's isolated runtime to OpenCode create", () =>
     const driver = makeOpenCodeAixDriver(() =>
       Effect.gen(function* () {
         const runtime = yield* OpenCodeRuntime.OpenCodeRuntime;
-        yield* runtime.startOpenCodeServerProcess({
-          binaryPath: "opencode",
-          directory: "/work",
-        });
+        yield* runtime
+          .startOpenCodeServerProcess({
+            binaryPath: "opencode",
+            directory: "/work",
+          })
+          .pipe(
+            Effect.mapError(
+              () =>
+                new ProviderDriverError({
+                  driver: OpenCodeDriver.driverKind,
+                  instanceId: ProviderInstanceId.make("aix-opencode-work"),
+                  detail: "isolated runtime failed",
+                }),
+            ),
+          );
         return yield* new ProviderDriverError({
           driver: OpenCodeDriver.driverKind,
           instanceId: ProviderInstanceId.make("aix-opencode-work"),

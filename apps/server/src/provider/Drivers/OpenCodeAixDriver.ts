@@ -31,6 +31,7 @@ const aixModels = (
 type OpenCodeAixLaunchEnv =
   | ChildProcessSpawner.ChildProcessSpawner
   | FileSystem.FileSystem
+  | OpenCodeRuntime.OpenCodeRuntime
   | Path.Path
   | SecureRandom.SecureRandom;
 
