@@ -66,6 +66,7 @@ interface FakeCodexInput {
   aixProfile?: string;
   aixApiKey?: string;
   requireAixKey?: string;
+  mcpEnvironmentReport?: string;
   requireModel?: string;
 }
 
@@ -88,6 +89,7 @@ function makeFakeCodexBinary(dir: string, input: FakeCodexInput) {
     exitCode: input.exitCode ?? 0,
     aixProfile: input.aixProfile ?? null,
     requireAixKey: input.requireAixKey ?? null,
+    mcpEnvironmentReport: input.mcpEnvironmentReport ?? null,
     requireModel: input.requireModel ?? null,
   });
   return Effect.gen(function* () {
@@ -100,7 +102,8 @@ function makeFakeCodexBinary(dir: string, input: FakeCodexInput) {
         `const check = ${check};`,
         "const args = process.argv.slice(2);",
         'const isMcpList = args.includes("mcp") && args.includes("list");',
-        'if (check.requireAixKey !== null && process.env.T3_AIX_API_KEY !== check.requireAixKey) fail("missing aix credential", 14);',
+        "if (isMcpList && check.mcpEnvironmentReport) NodeFS.writeFileSync(check.mcpEnvironmentReport, JSON.stringify({ aixKeyPresent: process.env.T3_AIX_API_KEY !== undefined }), { mode: 0o600 });",
+        'if (!isMcpList && check.requireAixKey !== null && process.env.T3_AIX_API_KEY !== check.requireAixKey) fail("missing aix credential", 14);',
         'if (check.requireAixKey !== null && process.env.OPENAI_API_KEY !== undefined) fail("host credential leaked into aix child", 15);',
         ...(input.lifecycle === undefined
           ? []
@@ -378,29 +381,37 @@ it.layer(layerCodexTextGenerationTest)("CodexTextGeneration", (it) => {
   it.effect(
     "keeps the selected aix model for title generation without host auth or effort overrides",
     () =>
-      withFakeCodexEnv(
-        {
-          output: JSON.stringify({ title: "Aix title" }),
-          aixProfile: "engineering",
-          aixApiKey: "aix-title-test-key",
-          requireAixKey: "aix-title-test-key",
-          models: ["gpt-6-astra"],
-          requireArg: 'model_provider="t3_aix"',
-          requireModel: "gateway/raw-model",
-          forbidArg: "aix-title-test-key",
-          forbidReasoningEffort: true,
-        },
-        (textGeneration) =>
-          textGeneration.generateThreadTitle({
-            cwd: process.cwd(),
-            message: "Describe this change",
-            modelSelection: createModelSelection(
-              ProviderInstanceId.make("codex"),
-              "gateway/raw-model",
-              [{ id: "reasoningEffort", value: "none" }],
-            ),
-          }),
-      ),
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const mcpEnvironmentReport = yield* fs.makeTempFileScoped();
+        yield* withFakeCodexEnv(
+          {
+            output: JSON.stringify({ title: "Aix title" }),
+            aixProfile: "engineering",
+            aixApiKey: "aix-title-test-key",
+            requireAixKey: "aix-title-test-key",
+            mcpEnvironmentReport,
+            models: ["gpt-6-astra"],
+            requireArg: 'model_provider="t3_aix"',
+            requireModel: "gateway/raw-model",
+            forbidArg: "aix-title-test-key",
+            forbidReasoningEffort: true,
+          },
+          (textGeneration) =>
+            textGeneration.generateThreadTitle({
+              cwd: process.cwd(),
+              message: "Describe this change",
+              modelSelection: createModelSelection(
+                ProviderInstanceId.make("codex"),
+                "gateway/raw-model",
+                [{ id: "reasoningEffort", value: "none" }],
+              ),
+            }),
+        );
+        expect(JSON.parse(yield* fs.readFileString(mcpEnvironmentReport))).toEqual({
+          aixKeyPresent: false,
+        });
+      }),
   );
 
   it.effect("redacts an aix API key echoed by a failed title process", () =>

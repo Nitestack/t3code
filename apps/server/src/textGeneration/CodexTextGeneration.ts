@@ -313,10 +313,12 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
             }
           : {}),
       };
+      const mcpEnvironment: NodeJS.ProcessEnv = { ...env };
+      delete mcpEnvironment.T3_AIX_API_KEY;
       const enabledMcpServers = yield* listEnabledMcpServers({
         binary,
         cwd,
-        env,
+        env: mcpEnvironment,
         launchArgs: codexMcpListLaunchArgs(resolvedLaunchArgs),
         extendEnv: aixLaunch.extendEnv,
       });
