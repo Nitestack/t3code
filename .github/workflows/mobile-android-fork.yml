@@ -35,15 +35,26 @@ jobs:
       T3CODE_MOBILE_UPDATES_ENABLED: "0"
       NODE_OPTIONS: --max-old-space-size=6144
     steps:
-      - name: Checkout
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-        with:
-          persist-credentials: false
-          # Vendored .repos gitlinks have no .gitmodules URL and break checkout's submodule cleanup.
-          sparse-checkout: |
-            /*
-            !/.repos/
-          sparse-checkout-cone-mode: false
+      # Checkout v6's auth cleanup fails on this tree's unconfigured vendor gitlinks.
+      # Keep the token scoped to fetch so the build cannot read it.
+      - name: Check out the built revision without persisting credentials
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          git init
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          authorization="$(printf 'x-access-token:%s' "$CHECKOUT_TOKEN" | base64 --wrap=0)"
+          env \
+            GIT_CONFIG_COUNT=1 \
+            GIT_CONFIG_KEY_0="http.https://github.com/${GITHUB_REPOSITORY}.git/.extraheader" \
+            GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $authorization" \
+            git fetch --no-tags --no-recurse-submodules --depth=1 origin "$GITHUB_SHA"
+          unset CHECKOUT_TOKEN authorization
+          git checkout --progress --force --detach FETCH_HEAD
+          if git config --local --name-only --get-regexp '^(http\..*\.extraheader|includeIf\..*\.path)$'; then
+            echo "::error::checkout credentials were persisted in the local Git config"
+            exit 1
+          fi
 
       - name: Select Android app version
         env:
