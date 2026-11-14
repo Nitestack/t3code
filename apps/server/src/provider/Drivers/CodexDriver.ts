@@ -63,6 +63,7 @@ import * as CodexManagedTokenBroker from "../CodexManagedTokenBroker.ts";
 import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
 import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import { getAixProfileStatus, withAixCatalogStatus } from "../../aix/ProviderInstanceSync.ts";
 const decodeCodexSettings = Schema.decodeSync(CodexSettings);
 
 const DRIVER_KIND = ProviderDriverKind.make("codex");
@@ -329,7 +330,14 @@ export const CodexDriver: ProviderDriver<
           ),
           Effect.provideService(HttpClient.HttpClient, httpClient),
           Effect.provideService(ProviderLatestVersions.ProviderLatestVersions, latestVersions),
-          Effect.flatMap((enrichedSnapshot) => publishSnapshot(enrichedSnapshot)),
+          Effect.flatMap((enrichedSnapshot) =>
+            (config.aixProfile === undefined
+              ? Effect.succeed(enrichedSnapshot)
+              : getAixProfileStatus(config.aixProfile).pipe(
+                  Effect.map((stale) => withAixCatalogStatus(enrichedSnapshot, stale)),
+                )
+            ).pipe(Effect.flatMap(publishSnapshot)),
+          ),
         ),
     }).pipe(
       Effect.mapError(

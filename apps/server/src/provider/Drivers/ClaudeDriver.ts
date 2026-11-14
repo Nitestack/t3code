@@ -58,6 +58,7 @@ import {
   validateClaudeAixSettingsAuth,
 } from "./ClaudeHome.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import { getAixProfileStatus, withAixCatalogStatus } from "../../aix/ProviderInstanceSync.ts";
 import { makeClaudeMaintenanceResolution } from "./ClaudeMaintenance.ts";
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
 
@@ -367,7 +368,14 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
           ),
           Effect.provideService(HttpClient.HttpClient, httpClient),
           Effect.provideService(ProviderLatestVersions.ProviderLatestVersions, latestVersions),
-          Effect.flatMap((enrichedSnapshot) => publishSnapshot(enrichedSnapshot)),
+          Effect.flatMap((enrichedSnapshot) =>
+            (config.aixProfile === undefined
+              ? Effect.succeed(enrichedSnapshot)
+              : getAixProfileStatus(config.aixProfile).pipe(
+                  Effect.map((stale) => withAixCatalogStatus(enrichedSnapshot, stale)),
+                )
+            ).pipe(Effect.flatMap(publishSnapshot)),
+          ),
         ),
     }).pipe(
       Effect.mapError(
