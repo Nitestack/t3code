@@ -1,136 +1,107 @@
 # T01: Native agent compatibility spike
 
-**Status:** STOP — exact model and endpoint compatibility is unverified.
-**Inspected baseline:** `368ec8a21a8a18cba83495a86173696804b95bc2`
-**Scope:** documentation-only spike; no product code or credentials used.
+**Result: partial evidence; no aix routing is approved for general use.** The probes show one
+successful Claude route, two limited OpenCode runs, and a failed Codex run. They do not establish
+the full model-to-agent mapping or profile-switch behavior required to enable aix in T3.
 
-## Environment and reproducibility
+## Probe scope and evidence
 
-Installed CLI versions on the spike host:
+The tested model IDs were `gpt-6.1-sol`, `claude-opus-5-5`, `gpt-oss-120b`, and
+`google/gemma-4-31b-it`. The provider CLIs on the probe host were Codex `0.166.0`, Claude Code
+`2.1.316`, and OpenCode `2.2.5`. No private profile names, endpoint hostnames, or credential values
+are recorded here.
 
-| CLI         | Version/result                           |
-| ----------- | ---------------------------------------- |
-| Codex       | `codex-cli 0.166.0`                      |
-| Claude Code | `2.1.316`                                |
-| OpenCode    | `v2.2.5`                                 |
-| aix         | Not installed (`aix: command not found`) |
+The reviewed probe harness reported 33 offline checks and 5 pending-RPC boundary checks passing.
+Those checks cover the bounded probe/RPC handling and allowlisted diagnostics; they do not prove
+that an endpoint supports a model. The harness was not included in this checkout, so these counts
+are recorded as supplied results rather than as commands another checkout can replay. The review
+also fixed pending-RPC timeouts across all three phases. It did not recover the cause of the Codex
+failure. No new live requests were made while updating this report.
 
-There is no safe LiteLLM test endpoint or disposable test credential configured/provided. I did not
-run `aix profiles`, `aix env`, provider authentication, or any model request. Consequently no model
-availability, response, tool call, or endpoint error was observed. Model names and the locally
-installed CLI versions are not evidence of runtime compatibility.
+The retained CLI accounting reports `$0.01929114537` total across all calls. Attribution by model
+or provider is unknown; OpenCode calls were excluded by a parser issue. This total must not be read
+as a per-model cost or as evidence of compatibility.
 
-The existing test fixtures were run after the worktree-local `vp i` completed successfully. They
-passed with each package's workspace-local Vite+ shim. These fixtures validate T3-side behavior only;
-they do not prove model availability at a real endpoint.
+Earlier T3 fixture runs exercised model selection, Codex and Claude text generation, provider
+switching, and OpenCode text generation. They establish T3-side behavior only; fixture results are
+not live endpoint evidence:
 
-The `vite-plus` symlinks for the root, `apps/server`, and `packages/provider-opencode` resolve to the
-same worktree-local `node_modules/.pnpm/vite-plus@1.4.0_.../node_modules/vite-plus` package. The
-package-local `node_modules/.bin/vp` entries are generated shims targeting that package's `bin/vp`.
-The earlier failed attempts put a separately installed Vite+ runner first in `PATH`, causing a
-duplicate Vitest context. The passing commands below invoke the workspace-local shim directly.
+| Historical command (from the owning package)                                                                                                                                                                  | Result                            |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
+| `./node_modules/.bin/vp run test src/textGeneration/CodexTextGeneration.test.ts src/textGeneration/ClaudeTextGeneration.test.ts src/orchestration-v2/SelectionRestart.integration.test.ts` from `apps/server` | Exit 0; 3 files, 60 tests passed. |
+| `./node_modules/.bin/vp run test src/server/textGeneration.test.ts` from `packages/provider-opencode`                                                                                                         | Exit 0; 1 file, 13 tests passed.  |
 
-## Existing extension points and constraints
+These earlier fixture commands were not rerun during this documentation update.
+
+## Runtime results
+
+“Exact ID echoed” means the runtime response reported the requested model ID. It is not a general
+compatibility guarantee. “Not tested” means this model/agent combination was not exercised.
+
+| Model ID                | Agent       | Endpoint/API route                                                                  | Expected result                                                | Observed result                                                                                                                                                     |
+| ----------------------- | ----------- | ----------------------------------------------------------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `gpt-6.1-sol`           | Codex       | LiteLLM Responses route; private host omitted                                       | Exact model ID and a tool-using turn complete                  | Exact ID echoed; turn failed before a tool call or final response. Exact failure cause was not recovered. **Failed probe.**                                         |
+| `gpt-6.1-sol`           | Claude Code | Anthropic Messages                                                                  | Not a Claude-family route                                      | Not tested.                                                                                                                                                         |
+| `gpt-6.1-sol`           | OpenCode    | Profile-configured LiteLLM route; API package not retained in the redacted evidence | Exact model ID and tool call complete                          | Not tested.                                                                                                                                                         |
+| `claude-opus-5-5`       | Codex       | LiteLLM Responses route; private host omitted                                       | Not a Codex-family route                                       | Not tested.                                                                                                                                                         |
+| `claude-opus-5-5`       | Claude Code | Direct Anthropic API, Messages                                                      | Exact model ID, tool call, and final response                  | Exact ID echoed; correlated Bash tool call and final response succeeded. **Successful probe.**                                                                      |
+| `claude-opus-5-5`       | OpenCode    | Profile-configured LiteLLM route; API package not retained in the redacted evidence | OpenCode may run only with a compatible configured API package | Not tested.                                                                                                                                                         |
+| `gpt-oss-120b`          | Codex       | LiteLLM Responses route; private host omitted                                       | Do not infer Codex compatibility from the `gpt-` prefix        | Not tested.                                                                                                                                                         |
+| `gpt-oss-120b`          | Claude Code | Anthropic Messages                                                                  | Not a Claude-family route                                      | Not tested.                                                                                                                                                         |
+| `gpt-oss-120b`          | OpenCode    | Profile-configured LiteLLM route; API package not retained in the redacted evidence | Requested ID and tool behavior must be verified                | ID was configured and requested, but OpenCode did not echo the model ID. A tool completed; a separate final request was stopped. **Limited runtime evidence only.** |
+| `google/gemma-4-31b-it` | Codex       | LiteLLM Responses route; private host omitted                                       | Do not infer Codex compatibility from the model name           | Not tested.                                                                                                                                                         |
+| `google/gemma-4-31b-it` | Claude Code | Anthropic Messages                                                                  | Not a Claude-family route                                      | Not tested.                                                                                                                                                         |
+| `google/gemma-4-31b-it` | OpenCode    | Profile-configured LiteLLM route; API package not retained in the redacted evidence | Requested ID and tool behavior must be verified                | ID was configured and requested, but OpenCode did not echo the model ID. A tool completed; a separate final request was stopped. **Limited runtime evidence only.** |
+
+The two OpenCode runs show that those requests reached a tool-capable path, but the CLI did not
+echo the requested model ID. The API package and model actually served therefore remain
+unconfirmed. A completed tool call alone is not enough to claim exact-model compatibility.
+
+## T3 extension points and constraints
 
 - **Codex:** [`CodexDriver`](../../apps/server/src/provider/Drivers/CodexDriver.ts) merges the
-  provider instance environment and launches the installed app-server. Hidden `customModels`
-  settings allow a custom model slug. `CodexTextGeneration` sends a registered custom slug through,
-  but an unregistered selection can be replaced by a same-family or default catalog model. That is
-  a silent model substitution and conflicts with the ticket's no-fallback invariant. The T3 driver
-  does not currently build an aix-profile-specific Codex `model_providers` configuration. Codex's
-  documented custom provider configuration includes `base_url`, `env_key`, and `wire_api =
-  "responses"`; the wire API must be Responses-compatible. See [Codex advanced
-  configuration](https://developers.openai.com/codex/config-advanced).
-- **Claude Code:** T3 passes the resolved model to `claude --model`; unknown slugs pass through
-  unchanged. Its process environment can carry `ANTHROPIC_BASE_URL` and an auth variable through
-  `ProviderInstanceEnvironment`. Model IDs still need to be recognized by the configured gateway;
-  T3 has not demonstrated that any of the listed IDs are accepted. Anthropic documents gateway
-  environment variables and explicitly does not support routing Claude Code to non-Claude models
-  through a gateway ([gateway documentation](https://code.claude.com/docs/en/llm-gateway)).
-- **OpenCode:** T3's provider core starts/connects to OpenCode and uses OpenCode's provider/model
-  catalog. Models are selected as `providerID/modelID`. Custom provider definitions currently come
-  from OpenCode configuration (including project `opencode.json`); T3's `customModels` list alone
-  does not define endpoint, auth, or API package. OpenCode supports distinct compatible runtimes,
-  including Responses, OpenAI-compatible, and Anthropic-compatible packages; choosing the package
-  is endpoint-specific. See [OpenCode provider configuration](https://opencode.ai/docs/providers).
-- **Profile isolation:** all three drivers receive per-instance environments, and secret references
-  are resolved before driver launch. This is a candidate runtime injection seam, not evidence that
-  aix output is currently consumed safely. Codex's continuation key uses `sharedHomePath`, including
-  in `authOverlay` mode; it excludes `shadowHomePath`. Two profiles sharing a shared home can remain
-  continuation-compatible even with separate auth overlays. Claude's continuation key uses its
-  config directory. Endpoint/credential changes are not part of either key; profile isolation must
-  account for this before native continuation across profile changes is enabled.
-  OpenCode's continuation identity uses the driver kind and `instanceId`: different instances are
-  incompatible and require a handoff under T3's transition policy, while rotating credentials within
-  the same instance does not change its identity.
-- **Switch/handoff:** `provider.switch` is handled by `ProviderSwitchService`; incompatible
-  continuation identities select `create_with_handoff`, and T3's provider-turn start persists a
-  portable context transfer. This transfers selected conversation history; it does not promise the
-  same native provider session ID. A model/instance change does not guarantee that the new provider
-  actually accepted the requested model.
+  provider-instance environment and starts the installed app-server. Its custom-model path can
+  replace an unregistered selection with a catalog or default model, so it cannot be treated as
+  proof that a requested aix model will be used. T3 does not construct an aix-profile-specific
+  Codex `model_providers` configuration. A compatible custom provider requires a Responses API
+  route. See [Codex advanced configuration](https://developers.openai.com/codex/config-advanced).
+- **Claude Code:** T3 passes the selected model to `claude --model`; its process environment can
+  carry `ANTHROPIC_BASE_URL` and auth through `ProviderInstanceEnvironment`. The direct Anthropic
+  probe above succeeded for `claude-opus-5-5`; it does not prove compatibility for arbitrary
+  LiteLLM aliases. See [Claude Code gateway documentation](https://code.claude.com/docs/en/llm-gateway).
+- **OpenCode:** T3 selects models using `providerID/modelID`. Custom endpoint, auth, and API package
+  come from OpenCode provider configuration; T3's `customModels` list does not supply those
+  settings. The tested requests did not establish which model ID or API package the endpoint
+  actually served. See [OpenCode provider configuration](https://opencode.ai/docs/providers).
+- **Credential and profile boundary:** all three drivers accept per-instance environments, and T3
+  resolves secret references before launch. This is a candidate injection seam, not evidence that
+  aix credentials are integrated or isolated. The probe compared distinct profile keys in memory;
+  it did not prove process isolation, rotation, or safe continuation after a profile change.
+- **Continuation:** Codex continuation identity uses `sharedHomePath`, including in `authOverlay`
+  mode, and excludes `shadowHomePath`; profiles that share a shared home may therefore remain
+  continuation-compatible despite separate auth overlays. Claude uses its config directory.
+  OpenCode identity includes driver kind and `instanceId`, so distinct instances are incompatible;
+  rotating credentials within one instance does not change that identity. Endpoint and credential
+  changes are not included in the Codex or Claude continuation keys. T3's `provider.switch` path can
+  use `create_with_handoff` and transfer portable conversation context; it does not promise the
+  same native session ID.
 
-## Required model matrix
+## Profile switching
 
-The endpoint column identifies the protocol each driver would have to use. **Every real model
-request remains unrun**, because no safe endpoint or credential was available. Therefore the error
-column means no runtime error was captured, not that a request succeeded. The fixture tests below
-are not endpoint observations. The routing expectations below describe the proposed F-09 mapping,
-not implemented aix routing in the inspected baseline.
+The probe did not test same-driver profile A → C continuation or cross-driver Claude ↔ Codex
+handoff. The credentials were compared in memory, which is not a runtime isolation or rotation
+test. T11 must verify both cases using distinct disposable credentials and confirm that the next
+provider receives the expected portable context. Do not claim native-session continuity.
 
-| Model ID                | Agent       | Endpoint / API type to probe                      | Expected from proposed F-09 mapping and existing interfaces                                                                       | Observed result / error             |
-| ----------------------- | ----------- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
-| `gpt-6.1-sol`           | Codex       | LiteLLM Responses API; Codex `wire_api=responses` | Candidate only with explicit custom model and compatible Responses/tool behavior. Current T3 may substitute an unregistered slug. | Not run; no request/error captured. |
-| `gpt-6.1-sol`           | Claude Code | LiteLLM Anthropic Messages                        | Not selected by the GPT-to-Codex routing rule; non-Claude routing is not a supported Claude gateway guarantee.                    | Not run; no request/error captured. |
-| `gpt-6.1-sol`           | OpenCode    | Explicit Responses or OpenAI-compatible package   | Candidate only after endpoint API type and tool behavior are known and configured.                                                | Not run; no request/error captured. |
-| `claude-opus-5-5`       | Codex       | LiteLLM Responses API                             | Not selected by the Claude-to-Claude routing rule. An ID string alone does not show Codex protocol compatibility.                 | Not run; no request/error captured. |
-| `claude-opus-5-5`       | Claude Code | LiteLLM Anthropic Messages                        | Candidate if the gateway recognizes the exact model ID and supports Claude Code's tool protocol.                                  | Not run; no request/error captured. |
-| `claude-opus-5-5`       | OpenCode    | Explicit Anthropic-compatible package             | Directly configurable in OpenCode, but not the automatic routing target for the Claude family.                                    | Not run; no request/error captured. |
-| `gpt-oss-120b`          | Codex       | LiteLLM Responses API                             | Excluded from automatic Codex mapping; compatibility requires an explicit Responses/tool probe.                                   | Not run; no request/error captured. |
-| `gpt-oss-120b`          | Claude Code | LiteLLM Anthropic Messages                        | Not a supported Claude gateway target and not selected by the routing rule.                                                       | Not run; no request/error captured. |
-| `gpt-oss-120b`          | OpenCode    | Explicit OpenAI-compatible or Responses package   | OpenCode fallback candidate; package and backend API must be established before selection.                                        | Not run; no request/error captured. |
-| `google/gemma-4-31b-it` | Codex       | LiteLLM Responses API                             | Not selected by automatic Codex mapping; slash-qualified ID also needs exact custom-model handling.                               | Not run; no request/error captured. |
-| `google/gemma-4-31b-it` | Claude Code | LiteLLM Anthropic Messages                        | Not a supported Claude gateway target and not selected by the routing rule.                                                       | Not run; no request/error captured. |
-| `google/gemma-4-31b-it` | OpenCode    | Explicit OpenAI-compatible or Responses package   | OpenCode fallback candidate; slash-qualified model ID must map exactly and pass a tool-call probe.                                | Not run; no request/error captured. |
+## Follow-up gates
 
-**Native availability conclusion:** none of the four exact model IDs is proven available through a
-native T3 driver. The matrix contains protocol candidates, not Go decisions. Mock protocol fixtures
-cannot close this gap.
+| Ticket | Recommendation                                                                                                 | Evidence required before enabling the behavior                                                                                                                                                           |
+| ------ | -------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| T05    | **STOP**                                                                                                       | A safe Responses endpoint must complete the exact Codex model, tool call, and final response without model substitution. The tested Codex turn failed.                                                   |
+| T06    | **Exploratory GO for the validated Claude direct-Anthropic route and shared fixture credential boundary only** | Keep scope to the successful Claude path. Prove per-profile process isolation, rotation for new turns, redaction, and failure behavior before enabling aix routing. This does not approve Codex routing. |
+| T08    | **Runtime GO for the two probed OpenCode request paths only; integration remains blocked**                     | Establish the API package and actual served model ID, then prove exact model and tool behavior with a profile-bound config and no manual setup.                                                          |
+| T11    | **STOP**                                                                                                       | Exercise same-driver profile switching with separate credentials and cross-driver portable handoffs. Verify context transfer and the expected native-session change.                                     |
 
-## Profile and context continuation probe
-
-Not run: aix and a safe two-profile endpoint fixture are unavailable. The required cases remain:
-
-1. Same driver, two profiles with distinct credentials and isolated native homes: turn, switch
-   profile, then continue with a portable handoff; capture whether the native session ID changes.
-2. Claude Code to Codex and Codex to Claude Code: verify handoff history reaches the new run and
-   confirm a new native session is expected.
-3. For each model, request a tool call and verify the selected endpoint receives the exact original
-   model ID and supported tool schema. Any API/model/tool error must be surfaced without retrying
-   through another model or agent.
-
-## Fixture test attempts
-
-After `vp i` succeeded, these focused tests were run via the package-local Vite+ shims. Only the
-Node toolchain directory was added to `PATH`; the isolated T00 runner directory was omitted.
-
-| Command                                                                                                                                                                                                        | Result                                   |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
-| From `apps/server`: `./node_modules/.bin/vp run test src/textGeneration/CodexTextGeneration.test.ts src/textGeneration/ClaudeTextGeneration.test.ts src/orchestration-v2/SelectionRestart.integration.test.ts` | Exit 0; 3 files passed, 60 tests passed. |
-| From `packages/provider-opencode`: `./node_modules/.bin/vp run test src/server/textGeneration.test.ts`                                                                                                         | Exit 0; 1 file passed, 13 tests passed.  |
-
-No tests or runner files were added or changed. The earlier global-runner failures were invocation
-errors and were superseded by these package-local passing runs.
-
-## Recommendation and gates
-
-| Follow-up | Recommendation | Gate                                                                                                                                                                                |
-| --------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| T05       | **STOP**       | Do not enable native model routing until a safe Responses endpoint proves exact ID, tool calling, failure behavior, and no Codex substitution.                                      |
-| T06       | **STOP**       | Do not enable Claude profile routing until an Anthropic Messages gateway proves exact model ID, base URL, auth isolation, and tool calling.                                         |
-| T08       | **STOP**       | Do not advertise OpenCode fallback until a profile-bound config selects the correct API package and an endpoint fixture proves exact model/tool behavior without manual user setup. |
-| T11       | **STOP**       | Do not claim profile/session continuation until two distinct credentials and cross-driver portable handoffs are exercised; native session identity is not portable.                 |
-
-STOP here means the required evidence is missing; it does not establish that the models fail. The
-ticket remains blocked on a safe, disposable LiteLLM gateway for real model requests. An endpoint
-emulator can validate protocol handling only; it cannot prove real model availability. No silent
-replacement routing is approved by this spike.
+These are scoped evidence gates, not a product routing decision. Do not silently retry a failed
+Codex request through OpenCode or substitute another model. A real endpoint emulator can verify
+protocol handling, but only a controlled model endpoint can establish model availability.

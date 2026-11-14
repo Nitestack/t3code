@@ -1,8 +1,16 @@
 # Nitestack/t3code
 
-This repository is a soft fork of [T3 Code](https://github.com/pingdotgg/t3code), created by pingdotgg and released under the [MIT License](./LICENSE). It follows upstream T3 while exploring a fuller T3 × [aix](https://github.com/Nitestack/aix) setup: using aix API-key profiles with T3's existing agent workflows, and organizing connected environments as work or personal.
+This is a soft fork of [T3 Code](https://github.com/pingdotgg/t3code), created by pingdotgg and
+released under the [MIT License](./LICENSE). It keeps T3's provider, thread, and remote-work
+flows while developing runtime support for [aix](https://github.com/Nitestack/aix) profiles and
+client-side Work/Personal environment views.
 
-The fork-specific workflows are still in development. The T3 server, web and desktop clients, provider integrations, remote access, and thread handoffs come from upstream. The current fork does not yet provide a user-facing aix setup, model catalog, profile picker, or Work/Personal switch. See the [fork guide](./docs/user/nitestack-fork.md) for the current limits and how to run this source checkout.
+The Work/Personal switch is available in the web and desktop source as a development preview; its
+full two-environment and active-task acceptance pass is still open. It only filters the client view
+and is not an access-control boundary. aix discovery and model-catalog code exist, but aix profiles
+cannot yet be activated in T3 or selected in a model picker. The [native compatibility spike](./docs/fork/t01-native-agent-spike.md)
+has partial runtime results; it does not approve general aix routing. See the [fork guide](./docs/user/nitestack-fork.md)
+for current capabilities and limits.
 
 ## Run from source
 
@@ -15,19 +23,38 @@ vp i
 T3CODE_HOME="$HOME/.t3-nitestack" vp run dev
 ```
 
-This starts the local development server and web client. Use the address printed at startup. The explicit `T3CODE_HOME` keeps this server's data separate from any original T3 installation. Set up a provider on the server machine before starting a thread; see [provider setup](./docs/user/install.md#providers).
+Open the address printed at startup. The explicit `T3CODE_HOME` keeps this server's data separate
+from an original T3 installation. Set up a supported T3 provider on the server machine before
+starting a thread; see [provider setup](./docs/user/install.md#providers).
 
-## Fork builds and original T3 clients
+## Nix and fork builds
 
-There are no published Nitestack desktop installers, Android APKs, or Nix packages at this time. To check for fork releases and assets, use `gh release list --repo Nitestack/t3code` or visit [Nitestack/t3code releases](https://github.com/Nitestack/t3code/releases). Upstream T3 download and package-manager links install the original product, not this fork.
+The repository includes a pinned Nix flake for `x86_64-linux`; it builds the fork from a reviewed
+source commit and provides distinct `t3code-fork` and `t3code-fork-desktop` commands. It is a source
+package, not a published fork binary. Follow the [Nix install and isolated launch guide](./docs/user/install.md#t3-code-fork-nix).
+An x86_64 Linux coexistence smoke succeeded with the nixpkgs T3 package and the fork source build,
+using separate data homes and desktop locks. It did not exercise an aix profile.
 
-The official [iOS](https://apps.apple.com/us/app/t3-code-remote-claude-more/id6787819824) and [Android](https://play.google.com/store/apps/details?id=com.t3tools.t3code) apps are upstream clients. This fork includes an Android variant and [build workflow](./docs/operations/android-fork-apk.md), but signing secrets, a real signed build, and an install smoke test are still outstanding; no verified fork APK is published. The iOS app is unchanged and has no fork-specific Work/Personal control. Live compatibility with a fork server has not been established.
+There is no verified published fork Android APK yet. The repository has an Android build workflow,
+but signing-secret setup, a successful signed release build, and device installation are still open.
+The official iOS app is unchanged and has no fork Work/Personal switch. Official mobile-client
+compatibility with the fork server has not been established. See the [Android build guide](./docs/operations/android-fork-apk.md).
+
+## Upstream updates
+
+A guarded stable-release sync workflow is present in the source. It checks daily at 23:37 UTC and
+supports manual dispatch with a dry run enabled by default. It proposes reviewable pull requests;
+it does not auto-merge or publish a fork release. Operational acceptance is still open: the fork's
+GitHub token policy prevents PR creation, and the first dry run failed during checkout before the
+sync script started. A narrow CI repair is in progress.
+See the [workflow](./.github/workflows/upstream-stable-sync.yml) and
+[fork update guide](./docs/user/nitestack-fork.md#updates).
 
 ## Learn more
 
 - [Nitestack fork guide](./docs/user/nitestack-fork.md)
 - [aix profiles and native compatibility](./docs/user/nitestack-fork.md#aix-profiles-and-native-compatibility)
-- [Catalog refresh and Work/Personal status](./docs/user/nitestack-fork.md#catalog-and-workpersonal-status)
+- [Catalog and Work/Personal status](./docs/user/nitestack-fork.md#catalog-and-workpersonal-status)
 - [Remote access](./docs/user/remote-access.md)
 - [Portable handoffs](./docs/user/portable-handoffs.md)
 - [Upstream T3 documentation](./docs/README.md)
