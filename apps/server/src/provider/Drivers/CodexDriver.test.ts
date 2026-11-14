@@ -106,7 +106,7 @@ const noSpawn = ChildProcessSpawner.make(() =>
 const encodeCredentials = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 
 it.layer(layerTest)("CodexDriver", (it) => {
-  it.effect("rejects aix profile references without exposing instance credentials", () =>
+  it.effect("rejects secret aix profile references without exposing instance credentials", () =>
     Effect.gen(function* () {
       const result = yield* Effect.result(
         CodexDriver.create({
@@ -114,7 +114,7 @@ it.layer(layerTest)("CodexDriver", (it) => {
           displayName: "Aix profile",
           enabled: true,
           environment: [
-            { name: "T3_AIX_PROFILE", value: "research", sensitive: false },
+            { name: "T3_AIX_PROFILE", value: "fake-aix-key-must-not-leak", sensitive: true },
             { name: "ANTHROPIC_API_KEY", value: "fake-aix-key-must-not-leak", sensitive: true },
           ],
           config: CodexDriver.defaultConfig(),
@@ -123,7 +123,7 @@ it.layer(layerTest)("CodexDriver", (it) => {
 
       expect(result._tag).toBe("Failure");
       if (result._tag === "Failure") {
-        expect(result.failure.message).toContain("Aix profiles are not supported by Codex.");
+        expect(result.failure.message).toContain("aix profile reference is invalid");
         expect(result.failure.message).not.toContain("fake-aix-key-must-not-leak");
         expect(JSON.stringify(result.failure)).not.toContain("fake-aix-key-must-not-leak");
       }
@@ -378,6 +378,10 @@ it.layer(layerTest)("CodexDriver", (it) => {
         yield* fs.writeFileString(binaryPath, "#!/bin/sh\n");
         yield* fs.chmod(binaryPath, 0o755);
 
+        const hostEnvironment = {
+          ...(yield* HostProcess.Environment),
+          T3_AIX_PROFILE: "host-profile-marker",
+        };
         const instance = yield* CodexDriver.create({
           instanceId: ProviderInstanceId.make("codex-shadow"),
           displayName: "Codex test",
@@ -389,7 +393,8 @@ it.layer(layerTest)("CodexDriver", (it) => {
             homePath: sharedHome,
             shadowHomePath: shadowHome,
           },
-        });
+        }).pipe(Effect.provideService(HostProcess.Environment, hostEnvironment));
+        expect(hostEnvironment.T3_AIX_PROFILE).toBe("host-profile-marker");
 
         const capabilities = yield* instance.snapshot.resolveMaintenance();
         expect(capabilities.update).toMatchObject({

@@ -55,6 +55,7 @@ import {
   type CodexResetCreditsSummary,
 } from "./codexUsageLimits.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import { resolveCodexAixLaunch } from "./CodexAixLaunch.ts";
 import packageJson from "../../package.json" with { type: "json" };
 const isCodexAppServerSpawnError = Schema.is(CodexErrors.CodexAppServerSpawnError);
 
@@ -643,18 +644,30 @@ export const withCodexAppServerClient = Effect.fn("withCodexAppServerClient")(fu
   readonly environment?: NodeJS.ProcessEnv | undefined;
 }) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const environment = yield* codexProcessEnvironment(input);
-  const spawnCommand = yield* resolveSpawnCommand(
-    input.binaryPath,
-    codexAppServerArgs(input.launchArgs),
-    { env: environment, extendEnv: true },
+  const processEnvironment = yield* codexProcessEnvironment(input);
+  const aixLaunch = yield* resolveCodexAixLaunch({
+    environment: processEnvironment,
+    launchArgs: resolveCodexLaunchArgs(input.launchArgs, processEnvironment),
+  }).pipe(
+    Effect.mapError(
+      (cause) => new CodexErrors.CodexAppServerSpawnError({ cause: new Error(cause.message) }),
+    ),
   );
+  const environment = aixLaunch.environment;
+  const args = [
+    ...codexAppServerArgs(resolveCodexLaunchArgs(input.launchArgs, processEnvironment)),
+    ...aixLaunch.configArgs,
+  ];
+  const spawnCommand = yield* resolveSpawnCommand(input.binaryPath, args, {
+    env: environment,
+    extendEnv: aixLaunch.extendEnv,
+  });
   const child = yield* spawner
     .spawn(
       ChildProcess.make(spawnCommand.command, spawnCommand.args, {
         cwd: input.cwd,
         env: environment,
-        extendEnv: true,
+        extendEnv: aixLaunch.extendEnv,
         forceKillAfter: CODEX_APP_SERVER_PROBE_FORCE_KILL_AFTER,
         shell: spawnCommand.shell,
       }),

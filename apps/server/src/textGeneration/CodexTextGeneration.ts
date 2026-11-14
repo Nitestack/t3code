@@ -35,6 +35,7 @@ import {
 } from "@t3tools/shared/model";
 import { getCodexServiceTierOptionValue } from "../codexModelOptions.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import { resolveCodexAixLaunch } from "../provider/CodexAixLaunch.ts";
 
 const CODEX_TIMEOUT_MS = 180_000;
 const CODEX_MCP_LIST_TIMEOUT_MS = 10_000;
@@ -171,15 +172,17 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       readonly cwd: string;
       readonly env: NodeJS.ProcessEnv;
       readonly launchArgs: ReadonlyArray<string>;
+      readonly extendEnv: boolean;
     }) {
       const spawnCommand = yield* resolveSpawnCommand(
         input.binary,
         [...input.launchArgs, ...CODEX_NO_PLUGIN_ARGS, "mcp", "list", "--json"],
-        { env: input.env },
+        { env: input.env, extendEnv: input.extendEnv },
       );
       const child = yield* commandSpawner.spawn(
         ChildProcess.make(spawnCommand.command, spawnCommand.args, {
           env: input.env,
+          extendEnv: input.extendEnv,
           cwd: input.cwd,
           shell: spawnCommand.shell,
           forceKillAfter: "1 second",
@@ -256,6 +259,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
         : undefined;
       const effectiveConfig = resolved?.config ?? codexConfig;
       const effectiveEnvironment = resolved?.environment ?? resolvedEnvironment;
+      const isAixProfile = effectiveEnvironment.T3_AIX_PROFILE !== undefined;
       const models = yield* getModels;
       const requestedModel = modelSelection.model;
       const listed = models.filter((candidate) => !candidate.isCustom);
@@ -268,25 +272,38 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
           (entry) => entry.slug === requestedModel,
         )?.slug ??
         listed.find((candidate) => codexModelFamily(candidate.slug) === requestedFamily)?.slug;
-      const model =
-        matchedModel ??
-        listed.find((candidate) => candidate.isDefault)?.slug ??
-        listed.find((candidate) => !candidate.isLegacy)?.slug ??
-        listed[0]?.slug ??
-        requestedModel;
+      const model = isAixProfile
+        ? requestedModel
+        : (matchedModel ??
+          listed.find((candidate) => candidate.isDefault)?.slug ??
+          listed.find((candidate) => !candidate.isLegacy)?.slug ??
+          listed[0]?.slug ??
+          requestedModel);
       // The selection's options were chosen for the requested model and may not fit a fallback.
-      const fellBack = matchedModel === undefined && model !== requestedModel;
-      const launchArgs = resolveCodexLaunchArgs(effectiveConfig.launchArgs, effectiveEnvironment);
-      const reasoningEffort =
-        (fellBack
-          ? undefined
-          : getModelSelectionStringOptionValue(modelSelection, "reasoningEffort")) ??
-        DEFAULT_TEXT_GENERATION_REASONING_EFFORT;
+      const fellBack = !isAixProfile && matchedModel === undefined && model !== requestedModel;
+      const resolvedLaunchArgs = resolveCodexLaunchArgs(
+        effectiveConfig.launchArgs,
+        effectiveEnvironment,
+      );
+      const aixLaunch = yield* resolveCodexAixLaunch({
+        environment: effectiveEnvironment,
+        launchArgs: resolvedLaunchArgs,
+      }).pipe(
+        Effect.mapError((cause) => new TextGenerationError({ operation, detail: cause.message })),
+      );
+      const reasoningEffort = isAixProfile
+        ? undefined
+        : ((fellBack
+            ? undefined
+            : getModelSelectionStringOptionValue(modelSelection, "reasoningEffort")) ??
+          DEFAULT_TEXT_GENERATION_REASONING_EFFORT);
       const serviceTier =
-        resolved || fellBack ? undefined : getCodexServiceTierOptionValue(modelSelection);
+        resolved || fellBack || isAixProfile
+          ? undefined
+          : getCodexServiceTierOptionValue(modelSelection);
       const binary = effectiveConfig.binaryPath || "codex";
       const env = {
-        ...effectiveEnvironment,
+        ...aixLaunch.environment,
         ...(effectiveConfig.homePath
           ? {
               CODEX_HOME: expandHomePath(
@@ -296,14 +313,17 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
             }
           : {}),
       };
+      const mcpEnvironment: NodeJS.ProcessEnv = { ...env };
+      delete mcpEnvironment.T3_AIX_API_KEY;
       const enabledMcpServers = yield* listEnabledMcpServers({
         binary,
         cwd,
-        env,
-        launchArgs: codexMcpListLaunchArgs(launchArgs),
+        env: mcpEnvironment,
+        launchArgs: codexMcpListLaunchArgs(resolvedLaunchArgs),
+        extendEnv: aixLaunch.extendEnv,
       });
       const mcpServersOff = codexMcpServersOff(enabledMcpServers);
-      const execLaunchArgs = codexExecLaunchArgs(launchArgs);
+      const execLaunchArgs = codexExecLaunchArgs(resolvedLaunchArgs);
       // A launch-arg mcp_servers={...} table replaces ours and can re-enable dotted names.
       const launchArgsSetMcpTable = execLaunchArgs.some((arg) => /\bmcp_servers\s*=/.test(arg));
       const spawnCommand = yield* resolveSpawnCommand(
@@ -313,6 +333,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
           // Before launch args: a later table would replace servers their -c flags define.
           ...(mcpServersOff ? ["--config", mcpServersOff] : []),
           ...execLaunchArgs,
+          ...aixLaunch.configArgs,
           // A user's MCP server could act on the text-generation prompt.
           ...CODEX_NO_PLUGIN_ARGS,
           ...(mcpServersOff && launchArgsSetMcpTable ? ["--config", mcpServersOff] : []),
@@ -324,8 +345,9 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
           "read-only",
           "--model",
           model,
-          "--config",
-          `model_reasoning_effort="${reasoningEffort}"`,
+          ...(reasoningEffort === undefined
+            ? []
+            : ["--config", `model_reasoning_effort="${reasoningEffort}"`]),
           ...(serviceTier ? ["--config", `service_tier="${serviceTier}"`] : []),
           "--output-schema",
           schemaPath,
@@ -334,10 +356,11 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
           ...imagePaths.flatMap((imagePath) => ["--image", imagePath]),
           "-",
         ],
-        { env: effectiveEnvironment },
+        { env, extendEnv: aixLaunch.extendEnv },
       );
       const command = ChildProcess.make(spawnCommand.command, spawnCommand.args, {
         env,
+        extendEnv: aixLaunch.extendEnv,
         cwd,
         shell: spawnCommand.shell,
         stdin: {
@@ -371,11 +394,13 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
         const stderrDetail = stderr.trim();
         const stdoutDetail = stdout.trim();
         const detail = stderrDetail.length > 0 ? stderrDetail : stdoutDetail;
+        const apiKey = aixLaunch.environment.T3_AIX_API_KEY;
+        const safeDetail = apiKey ? detail.replaceAll(apiKey, "[redacted]") : detail;
         return yield* new TextGenerationError({
           operation,
           detail:
-            detail.length > 0
-              ? `Codex CLI command failed: ${detail}`
+            safeDetail.length > 0
+              ? `Codex CLI command failed: ${safeDetail}`
               : `Codex CLI command failed with code ${exitCode}.`,
         });
       }

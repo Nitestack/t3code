@@ -89,6 +89,7 @@ import * as Digest from "effect/crypto/Digest";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Function from "effect/Function";
@@ -123,6 +124,8 @@ import {
 } from "../../provider/EventNdjsonLogger.ts";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
 import { codexAppServerArgs, resolveCodexLaunchArgs } from "../../provider/codexLaunchArgs.ts";
+import { resolveCodexAixLaunch } from "../../provider/CodexAixLaunch.ts";
+import type { CodexAixLaunch } from "../../provider/CodexAixLaunch.ts";
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
 import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
@@ -205,6 +208,17 @@ export function canReuseCodexContextUsage(previous: ModelSelection, next: ModelS
     },
     { ...next, options: (next.options ?? []).filter((option) => option.id !== "reasoningEffort") },
   );
+}
+
+class CodexAixRotationError extends Schema.TaggedError<CodexAixRotationError>()(
+  "CodexAixRotationError",
+  { reason: Schema.Literals(["active-work", "restart-failed"]) },
+) {
+  override get message(): string {
+    return this.reason === "active-work"
+      ? "Codex aix credentials changed while the app-server still has active work. Finish that work and start the turn again."
+      : "Codex could not restart safely with the refreshed aix credentials. Retry the turn.";
+  }
 }
 
 export function codexProviderTurnTokenUsage(
@@ -719,6 +733,7 @@ const decodeCodexTurnStartParams = Schema.decodeUnknownEffect(CodexClient.V2Turn
 const isProviderAdapterRuntimeRequestResponseError = Schema.is(
   ProviderAdapter.ProviderAdapterRuntimeRequestResponseError,
 );
+const isProviderAdapterTurnStartError = Schema.is(ProviderAdapter.ProviderAdapterTurnStartError);
 
 function codexRuntimeModeTurnDefaults(runtimeMode: RuntimeMode): {
   readonly approvalPolicy: CodexSchema.V2TurnStartParams__AskForApproval;
@@ -1408,6 +1423,11 @@ type CodexSubAgentActivityItem = Extract<
 >;
 
 export interface CodexAppServerClientFactoryShape {
+  readonly resolveAixLaunch?: (input: {
+    readonly settings: CodexSettings;
+    readonly environment: NodeJS.ProcessEnv;
+    readonly providerSessionId: OrchestrationV2ProviderSession["id"];
+  }) => Effect.Effect<CodexAixLaunch, ProviderAdapter.ProviderAdapterOpenSessionError>;
   readonly open: (input: {
     readonly instanceId: ProviderInstanceId;
     readonly threadId: ThreadId;
@@ -1415,12 +1435,159 @@ export interface CodexAppServerClientFactoryShape {
     readonly runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy;
     readonly settings: CodexSettings;
     readonly environment: NodeJS.ProcessEnv;
+    readonly aixLaunch?: CodexAixLaunch;
   }) => Effect.Effect<
     CodexClient.CodexAppServerClient["Service"],
     ProviderAdapter.ProviderAdapterOpenSessionError,
     Scope.Scope
   >;
 }
+
+const makeReplaceableCodexClient = Effect.fn("CodexAdapterV2.makeReplaceableCodexClient")(
+  function* (initial: CodexClient.CodexAppServerClient["Service"]) {
+    type Client = CodexClient.CodexAppServerClient["Service"];
+    const current = yield* Ref.make(initial);
+    const termination = yield* Deferred.make<never, CodexErrors.CodexAppServerError>();
+    const notificationRegistrations: Array<(client: Client) => Effect.Effect<void>> = [];
+    const requestRegistrations: Array<(client: Client) => Effect.Effect<void>> = [];
+    const unknownRequestRegistrations: Array<(client: Client) => Effect.Effect<void>> = [];
+    const unknownNotificationRegistrations: Array<(client: Client) => Effect.Effect<void>> = [];
+    const retiring = new WeakSet<object>();
+    const activityPermit = yield* Semaphore.make(1);
+    let activeCalls = 0;
+    const useClient = <A, E, R>(use: () => Effect.Effect<A, E, R>, source?: Client) =>
+      Effect.acquireUseRelease(
+        activityPermit.withPermit(
+          Effect.sync(() => {
+            if (source !== undefined && retiring.has(source)) return false;
+            activeCalls++;
+            return true;
+          }),
+        ),
+        (acquired) => (acquired ? Effect.suspend(use) : Effect.interrupt),
+        (acquired) =>
+          acquired
+            ? activityPermit.withPermit(
+                Effect.sync(() => {
+                  activeCalls--;
+                }),
+              )
+            : Effect.void,
+      );
+    const watch = (client: Client) =>
+      client.awaitTermination.pipe(
+        Effect.catch((cause) =>
+          Ref.get(current).pipe(
+            Effect.flatMap((active) =>
+              active === client && !retiring.has(client)
+                ? Deferred.fail(termination, cause).pipe(Effect.asVoid)
+                : Effect.void,
+            ),
+          ),
+        ),
+        Effect.forkScoped,
+      );
+    yield* watch(initial);
+
+    const raw: Client["raw"] = {
+      ...initial.raw,
+      request: (method, payload) =>
+        useClient(() =>
+          Ref.get(current).pipe(Effect.flatMap((active) => active.raw.request(method, payload))),
+        ),
+    };
+    const client: Client = {
+      raw,
+      awaitTermination: Deferred.await(termination),
+      request: (method, payload) =>
+        useClient(() =>
+          Ref.get(current).pipe(Effect.flatMap((active) => active.request(method, payload))),
+        ),
+      notify: (method, payload) =>
+        useClient(() =>
+          Ref.get(current).pipe(Effect.flatMap((active) => active.notify(method, payload))),
+        ),
+      handleServerNotification: (method, handler) => {
+        const registration = (target: Client) =>
+          target.handleServerNotification(method, (payload) =>
+            useClient(() => handler(payload), target),
+          );
+        return useClient(() =>
+          Ref.get(current).pipe(
+            Effect.flatMap(registration),
+            Effect.tap(() => Effect.sync(() => notificationRegistrations.push(registration))),
+          ),
+        );
+      },
+      handleServerRequest: (method, handler) => {
+        const registration = (target: Client) =>
+          target.handleServerRequest(method, (payload) =>
+            useClient(() => handler(payload), target),
+          );
+        return useClient(() =>
+          Ref.get(current).pipe(
+            Effect.flatMap(registration),
+            Effect.tap(() => Effect.sync(() => requestRegistrations.push(registration))),
+          ),
+        );
+      },
+      handleUnknownServerRequest: (handler) => {
+        const registration = (target: Client) =>
+          target.handleUnknownServerRequest((method, params) =>
+            useClient(() => handler(method, params), target),
+          );
+        return useClient(() =>
+          Ref.get(current).pipe(
+            Effect.flatMap(registration),
+            Effect.tap(() => Effect.sync(() => unknownRequestRegistrations.push(registration))),
+          ),
+        );
+      },
+      handleUnknownServerNotification: (handler) => {
+        const registration = (target: Client) =>
+          target.handleUnknownServerNotification((method, params) =>
+            useClient(() => handler(method, params), target),
+          );
+        return useClient(() =>
+          Ref.get(current).pipe(
+            Effect.flatMap(registration),
+            Effect.tap(() =>
+              Effect.sync(() => unknownNotificationRegistrations.push(registration)),
+            ),
+          ),
+        );
+      },
+    };
+
+    return {
+      client,
+      withIdle: <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+        activityPermit.withPermit(
+          Effect.suspend<A, E | CodexAixRotationError, R>(() =>
+            activeCalls === 0
+              ? effect
+              : Effect.fail(new CodexAixRotationError({ reason: "active-work" })),
+          ),
+        ),
+      prepare: Effect.fn("CodexAdapterV2.prepareCodexClient")(function* (next: Client) {
+        for (const registrations of [
+          notificationRegistrations,
+          requestRegistrations,
+          unknownRequestRegistrations,
+          unknownNotificationRegistrations,
+        ]) {
+          for (const register of registrations) yield* register(next);
+        }
+      }),
+      activate: Effect.fn("CodexAdapterV2.activateCodexClient")(function* (next: Client) {
+        yield* Ref.set(current, next);
+        yield* watch(next);
+      }),
+      markRetiring: (target: Client) => Effect.sync(() => retiring.add(target)),
+      current: Ref.get(current),
+    };
+  },
+);
 
 export class CodexAppServerClientFactory extends Context.Service<
   CodexAppServerClientFactory,
@@ -1705,19 +1872,47 @@ export const layerAppServerClientFactory: Layer.Layer<
     const agentScope = yield* AgentScope;
     const portDiscovery = yield* PortScanner.PortDiscovery;
 
-    return CodexAppServerClientFactory.of({
-      open: Effect.fn("CodexAdapterV2.open")(function* (input) {
-        const scope = yield* Scope.Scope;
-        const environment = {
+    const resolveLaunch = (input: {
+      readonly settings: CodexSettings;
+      readonly environment: NodeJS.ProcessEnv;
+      readonly providerSessionId: OrchestrationV2ProviderSession["id"];
+    }) =>
+      resolveCodexAixLaunch({
+        environment: {
           ...codexAppServerEnvironment(input.environment),
           ...(input.settings.homePath ? { CODEX_HOME: input.settings.homePath } : {}),
-        };
+        },
+        launchArgs: resolveCodexLaunchArgs(input.settings.launchArgs, input.environment),
+      }).pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        Effect.mapError(
+          (cause) =>
+            new ProviderAdapter.ProviderAdapterOpenSessionError({
+              driver: CODEX_PROVIDER,
+              providerSessionId: input.providerSessionId,
+              cause: new Error(cause.message),
+            }),
+        ),
+      );
+
+    return CodexAppServerClientFactory.of({
+      resolveAixLaunch: resolveLaunch,
+      open: Effect.fn("CodexAdapterV2.open")(function* (input) {
+        const scope = yield* Scope.Scope;
+        const launchArgs = resolveCodexLaunchArgs(input.settings.launchArgs, input.environment);
+        const aixLaunch =
+          input.aixLaunch ??
+          (yield* resolveLaunch({
+            settings: input.settings,
+            environment: input.environment,
+            providerSessionId: input.providerSessionId,
+          }));
+        const environment = aixLaunch.environment;
         const command = yield* makeCodexAppServerSpawnCommand({
           command: input.settings.binaryPath || "codex",
-          args: codexAppServerArgs(
-            resolveCodexLaunchArgs(input.settings.launchArgs, input.environment),
-          ),
+          args: [...codexAppServerArgs(launchArgs), ...aixLaunch.configArgs],
           env: environment,
+          extendEnv: aixLaunch.extendEnv,
           threadId: input.threadId,
         }).pipe(Effect.provideService(AgentScope, agentScope));
         const handle = yield* spawner.spawn(command).pipe(
@@ -1800,10 +1995,17 @@ export const createCodexAdapterV2 = Effect.fn("CodexAdapterV2.createCodexAdapter
     homePath: homeLayout.effectiveHomePath ?? "",
   } satisfies CodexSettings;
 
+  const processEnvironment = {
+    ...(yield* mergeProviderInstanceEnvironment(environment, hostEnvironment)),
+  };
+  if (!environment.some(({ name }) => name === "T3_AIX_PROFILE")) {
+    delete processEnvironment.T3_AIX_PROFILE;
+  }
+
   return yield* makeCodexAdapterV2({
     instanceId,
     settings,
-    environment: yield* mergeProviderInstanceEnvironment(environment, hostEnvironment),
+    environment: processEnvironment,
     clientFactory,
     digest,
     fileSystem,
@@ -1872,14 +2074,39 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                     }),
                 ),
               );
-        const client = yield* clientFactory.open({
-          instanceId: adapterOptions.instanceId,
-          threadId: input.threadId,
-          providerSessionId: input.providerSessionId,
-          runtimePolicy: input.runtimePolicy,
-          settings: resolvedRuntime?.config ?? adapterOptions.settings,
-          environment: resolvedRuntime?.environment ?? adapterOptions.environment,
-        });
+        const settings = resolvedRuntime?.config ?? adapterOptions.settings;
+        const environment = resolvedRuntime?.environment ?? adapterOptions.environment;
+        const aixLaunch =
+          environment.T3_AIX_PROFILE === undefined || clientFactory.resolveAixLaunch === undefined
+            ? undefined
+            : yield* clientFactory.resolveAixLaunch({
+                settings,
+                environment,
+                providerSessionId: input.providerSessionId,
+              });
+        const aixRotationEnabled = aixLaunch !== undefined;
+        let clientScope: Scope.Closeable | undefined = aixRotationEnabled
+          ? yield* Scope.fork(scope)
+          : undefined;
+        const openedClient = yield* clientFactory
+          .open({
+            instanceId: adapterOptions.instanceId,
+            threadId: input.threadId,
+            providerSessionId: input.providerSessionId,
+            runtimePolicy: input.runtimePolicy,
+            settings,
+            environment,
+            ...(aixLaunch === undefined ? {} : { aixLaunch }),
+          })
+          .pipe(Effect.provideService(Scope.Scope, clientScope ?? scope));
+        const replaceableClient = aixRotationEnabled
+          ? yield* makeReplaceableCodexClient(openedClient)
+          : undefined;
+        const client = replaceableClient?.client ?? openedClient;
+        let activeAixLaunch = aixLaunch;
+        let clientGeneration = 0;
+        const nativeThreadGeneration = new Map<string, number>();
+        const aixRotationPermit = yield* Semaphore.make(1);
         const additionalContextByThread = yield* Ref.make(
           new Map<string, NonNullable<CodexTurnStartParams["additionalContext"]>>(),
         );
@@ -7322,12 +7549,192 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
           );
         });
 
+        const initializeReplacement = (replacement: CodexClient.CodexAppServerClient["Service"]) =>
+          replacement
+            .request("initialize", {
+              clientInfo: buildCodexInitializeParams().clientInfo,
+              capabilities: CODEX_CLIENT_CAPABILITIES,
+            })
+            .pipe(
+              Effect.flatMap((response) => {
+                const version = /\/(\S+)/u.exec(response.userAgent)?.[1];
+                return version && adapterOptions.compatibility
+                  ? adapterOptions
+                      .compatibility(version)
+                      .pipe(
+                        Effect.flatMap((advisory) =>
+                          advisory?.status === "broken"
+                            ? Effect.fail(new CodexAixRotationError({ reason: "restart-failed" }))
+                            : Effect.void,
+                        ),
+                      )
+                  : Effect.void;
+              }),
+              Effect.andThen(replacement.notify("initialized", undefined)),
+              Effect.mapError(() => new CodexAixRotationError({ reason: "restart-failed" })),
+            );
+
+        const hasUnsafeAixWork = Effect.gen(function* () {
+          if (
+            (yield* Ref.get(activeTurns)).size > 0 ||
+            (yield* Ref.get(pendingRootTurns)).size > 0
+          ) {
+            return true;
+          }
+          for (const contexts of [
+            (yield* Ref.get(activeTurns)).values(),
+            (yield* Ref.get(settledTurns)).values(),
+          ]) {
+            for (const context of contexts) {
+              if (context.runningCompactionItemIds.size > 0) return true;
+            }
+          }
+          if (
+            Array.from((yield* Ref.get(runningCommandItemsByTurn)).values()).some(
+              (items) => items.size > 0,
+            ) ||
+            Array.from((yield* Ref.get(runningDynamicToolsByTurn)).values()).some(
+              (items) => items.size > 0,
+            ) ||
+            (yield* Ref.get(pendingMcpAppCaptures)).size > 0 ||
+            Array.from(imageTurns.values()).some(
+              (state) => state.running.size > 0 || state.saved.size > 0,
+            ) ||
+            Array.from((yield* Ref.get(subagentThreads)).values()).some(
+              (subagent) => subagent.task.status === "running",
+            )
+          ) {
+            return true;
+          }
+          return false;
+        });
+
+        const rotateAixClientForTurn = Effect.fn("CodexAdapterV2.rotateAixClientForTurn")(
+          function* (
+            turnInput: ProviderAdapter.ProviderAdapterV2TurnInput,
+          ): Effect.fn.Return<void, CodexAixRotationError, never> {
+            if (
+              activeAixLaunch === undefined ||
+              clientFactory.resolveAixLaunch === undefined ||
+              replaceableClient === undefined
+            ) {
+              return;
+            }
+            const refreshed = yield* clientFactory
+              .resolveAixLaunch({
+                settings,
+                environment,
+                providerSessionId: input.providerSessionId,
+              })
+              .pipe(Effect.mapError(() => new CodexAixRotationError({ reason: "restart-failed" })));
+            if (
+              activeAixLaunch.environment.T3_AIX_API_KEY === refreshed.environment.T3_AIX_API_KEY &&
+              activeAixLaunch.configArgs.join("\0") === refreshed.configArgs.join("\0")
+            ) {
+              return;
+            }
+            if (yield* hasUnsafeAixWork) {
+              return yield* new CodexAixRotationError({ reason: "active-work" });
+            }
+
+            const nextScope = yield* Scope.fork(scope);
+            const currentClient = yield* replaceableClient.current;
+            const nextClient = yield* clientFactory
+              .open({
+                instanceId: adapterOptions.instanceId,
+                threadId: input.threadId,
+                providerSessionId: input.providerSessionId,
+                runtimePolicy: input.runtimePolicy,
+                settings,
+                environment,
+                aixLaunch: refreshed,
+              })
+              .pipe(
+                Effect.provideService(Scope.Scope, nextScope),
+                Effect.mapError(() => new CodexAixRotationError({ reason: "restart-failed" })),
+                Effect.onError(() => Scope.close(nextScope, Exit.void).pipe(Effect.ignore)),
+              );
+            yield* replaceableClient.prepare(nextClient).pipe(
+              Effect.andThen(initializeReplacement(nextClient)),
+              Effect.mapError(() => new CodexAixRotationError({ reason: "restart-failed" })),
+              Effect.onError(() => Scope.close(nextScope, Exit.void).pipe(Effect.ignore)),
+            );
+            const previousScope = clientScope;
+            yield* turnTerminalizationPermit
+              .withPermits(1)(
+                replaceableClient.withIdle(
+                  Effect.gen(function* () {
+                    if (yield* hasUnsafeAixWork) {
+                      return yield* new CodexAixRotationError({ reason: "active-work" });
+                    }
+                    yield* replaceableClient.markRetiring(currentClient);
+                    clientScope = nextScope;
+                    activeAixLaunch = refreshed;
+                    clientGeneration++;
+                    yield* replaceableClient
+                      .activate(nextClient)
+                      .pipe(Effect.provideService(Scope.Scope, scope));
+                  }).pipe(Effect.uninterruptible),
+                ),
+              )
+              .pipe(
+                Effect.onError(() =>
+                  clientScope === nextScope
+                    ? Effect.void
+                    : Scope.close(nextScope, Exit.void).pipe(Effect.ignore),
+                ),
+                Effect.ensuring(
+                  Effect.suspend(() =>
+                    clientScope === nextScope && previousScope !== undefined
+                      ? Scope.close(previousScope, Exit.void)
+                      : Effect.void,
+                  ),
+                ),
+              );
+
+            const nativeThreadId = yield* getNativeThreadId(turnInput.providerThread).pipe(
+              Effect.mapError(() => new CodexAixRotationError({ reason: "restart-failed" })),
+            );
+            const mcpSession = yield* mcpSessions.read(turnInput.threadId);
+            yield* resumeNativeThread(nativeThreadId, {
+              excludeTurns: true,
+              ...codexThreadRuntimeParams({
+                threadId: turnInput.threadId,
+                mcpSession,
+                modelSelection: turnInput.modelSelection,
+                runtimePolicy: turnInput.runtimePolicy,
+              }),
+            }).pipe(Effect.mapError(() => new CodexAixRotationError({ reason: "restart-failed" })));
+            nativeThreadGeneration.set(nativeThreadId, clientGeneration);
+          },
+        );
+
+        const ensureNativeThreadLoadedForCurrentClient = Effect.fn(
+          "CodexAdapterV2.ensureNativeThreadLoadedForCurrentClient",
+        )(function* (turnInput: ProviderAdapter.ProviderAdapterV2TurnInput) {
+          if (activeAixLaunch === undefined) return;
+          const threadId = yield* getNativeThreadId(turnInput.providerThread);
+          if (nativeThreadGeneration.get(threadId) === clientGeneration) return;
+          const mcpSession = yield* mcpSessions.read(turnInput.threadId);
+          yield* resumeNativeThread(threadId, {
+            excludeTurns: true,
+            ...codexThreadRuntimeParams({
+              threadId: turnInput.threadId,
+              mcpSession,
+              modelSelection: turnInput.modelSelection,
+              runtimePolicy: turnInput.runtimePolicy,
+            }),
+          }).pipe(Effect.mapError(() => new CodexAixRotationError({ reason: "restart-failed" })));
+          nativeThreadGeneration.set(threadId, clientGeneration);
+        });
+
         const startNativeTurn = Effect.fn("CodexAdapterV2.startNativeTurn")(
           function* (
             turnInput: ProviderAdapter.ProviderAdapterV2TurnInput,
             codexInput: ReadonlyArray<CodexSchema.V2TurnStartParams__UserInput>,
           ) {
             const threadId = yield* getNativeThreadId(turnInput.providerThread);
+            yield* ensureNativeThreadLoadedForCurrentClient(turnInput);
             const mcpSession = yield* mcpSessions.read(turnInput.threadId);
             const models = adapterOptions.models === undefined ? [] : yield* adapterOptions.models;
             const configuredReasoningSummary = yield* client
@@ -7458,6 +7865,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             command: OrchestrationV2GoalCommand,
           ) {
             if (command.type === "set") yield* validateCodexGoalObjective(command.objective);
+            yield* ensureNativeThreadLoadedForCurrentClient(turnInput);
             const threadId = yield* getNativeThreadId(turnInput.providerThread);
             rootProviderThreads.set(threadId, turnInput.providerThread);
             const readGoal = client
@@ -7676,16 +8084,17 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                   }),
                 ),
               ),
-              Effect.map((response): OrchestrationV2ProviderThread =>
-                providerThreadFromCodexThread({
+              Effect.map((response): OrchestrationV2ProviderThread => {
+                nativeThreadGeneration.set(response.thread.id, clientGeneration);
+                return providerThreadFromCodexThread({
                   appThreadId: threadInput.threadId,
                   idAllocator,
                   ownerNodeId: null,
                   providerSessionId: input.providerSessionId,
                   providerInstanceId: adapterOptions.instanceId,
                   thread: response.thread,
-                }),
-              ),
+                });
+              }),
               Effect.mapError(
                 (cause) =>
                   new ProviderAdapter.ProviderAdapterEnsureThreadError({
@@ -7716,6 +8125,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 Effect.andThen(resume),
                 Effect.flatMap(decodeCodexResumeMetadata),
               );
+              nativeThreadGeneration.set(response.thread.id, clientGeneration);
               return {
                 ...threadInput.providerThread,
                 providerSessionId: input.providerSessionId,
@@ -7751,6 +8161,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
           ),
           compactThread: Effect.fn("CodexAdapterV2.compactThread")(
             function* (turnInput) {
+              yield* ensureNativeThreadLoadedForCurrentClient(turnInput);
               const threadId = yield* getNativeThreadId(turnInput.providerThread);
               yield* Ref.update(pendingRootTurns, (current) =>
                 new Map(current).set(threadId, turnInput),
@@ -7811,35 +8222,48 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               turnInput.restartContinuationOfRunId === undefined
                 ? parseGoalCommand(turnInput.message)
                 : null;
-            if (goalCommand !== null) return runGoalCommand(turnInput, goalCommand);
             const nativeThreadId = turnInput.providerThread.nativeThreadRef?.nativeId;
-            return Effect.gen(function* () {
-              if (
-                turnInput.restartContinuationOfRunId === undefined &&
-                nativeThreadId != null &&
-                goalsPausedForWake.has(nativeThreadId) &&
-                goalsByNativeThread.get(nativeThreadId)?.status === "paused"
-              ) {
-                return yield* activateGoal(turnInput, nativeThreadId, toCodexInput(turnInput));
-              }
-              yield* startNativeTurn(
-                turnInput,
-                turnInput.restartContinuationOfRunId === undefined
-                  ? yield* toCodexInput(turnInput)
-                  : [],
-              );
-            }).pipe(
-              Effect.mapError(
-                (cause) =>
-                  new ProviderAdapter.ProviderAdapterTurnStartError({
+            const turnStartError = (cause: unknown) =>
+              isProviderAdapterTurnStartError(cause)
+                ? cause
+                : new ProviderAdapter.ProviderAdapterTurnStartError({
                     driver: CODEX_PROVIDER,
                     threadId: turnInput.threadId,
                     providerThreadId: turnInput.providerThread.id,
                     runId: turnInput.runId,
                     cause,
-                  }),
-              ),
-            );
+                  });
+            const start =
+              goalCommand !== null
+                ? runGoalCommand(turnInput, goalCommand)
+                : Effect.gen(function* () {
+                    if (
+                      turnInput.restartContinuationOfRunId === undefined &&
+                      nativeThreadId != null &&
+                      goalsPausedForWake.has(nativeThreadId) &&
+                      goalsByNativeThread.get(nativeThreadId)?.status === "paused"
+                    ) {
+                      return yield* activateGoal(
+                        turnInput,
+                        nativeThreadId,
+                        toCodexInput(turnInput),
+                      );
+                    }
+                    yield* startNativeTurn(
+                      turnInput,
+                      turnInput.restartContinuationOfRunId === undefined
+                        ? yield* toCodexInput(turnInput)
+                        : [],
+                    );
+                  }).pipe(Effect.mapError(turnStartError));
+            return activeAixLaunch === undefined
+              ? start
+              : aixRotationPermit.withPermit(
+                  rotateAixClientForTurn(turnInput).pipe(
+                    Effect.mapError(turnStartError),
+                    Effect.andThen(start),
+                  ),
+                );
           },
           steerTurn: Effect.fn("CodexAdapterV2.steerTurn")(
             function* (turnInput) {
