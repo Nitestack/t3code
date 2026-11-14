@@ -448,6 +448,33 @@ it.layer(
   Layer.mergeAll(layerTestNodeServices, ServerSettingsModule.layerTest(), layerTestHttpClient),
 )("ProviderRegistry", (it) => {
   describe("checkCodexProviderStatus", () => {
+    it.effect("offers only the synced models on an aix-managed instance", () =>
+      Effect.gen(function* () {
+        const settings = decodeCodexSettings({
+          customModels: [{ slug: "gpt-synced", name: "Synced" }],
+        });
+        const probe = () => Effect.succeed(makeCodexProbeSnapshot());
+
+        const managed = yield* checkCodexProviderStatus(
+          settings,
+          probe,
+          undefined,
+          undefined,
+          true,
+        );
+        assert.deepStrictEqual(
+          managed.models.map((model) => model.slug),
+          ["gpt-synced"],
+        );
+
+        const manual = yield* checkCodexProviderStatus(settings, probe);
+        assert.deepStrictEqual(
+          manual.models.map((model) => model.slug),
+          ["gpt-live-codex", "gpt-synced"],
+        );
+      }),
+    );
+
     it.effect("uses the app-server account and model list for provider status", () =>
       Effect.gen(function* () {
         const status = yield* checkCodexProviderStatus(defaultCodexSettings, () =>
@@ -3886,6 +3913,41 @@ it.layer(
   });
 
   describe("checkClaudeProviderStatus", () => {
+    it.effect("offers only the synced models on an aix-managed instance", () =>
+      Effect.gen(function* () {
+        const status = yield* checkClaudeProviderStatus(
+          {
+            ...defaultClaudeSettings,
+            customModels: [{ slug: "gateway/kimi-3[1m]", name: "Kimi (mine)" }],
+          },
+          claudeCapabilities({
+            models: [
+              { value: "sonnet", displayName: "Sonnet", description: "" },
+              { value: "gateway/glm-5[1m]", displayName: "GLM 5", description: "" },
+            ],
+          }),
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          true,
+        );
+        assert.deepStrictEqual(
+          status.models.map((model) => model.slug),
+          ["gateway/kimi-3[1m]"],
+        );
+      }).pipe(
+        Effect.provide(
+          layerMockSpawner((args) => {
+            const joined = args.join(" ");
+            if (joined === "--version") return { stdout: "1.0.0\n", stderr: "", code: 0 };
+            throw new Error(`Unexpected args: ${joined}`);
+          }),
+        ),
+      ),
+    );
+
     it.effect("adds models Claude Code reports that the catalog does not know", () =>
       Effect.gen(function* () {
         const status = yield* checkClaudeProviderStatus(

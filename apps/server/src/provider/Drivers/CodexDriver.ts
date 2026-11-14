@@ -295,7 +295,13 @@ export const CodexDriver: ProviderDriver<
     const checkProvider = modelCatalog.refreshInBackground.pipe(
       Effect.andThen(
         Effect.zipWith(
-          checkCodexProviderStatus(effectiveConfig, undefined, processEnv),
+          checkCodexProviderStatus(
+            effectiveConfig,
+            undefined,
+            processEnv,
+            undefined,
+            aixProfiles.length > 0,
+          ),
           currentCatalog,
           (draft, catalog) => stampIdentity(applyCodexModelCatalog(draft, catalog)),
           { concurrent: true },
@@ -313,7 +319,7 @@ export const CodexDriver: ProviderDriver<
       haveSettingsChanged: haveProviderSnapshotSettingsChanged,
       initialSnapshot: (settings) =>
         Effect.zipWith(
-          makePendingCodexProvider(settings.provider),
+          makePendingCodexProvider(settings.provider, aixProfiles.length > 0),
           currentCatalog,
           (draft, catalog) => stampIdentity(applyCodexModelCatalog(draft, catalog)),
         ),

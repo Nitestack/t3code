@@ -325,6 +325,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
                   Effect.provideService(FileSystem.FileSystem, fileSystem),
                   Effect.provideService(Path.Path, path),
                 ),
+              resolvesAixProfile,
             ),
           ),
           Effect.tap((provider) =>
@@ -348,7 +349,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
       haveSettingsChanged: haveProviderSnapshotSettingsChanged,
       initialSnapshot: (settings) =>
         modelCatalog.pipe(
-          Effect.flatMap((catalog) => makePendingClaudeProvider(settings.provider, catalog)),
+          Effect.flatMap((catalog) =>
+            makePendingClaudeProvider(settings.provider, catalog, resolvesAixProfile),
+          ),
           Effect.map(stampIdentity),
         ),
       checkProvider,

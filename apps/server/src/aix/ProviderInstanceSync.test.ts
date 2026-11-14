@@ -4,7 +4,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   type ProviderInstanceConfig,
-  type ProviderInstanceConfigMap,
+  ProviderInstanceConfigMap,
 } from "@t3tools/contracts";
 import { it as effectIt } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -245,14 +245,18 @@ describe("syncAixProviderInstances", () => {
   const countingSettings = Effect.gen(function* () {
     const base = yield* ServerSettingsService;
     const writes = yield* Ref.make<ReadonlyArray<string>>([]);
+    const payloads = yield* Ref.make<ReadonlyArray<string>>([]);
     const counted = {
       ...base,
       updateProviderInstance: (...args: Parameters<typeof base.updateProviderInstance>) =>
         Ref.update(writes, (previous) => [...previous, args[0].instanceId]).pipe(
+          Effect.andThen(
+            Ref.update(payloads, (previous) => [...previous, JSON.stringify(args[0])]),
+          ),
           Effect.andThen(base.updateProviderInstance(...args)),
         ),
     } satisfies ServerSettingsService["Service"];
-    return { counted, writes };
+    return { counted, writes, payloads };
   });
 
   effectIt.effect("creates instances for both profiles, and a refresh writes nothing", () =>
@@ -320,7 +324,7 @@ describe("syncAixProviderInstances", () => {
   effectIt.effect("uses the resolved key for the catalog request but never persists it", () =>
     Effect.gen(function* () {
       const seenKeys: string[] = [];
-      const { counted, writes } = yield* countingSettings;
+      const { counted, payloads } = yield* countingSettings;
       yield* syncAixProviderInstances({
         enabled: true,
         source: sourceFor({
@@ -334,10 +338,46 @@ describe("syncAixProviderInstances", () => {
 
       const settings = yield* (yield* ServerSettingsService).getSettings;
       expect(seenKeys).toEqual([SENTINEL_KEY]);
+      expect((yield* Ref.get(payloads)).length).toBeGreaterThan(0);
       expect(JSON.stringify(settings.providerInstances)).not.toContain(SENTINEL_KEY);
-      expect(JSON.stringify(yield* Ref.get(writes))).not.toContain(SENTINEL_KEY);
+      expect(JSON.stringify(yield* Ref.get(payloads))).not.toContain(SENTINEL_KEY);
     }).pipe(Effect.provide(ServerSettingsService.layerTest())),
   );
+
+  describe("ownership across settings persistence", () => {
+    const decodePersisted = Schema.decodeUnknownSync(ProviderInstanceConfigMap);
+    const encodePersisted = Schema.encodeSync(ProviderInstanceConfigMap);
+
+    it("keeps the aix marker through an encode and decode of persisted instances", () => {
+      const persisted = decodePersisted(
+        encodePersisted(decodePersisted({ "aix-codex-work": codexInstance("work") })),
+      );
+
+      expect(must(persisted[ProviderInstanceId.make("aix-codex-work")]).config).toEqual(
+        codexInstance("work").config,
+      );
+      expect(
+        planAixInstanceSync({
+          current: persisted,
+          desired: new Map(),
+          unavailableProfiles: new Set(),
+        }),
+      ).toEqual([
+        {
+          operation: "upsert",
+          instanceId: ProviderInstanceId.make("aix-codex-work"),
+          instance: { ...codexInstance("work"), enabled: false },
+        },
+      ]);
+    });
+
+    it("driver decoding drops the marker without rejecting, so ownership is read from stored settings", () => {
+      const decoded = decodeCodexSettings(codexInstance("work").config);
+
+      expect(decoded).not.toHaveProperty("aixProfile");
+      expect(decoded.customModels).toHaveLength(1);
+    });
+  });
 
   effectIt.effect("with aix off and no managed instance, writes nothing", () =>
     Effect.gen(function* () {
