@@ -35,6 +35,20 @@ describe("aix model picker metadata", () => {
     expect(aixCatalogStatus(provider({ instanceId: ProviderInstanceId.make("codex") }))).toBeNull();
   });
 
+  it("prioritizes provider errors over stale notes and preserves unrelated warnings", () => {
+    expect(
+      aixCatalogStatus(
+        provider({ status: "error", message: "Codex missing; aix catalog stale since yesterday" }),
+      ),
+    ).toMatchObject({ kind: "unavailable" });
+    expect(
+      aixCatalogStatus(provider({ status: "warning", message: "Codex needs attention" })),
+    ).toEqual({
+      kind: "current",
+      message: "Codex needs attention",
+    });
+  });
+
   it("shows Unknown for catalog fields the provider did not report", () => {
     expect(catalogMetadataRows(undefined)).toEqual([
       { label: "Family", value: "Unknown" },
@@ -57,8 +71,8 @@ describe("aix model picker metadata", () => {
       }),
     ).toEqual([
       { label: "Family", value: "OpenAI GPT" },
-      { label: "Context window", value: "128000 tokens" },
-      { label: "Max output", value: "16000 tokens" },
+      { label: "Context window", value: "128k tokens" },
+      { label: "Max output", value: "16k tokens" },
       { label: "Input", value: "$2 USD / 1M tokens" },
       { label: "Output", value: "$8 USD / 1M tokens" },
       { label: "Reasoning", value: "low, high" },

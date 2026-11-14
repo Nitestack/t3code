@@ -1,4 +1,5 @@
 import type { ServerProvider } from "@t3tools/contracts";
+import { formatContextWindowTokens } from "../../lib/contextWindow";
 
 export function aixCatalogStatus(provider: ServerProvider): {
   readonly kind: "current" | "stale" | "unavailable";
@@ -6,21 +7,18 @@ export function aixCatalogStatus(provider: ServerProvider): {
 } | null {
   if (!provider.instanceId.startsWith("aix-")) return null;
   const message = provider.message?.trim();
-  if (message?.toLowerCase().includes("aix catalog stale")) {
+  if (provider.status === "error") {
+    return { kind: "unavailable", message: message || "The aix catalog is unavailable." };
+  }
+  if (provider.status === "warning" && message?.toLowerCase().includes("aix catalog stale")) {
     return {
       kind: "stale",
       message,
     };
   }
-  if (provider.status !== "ready") {
-    return {
-      kind: "unavailable",
-      message: message || "The aix catalog is unavailable.",
-    };
-  }
   return {
     kind: "current",
-    message: "Aix models are cached for up to 24 hours. Refresh to sync now.",
+    message: message || "Aix models are cached for up to 24 hours. Refresh to sync now.",
   };
 }
 
@@ -35,12 +33,17 @@ export function catalogMetadataRows(
     { label: "Family", value: metadata?.family ?? unknown },
     {
       label: "Context window",
-      value: metadata?.contextTokens === undefined ? unknown : `${metadata.contextTokens} tokens`,
+      value:
+        metadata?.contextTokens === undefined
+          ? unknown
+          : `${formatContextWindowTokens(metadata.contextTokens)} tokens`,
     },
     {
       label: "Max output",
       value:
-        metadata?.maxOutputTokens === undefined ? unknown : `${metadata.maxOutputTokens} tokens`,
+        metadata?.maxOutputTokens === undefined
+          ? unknown
+          : `${formatContextWindowTokens(metadata.maxOutputTokens)} tokens`,
     },
     { label: "Input", value: price(metadata?.pricing?.inputPerMillionTokens) },
     { label: "Output", value: price(metadata?.pricing?.outputPerMillionTokens) },

@@ -31,6 +31,8 @@ import { takeOpenTarget, useComposerMenuProps } from "./composerEventScope";
 import { shortcutLabelForCommand } from "../../keybindings";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { isAtomCommandInterrupted } from "@t3tools/client-runtime/state/runtime";
+import { toastManager } from "../ui/toast";
 
 /** Holds the page still behind the open picker; its lifetime is the popup element's. */
 function lockBackgroundScroll(popup: HTMLElement | null) {
@@ -154,8 +156,24 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     if (environmentId === null || refreshingAixInstanceId !== null) return;
     setRefreshingAixInstanceId(instanceId);
     void refreshProviders({ environmentId, input: { instanceId, refreshModels: true } }).then(
-      () => setRefreshingAixInstanceId(null),
-      () => setRefreshingAixInstanceId(null),
+      (result) => {
+        setRefreshingAixInstanceId(null);
+        if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+          toastManager.add({
+            type: "error",
+            title: "Could not refresh aix catalogs",
+            description: "Try again.",
+          });
+        }
+      },
+      () => {
+        setRefreshingAixInstanceId(null);
+        toastManager.add({
+          type: "error",
+          title: "Could not refresh aix catalogs",
+          description: "Try again.",
+        });
+      },
     );
   };
   const searchInputRef = useRef<HTMLInputElement>(null);

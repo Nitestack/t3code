@@ -4,25 +4,24 @@ import type { ServerProvider } from "@t3tools/contracts";
 import { Button } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { catalogMetadataRows } from "./aixModelMetadata";
+import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 
 export function ModelCatalogDetails(props: {
   modelId: string;
   name: string;
   metadata: ServerProvider["models"][number]["catalogMetadata"];
 }) {
-  const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
+  const { copyToClipboard, isCopied: copied } = useCopyToClipboard({
+    target: "model ID",
+    onError: () => setCopyFailed(true),
+    onCopy: () => setCopyFailed(false),
+  });
   const rows = catalogMetadataRows(props.metadata);
 
   const copyModelId = async () => {
-    try {
-      await navigator.clipboard.writeText(props.modelId);
-      setCopied(true);
-      setCopyFailed(false);
-    } catch {
-      setCopied(false);
-      setCopyFailed(true);
-    }
+    copyToClipboard(props.modelId, undefined);
+    setCopyFailed(false);
   };
 
   return (
@@ -46,6 +45,9 @@ export function ModelCatalogDetails(props: {
         align="end"
         className="max-w-[calc(100vw-1rem)]"
         data-model-picker-option-menu
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={(event) => event.stopPropagation()}
+        onKeyDown={(event) => event.stopPropagation()}
       >
         <div className="space-y-2 text-xs">
           <p className="truncate font-medium">{props.name}</p>

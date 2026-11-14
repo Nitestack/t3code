@@ -299,7 +299,7 @@ function AixCatalogControls(props: {
           className="shrink-0"
           disabled={props.refreshing}
           onClick={() => props.onRefresh(props.entry.instanceId)}
-          aria-label={`Refresh ${props.entry.displayName} catalog`}
+          aria-label="Refresh aix catalogs"
         >
           <RefreshCwIcon aria-hidden="true" />
           Refresh
