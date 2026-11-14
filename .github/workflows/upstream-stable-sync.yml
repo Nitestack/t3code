@@ -41,11 +41,27 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Check out the tested revision
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || 'main' }}
-          persist-credentials: false
+      # Checkout v6's auth cleanup fails on this tree's unconfigured vendor gitlinks.
+      # Keep the token scoped to fetch so the tested revision cannot read it.
+      - name: Check out the tested revision without persisting credentials
+        env:
+          CHECKOUT_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || 'refs/heads/main' }}
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          git init
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          authorization="$(printf 'x-access-token:%s' "$CHECKOUT_TOKEN" | base64 --wrap=0)"
+          env \
+            GIT_CONFIG_COUNT=1 \
+            GIT_CONFIG_KEY_0="http.https://github.com/${GITHUB_REPOSITORY}.git/.extraheader" \
+            GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $authorization" \
+            git fetch --no-tags --no-recurse-submodules --depth=1 origin "$CHECKOUT_REF"
+          unset CHECKOUT_TOKEN authorization
+          git checkout --progress --force --detach FETCH_HEAD
+          if git config --local --name-only --get-regexp '^(http\..*\.extraheader|includeIf\..*\.path)$'; then
+            echo "::error::checkout credentials were persisted in the local Git config"
+            exit 1
+          fi
 
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -56,7 +72,7 @@ jobs:
         run: node --test scripts/upstream-stable-sync.test.mjs
 
   sync:
-    if: ${{ github.repository == 'Nitestack/t3code' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+    if: ${{ github.repository == 'Nitestack/t3code' && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
     needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -65,11 +81,25 @@ jobs:
       pull-requests: write
       actions: write
     steps:
-      - name: Check out the fork main branch
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-        with:
-          ref: main
-          fetch-depth: 0
+      # Keep fetch and push auth command-scoped; the complete tree is needed for merges.
+      - name: Check out the complete fork main history without persisting credentials
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          git init --initial-branch=main
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          authorization="$(printf 'x-access-token:%s' "$CHECKOUT_TOKEN" | base64 --wrap=0)"
+          env \
+            GIT_CONFIG_COUNT=1 \
+            GIT_CONFIG_KEY_0="http.https://github.com/${GITHUB_REPOSITORY}.git/.extraheader" \
+            GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $authorization" \
+            git fetch --no-tags --no-recurse-submodules origin +refs/heads/main:refs/remotes/origin/main
+          unset CHECKOUT_TOKEN authorization
+          git checkout --progress --force -B main refs/remotes/origin/main
+          if git config --local --name-only --get-regexp '^(http\..*\.extraheader|includeIf\..*\.path)$'; then
+            echo "::error::checkout credentials were persisted in the local Git config"
+            exit 1
+          fi
 
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -80,7 +110,15 @@ jobs:
         env:
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
           GH_TOKEN: ${{ github.token }}
+          SYNC_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           RUNNER_TEMP: ${{ runner.temp }}
           TARGET_TAG: ${{ inputs.target_tag }}
-        run: node scripts/upstream-stable-sync.mjs
+        run: |
+          authorization="$(printf 'x-access-token:%s' "$SYNC_TOKEN" | base64 --wrap=0)"
+          unset SYNC_TOKEN
+          env \
+            GIT_CONFIG_COUNT=1 \
+            GIT_CONFIG_KEY_0="http.https://github.com/${GITHUB_REPOSITORY}.git/.extraheader" \
+            GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $authorization" \
+            node scripts/upstream-stable-sync.mjs
