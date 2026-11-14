@@ -2,6 +2,7 @@ import { useActiveNewTask } from "../../state/active-new-task";
 import { ThreadUndoNotice } from "../home/ThreadUndoNotice";
 import { EnvironmentScopeSwitcher } from "../environment-scope/EnvironmentScopeSwitcher";
 import { useMobileEnvironmentScope } from "../environment-scope/useMobileEnvironmentScope";
+import { mobileScopeSearchEnvironmentIds } from "../environment-scope/mobile-environment-scope";
 import { useAndroidControlSizing } from "../../components/ui/useAndroidControlSizing";
 import { pickableProjectGroups } from "@t3tools/client-runtime/state/project-grouping";
 import type { LegendListRef } from "@legendapp/list/react-native";
@@ -123,7 +124,7 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
   const { fabClearance, fabSize } = useAndroidControlSizing();
   const allProjects = useProjects();
   const allThreads = useAtomValue(steadyNavigationThreadShellsAtom);
-  const { filter: filterScope } = useMobileEnvironmentScope();
+  const { filter: filterScope, enabled, activeScope, assignments } = useMobileEnvironmentScope();
   const projects = filterScope(allProjects);
   const threads = filterScope(allThreads);
   const { environments: workspaceEnvironments, state: catalogState } = useWorkspaceState();
@@ -166,18 +167,13 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
   );
   const { options, setSelectedEnvironmentId, setSelectedProjectKey } =
     useHomeListOptions(availableEnvironmentIds);
-  const searchEnvironmentIds =
-    options.selectedEnvironmentId === null
-      ? workspaceEnvironments
-          .filter((environment) => environment.connectionState === "connected")
-          .map((environment) => environment.environmentId)
-      : workspaceEnvironments.some(
-            (environment) =>
-              environment.environmentId === options.selectedEnvironmentId &&
-              environment.connectionState === "connected",
-          )
-        ? [options.selectedEnvironmentId]
-        : [];
+  const searchEnvironmentIds = mobileScopeSearchEnvironmentIds({
+    environments: workspaceEnvironments,
+    selectedEnvironmentId: options.selectedEnvironmentId,
+    enabled,
+    scope: activeScope,
+    assignments,
+  });
   const projectScopes = useMemo(
     () =>
       buildHomeProjectScopes({

@@ -31,3 +31,28 @@ export function routeEnvironmentScope(input: {
     ? getEnvironmentScope(input.assignments, input.environmentId)
     : null;
 }
+
+export function mobileScopeSearchEnvironmentIds(input: {
+  readonly environments: ReadonlyArray<{
+    readonly environmentId: EnvironmentId;
+    readonly connectionState: string;
+  }>;
+  readonly selectedEnvironmentId: EnvironmentId | null;
+  readonly enabled: boolean;
+  readonly scope: EnvironmentScope;
+  readonly assignments: EnvironmentScopeAssignments;
+}): ReadonlyArray<EnvironmentId> {
+  return filterMobileEnvironmentScope(
+    input.environments,
+    input.enabled,
+    input.scope,
+    input.assignments,
+  )
+    .filter(
+      (environment) =>
+        environment.connectionState === "connected" &&
+        (input.selectedEnvironmentId === null ||
+          environment.environmentId === input.selectedEnvironmentId),
+    )
+    .map((environment) => environment.environmentId);
+}

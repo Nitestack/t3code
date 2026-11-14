@@ -36,6 +36,8 @@ const mocks = vi.hoisted(() => ({
   serverConfig: vi.fn(),
   openScratch: vi.fn(),
   prepareTriage: vi.fn(),
+  scope: vi.fn(),
+  connections: vi.fn(),
 }));
 vi.mock("../../state/atom-registry", () => ({
   appAtomRegistry: {
@@ -45,14 +47,7 @@ vi.mock("../../state/atom-registry", () => ({
   },
 }));
 vi.mock("../environment-scope/useMobileEnvironmentScope", () => ({
-  useMobileEnvironmentScope: () => ({
-    enabled: false,
-    activeScope: "personal",
-    assignments: {},
-    setActiveScope: vi.fn(),
-    setEnvironmentScope: vi.fn(),
-    filter: (values: ReadonlyArray<{ readonly environmentId: string }>) => values,
-  }),
+  useMobileEnvironmentScope: mocks.scope,
 }));
 vi.mock("../../state/entities", () => ({
   useProjects: mocks.projects,
@@ -83,7 +78,7 @@ vi.mock("../../components/ui/Dialog", () => ({ alert: vi.fn() }));
 vi.mock("../../state/use-atom-command", () => ({ useAtomCommand: () => mocks.openScratch }));
 vi.mock("../triage/usePrepareTriage", () => ({ usePrepareTriage: () => mocks.prepareTriage }));
 vi.mock("../../state/use-remote-environment-registry", () => ({
-  useSavedRemoteConnections: () => ({ savedConnectionsById: {} }),
+  useSavedRemoteConnections: mocks.connections,
   useRemoteConnectionStatus: () => ({ connectedEnvironments: [] }),
   setPendingConnectionError: vi.fn(),
 }));
@@ -142,6 +137,15 @@ function setup() {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   vi.useFakeTimers();
   vi.clearAllMocks();
+  mocks.connections.mockReturnValue({ savedConnectionsById: {} });
+  mocks.scope.mockReturnValue({
+    enabled: false,
+    activeScope: "personal",
+    assignments: {},
+    setActiveScope: vi.fn(),
+    setEnvironmentScope: vi.fn(),
+    filter: (values: ReadonlyArray<{ readonly environmentId: string }>) => values,
+  });
   const registry = AtomRegistry.make();
   mocks.registry.mockReturnValue(registry);
   const projects = [project("one", "a"), project("one", "b"), project("two", "b")];
@@ -279,6 +283,36 @@ function setup() {
     },
   };
 }
+
+it("limits an active draft's destinations after a manual scope switch", async () => {
+  using screen = setup();
+  mocks.connections.mockReturnValue({
+    savedConnectionsById: {
+      one: { environmentLabel: "Work" },
+      two: { environmentLabel: "Personal" },
+    },
+  });
+  const selectScope = (environmentId: string) => {
+    mocks.scope.mockReturnValue({
+      enabled: true,
+      activeScope: environmentId === "one" ? "work" : "personal",
+      assignments: { one: "work", two: "personal" },
+      setActiveScope: vi.fn(),
+      setEnvironmentScope: vi.fn(),
+      filter: (values: ReadonlyArray<{ readonly environmentId: string }>) =>
+        values.filter((value) => value.environmentId === environmentId),
+    });
+  };
+  selectScope("one");
+  await screen.render(true);
+  expect(screen.current.draftKey).not.toBeNull();
+  expect(screen.current.environments.map((value) => value.environmentId)).toEqual(["one"]);
+
+  selectScope("two");
+  await screen.render(true);
+  expect(screen.current.selectedProject?.environmentId).toBe("two");
+  expect(screen.current.environments.map((value) => value.environmentId)).toEqual(["two"]);
+});
 
 it("owns a status stream only while the draft is active, retaining draft choices on reopen", async () => {
   using screen = setup();

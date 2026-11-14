@@ -4,9 +4,32 @@ import {
   filterMobileEnvironmentScope,
   isAndroidForkEnvironmentScopeEnabled,
   routeEnvironmentScope,
+  mobileScopeSearchEnvironmentIds,
 } from "./mobile-environment-scope";
 
 describe("mobile environment scope", () => {
+  it("searches only connected environments in the active scope, even with a stale selection", () => {
+    const work = EnvironmentId.make("work-server");
+    const personal = EnvironmentId.make("personal-server");
+    const input = {
+      environments: [
+        { environmentId: work, connectionState: "connected" },
+        { environmentId: personal, connectionState: "connected" },
+        { environmentId: EnvironmentId.make("offline"), connectionState: "offline" },
+      ],
+      enabled: true,
+      scope: "personal" as const,
+      assignments: { "work-server": "work" as const },
+    };
+    expect(mobileScopeSearchEnvironmentIds({ ...input, selectedEnvironmentId: null })).toEqual([
+      personal,
+    ]);
+    expect(mobileScopeSearchEnvironmentIds({ ...input, selectedEnvironmentId: work })).toEqual([]);
+    expect(
+      mobileScopeSearchEnvironmentIds({ ...input, enabled: false, selectedEnvironmentId: null }),
+    ).toEqual([work, personal]);
+  });
+
   it("filters same-named project paths by environment id only for the Android fork", () => {
     const projects = [
       { environmentId: EnvironmentId.make("work-server"), title: "repo", workspaceRoot: "/repo" },

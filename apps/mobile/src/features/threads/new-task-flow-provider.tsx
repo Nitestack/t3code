@@ -294,8 +294,7 @@ export function NewTaskFlowProvider(
     submitting,
     expandedProvider,
   } = flowState;
-  const selectableProjects =
-    props.routeDraftId !== undefined || activeDraftKey !== null ? allProjects : scopedProjects;
+  const selectableProjects = props.routeDraftId !== undefined ? allProjects : scopedProjects;
   const routeScope = routeEnvironmentScope({
     enabled: props.routeDraftId !== undefined && mobileScope.enabled,
     environmentId:
