@@ -7,6 +7,13 @@ const UPSTREAM_REPOSITORY = "pingdotgg/t3code";
 const UPSTREAM_URL = "https://github.com/pingdotgg/t3code.git";
 const MARKER_PATH = ".github/upstream-stable.json";
 const BRANCH_PREFIX = "automation/upstream-stable-";
+const GITHUB_OPERATION_LABELS = new Map([
+  ["upstreamReleases", "upstream releases lookup"],
+  ["openSyncPullRequests", "open sync pull-request lookup"],
+  ["workflowRuns", "CI workflow-run lookup"],
+  ["workflowDispatch", "CI workflow dispatch"],
+  ["createSyncPullRequest", "sync pull-request creation"],
+]);
 
 const TEST_RELEASE_LABEL =
   /\b(?:test(?:ing)?|maintainer|preview|nightly|alpha|beta|rc|canary|development)\b/i;
@@ -67,15 +74,27 @@ export function getSyncDecision(
   return { kind: "update", release };
 }
 
-export function classifyGitHubFailure(stderr) {
+export function classifyGitHubFailure(stderr, operation) {
+  const label = GITHUB_OPERATION_LABELS.get(operation) ?? "GitHub API request";
   const message = String(stderr ?? "");
+  const status = /\bHTTP(?:\/[\d.]+)?\s+(\d{3})\b/i.exec(message)?.[1];
   if (/rate limit exceeded|secondary rate limit|abuse detection/i.test(message)) {
-    return "GitHub API rate limit reached while checking upstream releases or pull requests; retry later.";
+    return `GitHub ${label} failed: API rate limit reached${status ? ` (HTTP ${status})` : ""}; retry later.`;
   }
-  if (/\b404\b|not found/i.test(message)) {
-    return "GitHub returned 404 while checking upstream releases or pull requests; verify repository access and the API endpoint.";
+  if (status === "404" || /\b404\b|not found/i.test(message)) {
+    return `GitHub ${label} failed with HTTP 404 (not found); verify repository access and the API endpoint.`;
   }
-  return "GitHub request failed while checking upstream releases or pull requests.";
+  if (
+    status === "403" ||
+    /resource not accessible by integration|permission denied/i.test(message)
+  ) {
+    return `GitHub ${label} failed: permission denied${status ? ` (HTTP ${status})` : ""}.`;
+  }
+  if (status === "401" || /bad credentials|requires authentication/i.test(message)) {
+    return `GitHub ${label} failed: authentication rejected${status ? ` (HTTP ${status})` : ""}.`;
+  }
+  if (status) return `GitHub request failed during ${label} (HTTP ${status}).`;
+  return `GitHub request failed during ${label}.`;
 }
 
 export function mergeStableRelease({ targetTag, mainRef, branch, tagRef, cwd = process.cwd() }) {
@@ -93,11 +112,7 @@ export function mergeStableRelease({ targetTag, mainRef, branch, tagRef, cwd = p
   }
 }
 
-function run(
-  command,
-  args,
-  { githubRequest = false, cwd = process.cwd(), allowFailure = false } = {},
-) {
+function run(command, args, { githubOperation, cwd = process.cwd(), allowFailure = false } = {}) {
   try {
     return NodeChildProcess.execFileSync(command, args, {
       cwd,
@@ -106,7 +121,9 @@ function run(
     }).trim();
   } catch (error) {
     if (allowFailure) return undefined;
-    if (githubRequest) throw new Error(classifyGitHubFailure(error.stderr), { cause: error });
+    if (githubOperation) {
+      throw new Error(classifyGitHubFailure(error.stderr, githubOperation), { cause: error });
+    }
     const detail = String(error.stderr ?? error.message ?? "")
       .trim()
       .split("\n")
@@ -226,7 +243,7 @@ function findWorkflowDispatch(branch) {
           "--json",
           "databaseId,status,conclusion",
         ],
-        { githubRequest: true },
+        { githubOperation: "workflowRuns" },
       ),
     );
   } catch (error) {
@@ -251,7 +268,7 @@ function dispatchForkCi(branch) {
         "-f",
         `ref=${branch}`,
       ],
-      { githubRequest: true },
+      { githubOperation: "workflowDispatch" },
     );
   } catch (error) {
     const details = `${error.message} ${error.cause?.message ?? ""} ${error.cause?.stderr ?? ""}`;
@@ -291,7 +308,7 @@ function createSyncPullRequest(branch, targetTag, bodyPath) {
         "--body-file",
         bodyPath,
       ],
-      { githubRequest: true },
+      { githubOperation: "createSyncPullRequest" },
     );
   } catch (error) {
     const stderr = String(error.cause?.stderr ?? error.message ?? "");
@@ -364,7 +381,7 @@ function getPublishedReleases() {
   const output = run(
     "gh",
     ["api", "--paginate", "--slurp", `repos/${UPSTREAM_REPOSITORY}/releases?per_page=100`],
-    { githubRequest: true },
+    { githubOperation: "upstreamReleases" },
   );
   let pages;
   try {
@@ -398,7 +415,7 @@ function getOpenSyncPullRequests() {
       "--limit",
       "1000",
     ],
-    { githubRequest: true },
+    { githubOperation: "openSyncPullRequests" },
   );
   try {
     const pullRequests = JSON.parse(output);
