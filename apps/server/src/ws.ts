@@ -109,6 +109,7 @@ import {
 } from "effect/http";
 import { RpcGroup, RpcSerialization, RpcServer } from "effect/rpc";
 
+import * as AixProviderInstanceSync from "./aix/ProviderInstanceSync.ts";
 import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
 import * as NativeChildWorkQuery from "./orchestration-v2/NativeChildWorkQuery.ts";
 import * as ServerConfig from "./config.ts";
@@ -1496,6 +1497,7 @@ export const layerWsRpc = (
             );
       const usage = yield* UsageService.UsageService;
       const usageLimitSources = yield* UsageLimitSources.UsageLimitSources;
+      const aixProviderInstanceSync = yield* AixProviderInstanceSync.AixProviderInstanceSync;
       const worktreeSetupTracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;
       const projectCloneTracker = yield* ProjectCloneTracker.ProjectCloneTracker;
       const repositoryIdentityResolver =
@@ -2439,6 +2441,10 @@ export const layerWsRpc = (
             }
             // Await refresh; RPC scope closure would interrupt a fork before the hub answered.
             if (input.instanceId === undefined) {
+              // Explicit refreshes bypass the aix catalog TTL; other callers read through it.
+              yield* aixProviderInstanceSync.refresh({
+                force: input.refreshModels === true || input.reloadSecrets === true,
+              });
               yield* usageLimitSources.refresh;
             }
             let providers = yield* input.cwd !== undefined && input.instanceId !== undefined

@@ -10,18 +10,21 @@ import { it as effectIt } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
+import * as TestClock from "effect/testing/TestClock";
 import { describe, expect, it } from "vite-plus/test";
 
 import { AixDiscoveryError } from "../provider/AixDiscovery.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { type CatalogModel, ModelCatalogFetchError } from "./ModelCatalog.ts";
 import {
+  type AixSyncCache,
   type AixSyncSource,
   aixDesiredInstances,
   aixInstanceId,
+  makeAixSyncCache,
   planAixInstanceSync,
   routeAixModels,
-  syncAixOnStartup,
+  syncAixFromEnvironment,
   syncAixProviderInstances,
 } from "./ProviderInstanceSync.ts";
 
@@ -345,6 +348,196 @@ describe("syncAixProviderInstances", () => {
     }).pipe(Effect.provide(ServerSettingsService.layerTest())),
   );
 
+  describe("refresh cache", () => {
+    const refreshWith = (
+      counted: ServerSettingsService["Service"],
+      source: AixSyncSource,
+      cache: AixSyncCache,
+      force = false,
+    ) =>
+      syncAixProviderInstances({ enabled: true, source, cache, force }).pipe(
+        Effect.provideService(ServerSettingsService, counted),
+      );
+
+    effectIt.effect("a repeat refresh inside the 24h TTL reads neither aix nor LiteLLM", () =>
+      Effect.gen(function* () {
+        const { counted } = yield* countingSettings;
+        const cache = yield* makeAixSyncCache;
+        const profileReads = yield* Ref.make(0);
+        const catalogReads = yield* Ref.make(0);
+        const base = sourceFor();
+        const source = sourceFor({
+          listProfiles: Ref.update(profileReads, (count) => count + 1).pipe(
+            Effect.andThen(base.listProfiles),
+          ),
+          fetchLiteLlmCatalog: () =>
+            Ref.update(catalogReads, (count) => count + 1).pipe(
+              Effect.as({ models: LITELLM_MODELS }),
+            ),
+        });
+
+        yield* refreshWith(counted, source, cache);
+        yield* TestClock.adjust("23 hours");
+        yield* refreshWith(counted, source, cache);
+
+        expect(yield* Ref.get(profileReads)).toBe(1);
+        expect(yield* Ref.get(catalogReads)).toBe(1);
+      }).pipe(Effect.provide(ServerSettingsService.layerTest())),
+    );
+
+    effectIt.effect("a refresh after 24h re-reads the profiles and the catalog", () =>
+      Effect.gen(function* () {
+        const { counted } = yield* countingSettings;
+        const cache = yield* makeAixSyncCache;
+        const profileReads = yield* Ref.make(0);
+        const base = sourceFor();
+        const source = sourceFor({
+          listProfiles: Ref.update(profileReads, (count) => count + 1).pipe(
+            Effect.andThen(base.listProfiles),
+          ),
+        });
+
+        yield* refreshWith(counted, source, cache);
+        yield* TestClock.adjust("24 hours");
+        yield* refreshWith(counted, source, cache);
+
+        expect(yield* Ref.get(profileReads)).toBe(2);
+      }).pipe(Effect.provide(ServerSettingsService.layerTest())),
+    );
+
+    effectIt.effect("a forced refresh reads again inside the TTL", () =>
+      Effect.gen(function* () {
+        const { counted } = yield* countingSettings;
+        const cache = yield* makeAixSyncCache;
+        const profileReads = yield* Ref.make(0);
+        const base = sourceFor();
+        const source = sourceFor({
+          listProfiles: Ref.update(profileReads, (count) => count + 1).pipe(
+            Effect.andThen(base.listProfiles),
+          ),
+        });
+
+        yield* refreshWith(counted, source, cache);
+        yield* refreshWith(counted, source, cache, true);
+
+        expect(yield* Ref.get(profileReads)).toBe(2);
+      }).pipe(Effect.provide(ServerSettingsService.layerTest())),
+    );
+
+    effectIt.effect("a gateway 503 on a daily refresh keeps the last valid models", () =>
+      Effect.gen(function* () {
+        const { counted, writes } = yield* countingSettings;
+        const cache = yield* makeAixSyncCache;
+        yield* refreshWith(counted, sourceFor(), cache);
+        yield* Ref.set(writes, []);
+
+        yield* TestClock.adjust("24 hours");
+        yield* refreshWith(
+          counted,
+          sourceFor({
+            fetchLiteLlmCatalog: () =>
+              Effect.fail(
+                new ModelCatalogFetchError({ stage: "models", reason: "status", status: 503 }),
+              ),
+          }),
+          cache,
+        );
+
+        expect(yield* Ref.get(writes)).toEqual([]);
+        const settings = yield* (yield* ServerSettingsService).getSettings;
+        expect(settings.providerInstances[ProviderInstanceId.make("aix-codex-work")]?.enabled).toBe(
+          true,
+        );
+      }).pipe(Effect.provide(ServerSettingsService.layerTest())),
+    );
+
+    effectIt.effect("a forced refresh disables an instance whose only model is deleted", () =>
+      Effect.gen(function* () {
+        const { counted } = yield* countingSettings;
+        const cache = yield* makeAixSyncCache;
+        yield* refreshWith(counted, sourceFor(), cache);
+        const before = yield* (yield* ServerSettingsService).getSettings;
+        expect(before.providerInstances[ProviderInstanceId.make("aix-codex-work")]?.enabled).toBe(
+          true,
+        );
+
+        yield* refreshWith(
+          counted,
+          sourceFor({
+            fetchLiteLlmCatalog: () =>
+              Effect.succeed({
+                models: LITELLM_MODELS.filter((model) => model.id !== "gpt-6.1-sol"),
+              }),
+          }),
+          cache,
+          true,
+        );
+
+        const after = yield* (yield* ServerSettingsService).getSettings;
+        expect(after.providerInstances[ProviderInstanceId.make("aix-codex-work")]?.enabled).toBe(
+          false,
+        );
+      }).pipe(Effect.provide(ServerSettingsService.layerTest())),
+    );
+
+    effectIt.effect("a forced refresh disables the instance of a profile deleted in aix", () =>
+      Effect.gen(function* () {
+        const { counted } = yield* countingSettings;
+        const cache = yield* makeAixSyncCache;
+        yield* refreshWith(counted, sourceFor(), cache);
+
+        yield* refreshWith(
+          counted,
+          sourceFor({ listProfiles: Effect.succeed([{ name: "claude", label: "Claude" }]) }),
+          cache,
+          true,
+        );
+
+        const settings = yield* (yield* ServerSettingsService).getSettings;
+        expect(settings.providerInstances[ProviderInstanceId.make("aix-codex-work")]?.enabled).toBe(
+          false,
+        );
+      }).pipe(Effect.provide(ServerSettingsService.layerTest())),
+    );
+
+    effectIt.effect(
+      "a forced refresh after key rotation uses the new key and persists neither",
+      () =>
+        Effect.gen(function* () {
+          const rotatedKey = "sk-aix-rotated-do-not-persist";
+          const currentKey = yield* Ref.make(SENTINEL_KEY);
+          const seenKeys = yield* Ref.make<ReadonlyArray<string>>([]);
+          const { counted, payloads } = yield* countingSettings;
+          const cache = yield* makeAixSyncCache;
+          const source = sourceFor({
+            listProfiles: Effect.succeed([{ name: "work", label: "Work" }]),
+            resolveEnvironment: (profileName) =>
+              Ref.get(currentKey).pipe(
+                Effect.map((apiKey) => ({
+                  profileName,
+                  endpoint: "https://gateway.example",
+                  endpointKind: "unknown" as const,
+                  apiKey,
+                })),
+              ),
+            fetchLiteLlmCatalog: (input) =>
+              Ref.update(seenKeys, (keys) => [...keys, input.apiKey]).pipe(
+                Effect.as({ models: LITELLM_MODELS }),
+              ),
+          });
+
+          yield* refreshWith(counted, source, cache);
+          yield* Ref.set(currentKey, rotatedKey);
+          yield* refreshWith(counted, source, cache, true);
+
+          expect(yield* Ref.get(seenKeys)).toEqual([SENTINEL_KEY, rotatedKey]);
+          const settings = yield* (yield* ServerSettingsService).getSettings;
+          expect(JSON.stringify(settings.providerInstances)).not.toContain(rotatedKey);
+          expect(JSON.stringify(yield* Ref.get(payloads))).not.toContain(rotatedKey);
+        }).pipe(Effect.provide(ServerSettingsService.layerTest())),
+    );
+  });
+
   describe("ownership across settings persistence", () => {
     const decodePersisted = Schema.decodeUnknownSync(ProviderInstanceConfigMap);
     const encodePersisted = Schema.encodeSync(ProviderInstanceConfigMap);
@@ -442,10 +635,10 @@ describe("syncAixProviderInstances", () => {
         listProfiles: Ref.update(listings, (count) => count + 1).pipe(Effect.as([])),
       });
 
-      yield* syncAixOnStartup({}, source);
+      yield* syncAixFromEnvironment({}, source);
       expect(yield* Ref.get(listings)).toBe(0);
 
-      yield* syncAixOnStartup({ T3CODE_AIX: "1" }, source);
+      yield* syncAixFromEnvironment({ T3CODE_AIX: "1" }, source);
       expect(yield* Ref.get(listings)).toBe(1);
     }).pipe(Effect.provide(ServerSettingsService.layerTest())),
   );

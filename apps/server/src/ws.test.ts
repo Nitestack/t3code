@@ -125,6 +125,7 @@ import * as TerminalManager from "./terminal/Manager.ts";
 import * as ThreadLaunchService from "./orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadSearch from "./orchestration-v2/ThreadSearch.ts";
 import * as UsageLimitSources from "./usage/UsageLimitSources.ts";
+import * as AixProviderInstanceSync from "./aix/ProviderInstanceSync.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as VcsProvisioningService from "./vcs/VcsProvisioningService.ts";
 import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
@@ -942,6 +943,7 @@ it.effect.each([
           getProviders: Effect.succeed([]),
           streamChanges: Stream.never,
         }),
+        Layer.mock(AixProviderInstanceSync.AixProviderInstanceSync)({ refresh: () => Effect.void }),
         Layer.mock(UsageLimitSources.UsageLimitSources)({ streamChanges: Stream.make([]) }),
         Layer.mock(RemoteOpenTargets.RemoteOpenTargets)({
           resolveTargets: () =>
@@ -1193,6 +1195,9 @@ it.effect("access changes made while the snapshot loads reach the client after i
               layerUnusedConfigRpcServices,
               Layer.mock(ExternalLauncher.ExternalLauncher)({}),
               Layer.mock(ProviderRegistry.ProviderRegistry)({}),
+              Layer.mock(AixProviderInstanceSync.AixProviderInstanceSync)({
+                refresh: () => Effect.void,
+              }),
               Layer.mock(UsageLimitSources.UsageLimitSources)({}),
               Layer.mock(RemoteOpenTargets.RemoteOpenTargets)({}),
               Layer.mock(DirectEndpoints.DirectEndpoints)({}),
@@ -1327,6 +1332,7 @@ it.effect("on-demand clients get provider config without workspace snapshots", (
                 : { instanceId }) as never,
           ),
       }),
+      Layer.mock(AixProviderInstanceSync.AixProviderInstanceSync)({ refresh: () => Effect.void }),
       Layer.mock(UsageLimitSources.UsageLimitSources)({
         current: Effect.succeed([]),
         streamChanges: Stream.make([]),
@@ -1714,6 +1720,7 @@ it.effect("a missing thread worktree gets its project's skills in the cwd snapsh
           ),
         ),
       ),
+      Layer.mock(AixProviderInstanceSync.AixProviderInstanceSync)({ refresh: () => Effect.void }),
       Layer.mock(UsageLimitSources.UsageLimitSources)({ current: Effect.succeed([]) }),
       Layer.mock(ExternalLauncher.ExternalLauncher)({}),
       Layer.mock(RemoteOpenTargets.RemoteOpenTargets)({}),
@@ -1804,6 +1811,7 @@ it.effect("a git action that fails partway still refreshes the repository status
       }),
       Layer.mock(ExternalLauncher.ExternalLauncher)({}),
       Layer.mock(ProviderRegistry.ProviderRegistry)({}),
+      Layer.mock(AixProviderInstanceSync.AixProviderInstanceSync)({ refresh: () => Effect.void }),
       Layer.mock(UsageLimitSources.UsageLimitSources)({}),
       Layer.mock(RemoteOpenTargets.RemoteOpenTargets)({}),
       Layer.mock(DirectEndpoints.DirectEndpoints)({}),
@@ -1884,6 +1892,7 @@ it.effect("a publish whose push fails still refreshes the new remote", () =>
       }),
       Layer.mock(ExternalLauncher.ExternalLauncher)({}),
       Layer.mock(ProviderRegistry.ProviderRegistry)({}),
+      Layer.mock(AixProviderInstanceSync.AixProviderInstanceSync)({ refresh: () => Effect.void }),
       Layer.mock(UsageLimitSources.UsageLimitSources)({}),
       Layer.mock(RemoteOpenTargets.RemoteOpenTargets)({}),
       Layer.mock(DirectEndpoints.DirectEndpoints)({}),
@@ -2344,6 +2353,7 @@ it.effect("ACP session RPCs list a thread missing its history and repair it on i
       Layer.fresh(layerConfigSources),
       Layer.mock(ExternalLauncher.ExternalLauncher)({}),
       Layer.mock(ProviderRegistry.ProviderRegistry)({}),
+      Layer.mock(AixProviderInstanceSync.AixProviderInstanceSync)({ refresh: () => Effect.void }),
       Layer.mock(UsageLimitSources.UsageLimitSources)({}),
       Layer.mock(RemoteOpenTargets.RemoteOpenTargets)({}),
       Layer.mock(DirectEndpoints.DirectEndpoints)({}),
