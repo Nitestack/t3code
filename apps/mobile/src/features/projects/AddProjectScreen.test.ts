@@ -69,6 +69,16 @@ vi.mock("react-native", () => ({
   ScrollView: "ScrollView",
   View: "View",
 }));
+vi.mock("../environment-scope/useMobileEnvironmentScope", () => ({
+  useMobileEnvironmentScope: () => ({
+    enabled: false,
+    activeScope: "personal",
+    assignments: {},
+    setActiveScope: vi.fn(),
+    setEnvironmentScope: vi.fn(),
+    filter: (values: ReadonlyArray<{ readonly environmentId: string }>) => values,
+  }),
+}));
 vi.mock("@react-navigation/native", () => ({
   useNavigation: () => ({
     dispatch: state.dispatch,

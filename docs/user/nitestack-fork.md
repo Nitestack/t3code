@@ -30,11 +30,13 @@ aix profile switching and its context handoff have not been verified.
 
 ## Work/Personal and mobile
 
-The web and desktop source includes a Work/Personal view that filters connected environments using
-locally stored classifications. It is a preview: the full real-client pass across two environments,
-including search routes, active-task behavior, and notifications, remains open. The view is only a
-client-side filter. It does not provide access control or isolate server data. For actual server
-separation, run separate T3 data directories using `T3CODE_HOME` as described in the
+The web, desktop, and Android-fork source includes a Work/Personal view that filters connected
+environments using locally stored classifications. On Android, this is enabled only in the fork
+variant; it does not change the official Android or iOS apps. The Android implementation is a
+source preview and has not had a two-environment device smoke. The full real-client pass, including
+search routes, active-task behavior, and notifications, remains open. The view is only a client-side
+filter. It does not provide access control or isolate server data. For actual server separation, run
+separate T3 data directories using `T3CODE_HOME` as described in the
 [isolated Nix launch guide](./install.md#t3-code-fork-nix).
 
 An Android variant and build workflow are in the source, but there is no verified signed APK or

@@ -126,6 +126,8 @@ import { useStartSideChat } from "./useStartSideChat";
 import { useThreadStatusAnnouncements } from "./useThreadStatusAnnouncements";
 import type { ThreadInspectorMode, ThreadInspectorTarget } from "./thread-inspector-navigation";
 import { useSelectWorkspaceDetail } from "../layout/workspace/useSelectWorkspaceDetail";
+import { routeEnvironmentScope } from "../environment-scope/mobile-environment-scope";
+import { useMobileEnvironmentScope } from "../environment-scope/useMobileEnvironmentScope";
 
 function firstRouteParam(value: string | string[] | undefined): string | null {
   const first = Array.isArray(value) ? value[0] : value;
@@ -260,6 +262,27 @@ function LiveThreadRouteController(props: ThreadRouteScreenProps) {
     environmentId !== null && threadIdRaw !== null
       ? scopedThreadKey(environmentId, ThreadId.make(threadIdRaw))
       : null;
+  const mobileEnvironmentScope = useMobileEnvironmentScope();
+  const routeScope = routeEnvironmentScope({
+    enabled: mobileEnvironmentScope.enabled,
+    environmentId,
+    assignments: mobileEnvironmentScope.assignments,
+  });
+  const syncEnvironmentScopeToRoute = useEffectEvent(
+    (scope: ReturnType<typeof routeEnvironmentScope>) => {
+      if (
+        routeThreadKey !== null &&
+        scope !== null &&
+        mobileEnvironmentScope.activeScope !== scope
+      ) {
+        mobileEnvironmentScope.setActiveScope(scope);
+      }
+    },
+  );
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- direct thread navigation selects the local view for that thread's environment
+  useEffect(() => {
+    if (routeThreadKey !== null) syncEnvironmentScopeToRoute(routeScope);
+  }, [routeScope, routeThreadKey]);
   const selectedThreadKey =
     selectedThread === null
       ? null
