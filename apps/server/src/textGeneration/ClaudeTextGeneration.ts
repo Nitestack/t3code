@@ -37,6 +37,7 @@ import {
   claudeAixSettingsEnvironment,
   hasClaudeManagedMcpConfig,
   makeClaudeEnvironment,
+  validateClaudeAixSettingsAuth,
 } from "../provider/Drivers/ClaudeHome.ts";
 
 const CLAUDE_TIMEOUT_MS = 180_000;
@@ -236,6 +237,23 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
                 ),
               )
           : cwd;
+      if (resolveEnvironment !== undefined) {
+        yield* validateClaudeAixSettingsAuth(
+          claudeSettings,
+          workingDirectory,
+          processEnvironment,
+        ).pipe(
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          Effect.provideService(Path.Path, path),
+          Effect.mapError(
+            () =>
+              new TextGenerationError({
+                operation,
+                detail: "Claude settings contain conflicting authentication values.",
+              }),
+          ),
+        );
+      }
       const managedMcpConfig = yield* hasClaudeManagedMcpConfig();
       const spawnCommand = yield* resolveSpawnCommand(
         claudeSettings.binaryPath || "claude",

@@ -567,30 +567,49 @@ const SettingsEnv = Schema.Struct({
 const decodeSettingsEnv = Schema.decodeUnknownEffect(
   fromLenientJson(Schema.Struct({ env: Schema.optional(SettingsEnv) })),
 );
+const AixSettingsEnv = Schema.Struct({
+  ...SettingsEnv.fields,
+  ANTHROPIC_API_KEY: Schema.optional(Schema.String),
+  ANTHROPIC_AUTH_TOKEN: Schema.optional(Schema.String),
+});
+const decodeAixSettingsEnv = Schema.decodeUnknownEffect(
+  fromLenientJson(Schema.Struct({ env: Schema.optional(AixSettingsEnv) })),
+);
 
-/** The `env` values T3 Code reads from Claude's user and managed settings; later files win. */
+/** User and managed env by default; aix also checks project env for authentication conflicts. */
 export const readClaudeSettingsEnv = Effect.fn("readClaudeSettingsEnv")(function* (
   config: Pick<ClaudeSettings, "homePath">,
   cwd: string | undefined,
   environment: NodeJS.ProcessEnv,
-): Effect.fn.Return<typeof SettingsEnv.Type, never, FileSystem.FileSystem | Path.Path> {
+  options: { readonly forAixProfile?: boolean } = {},
+): Effect.fn.Return<typeof AixSettingsEnv.Type, never, FileSystem.FileSystem | Path.Path> {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const platform = yield* HostProcess.Platform;
   const configDirPath = yield* resolveClaudeConfigDirPath(config, environment, cwd);
-  const settingsEnv: typeof SettingsEnv.Type = {};
-  for (const settingsPath of claudeSettingsPaths(
+  const settingsEnv: typeof AixSettingsEnv.Type = {};
+  const repositoryRoot = options.forAixProfile && cwd ? yield* findRepositoryRoot(cwd) : undefined;
+  const settingsPaths = claudeSettingsPaths(
     path,
     configDirPath,
-    undefined,
+    options.forAixProfile ? cwd : undefined,
     platform,
     environment,
-  )) {
+    repositoryRoot,
+  );
+  for (const settingsPath of [
+    ...(repositoryRoot !== undefined && repositoryRoot !== cwd
+      ? [path.join(repositoryRoot, ".claude", "settings.json")]
+      : []),
+    ...settingsPaths,
+  ]) {
     const contents = yield* fileSystem
       .readFileString(settingsPath)
       .pipe(Effect.orElseSucceed(() => undefined));
     if (contents === undefined) continue;
-    const parsed = yield* decodeSettingsEnv(contents).pipe(Effect.orElseSucceed(() => undefined));
+    const parsed = yield* (
+      options.forAixProfile ? decodeAixSettingsEnv(contents) : decodeSettingsEnv(contents)
+    ).pipe(Effect.orElseSucceed(() => undefined));
     Object.assign(settingsEnv, parsed?.env);
   }
   return settingsEnv;

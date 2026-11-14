@@ -38,10 +38,13 @@ if (settings?.disableAllHooks !== true) {
   fail("text generation must disable hooks", 10);
 }
 if (process.env.T3_FAKE_CLAUDE_CHECK_GATEWAY_ENV === "1") {
-  for (const name of ["ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"]) {
+  for (const name of ["ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY"]) {
     if (process.env[name] !== settings.env?.[name]) {
       fail(`title process did not apply its configured ${name}`, 18);
     }
+  }
+  if (Object.hasOwn(settings.env ?? {}, "ANTHROPIC_AUTH_TOKEN")) {
+    fail("title process exposed its active credential in settings", 20);
   }
   if (
     process.env.ANTHROPIC_BASE_URL !== "https://gateway.example.test" ||

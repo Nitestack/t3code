@@ -19,6 +19,7 @@ import {
   mergeClaudeProcessEnvironment,
   resolveClaudeProviderInstanceEnvironment,
   resolveClaudeHomePath,
+  validateClaudeAixSettingsAuth,
 } from "./ClaudeHome.ts";
 
 const aixSecret = "fake-aix-api-key-sentinel";
@@ -73,6 +74,50 @@ const withAixProfiles = <A, E>(
   );
 
 it.layer(NodeServices.layer)("ClaudeHome", (it) => {
+  it.effect(
+    "rejects settings that mask an aix profile's active credential without exposing it",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const homePath = yield* fs.makeTempDirectoryScoped({ prefix: "t3-aix-settings-auth-" });
+        const projectRoot = path.join(homePath, "project");
+        const cwd = path.join(projectRoot, "nested");
+        yield* fs.makeDirectory(path.join(projectRoot, ".git"), { recursive: true });
+        yield* fs.makeDirectory(path.join(projectRoot, ".claude"), { recursive: true });
+        yield* fs.makeDirectory(path.join(cwd, ".claude"), { recursive: true });
+        const config = { homePath };
+        for (const name of ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"] as const) {
+          const environment = {
+            [name]: "active-profile-key",
+            ANTHROPIC_BASE_URL: "https://gateway.example.test",
+          };
+          for (const file of [
+            path.join(homePath, "settings.json"),
+            path.join(projectRoot, ".claude", "settings.json"),
+            path.join(cwd, ".claude", "settings.local.json"),
+          ]) {
+            yield* fs.writeFileString(file, JSON.stringify({ env: { [name]: aixSecret } }));
+            const error = yield* Effect.flip(
+              validateClaudeAixSettingsAuth(config, cwd, environment),
+            );
+            expect(error.reason).toBe("settings-auth-conflict");
+            expect(JSON.stringify(error)).not.toContain(aixSecret);
+            yield* fs.remove(file);
+          }
+          const error = yield* Effect.flip(
+            validateClaudeAixSettingsAuth(config, cwd, environment, { [name]: aixSecret }),
+          );
+          expect(error.reason).toBe("settings-auth-conflict");
+          const masked = yield* Effect.flip(
+            validateClaudeAixSettingsAuth(config, cwd, environment, { [name]: "" }),
+          );
+          expect(masked.reason).toBe("settings-auth-conflict");
+          yield* validateClaudeAixSettingsAuth(config, cwd, environment);
+        }
+      }).pipe(Effect.scoped),
+  );
+
   describe("Claude home resolution", () => {
     it.effect("resolves configured Claude HOME and stamps continuation/cache keys with it", () =>
       Effect.gen(function* () {

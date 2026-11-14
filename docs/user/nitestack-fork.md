@@ -16,8 +16,8 @@ launching an explicitly selected Claude aix profile through Claude Code's Messag
 direct Anthropic endpoints use API-key authentication, and other configured endpoints use Bearer
 authentication by default. This launch support does not establish compatibility for every gateway,
 model, or tool route. LiteLLM profiles and OpenCode are not available as aix product features. A
-Codex probe failed before a tool result or final response, but that single result does not establish
-general incompatibility. The
+corrected minimal-config native Codex probe completed a tool round trip and final response for
+`gpt-6.1-sol`; it does not establish T3 integration or profile switching. The
 [native compatibility report](../fork/t01-native-agent-spike.md) records the tested combinations
 and evidence limits.
 
@@ -25,6 +25,8 @@ The direct Anthropic Claude probe completed a tool call and final response for t
 No live gateway E2E has verified the Bearer launch path or arbitrary model aliases. T3 credential
 fixtures are offline tests, not proof of a live aix profile flow. API keys remain in aix's credential
 handling and should not be added to T3 settings or Nix configuration.
+If a source launch reports conflicting Claude authentication settings, remove the credential
+variables from Claude's settings and keep the selected key in aix. Managed policies still apply.
 
 There is no user-facing aix picker, manual catalog refresh, or stale-catalog behavior. T3's existing
 [portable handoffs](./portable-handoffs.md) continue to work for supported provider switches, but

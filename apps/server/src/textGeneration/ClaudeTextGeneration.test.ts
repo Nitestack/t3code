@@ -191,6 +191,7 @@ it.layer(layerClaudeTextGenerationTest)("ClaudeTextGeneration", (it) => {
             ANTHROPIC_AUTH_TOKEN: "stale-host-token",
           },
           checkGatewayEnvironment: true,
+          argsMustNotContain: "fixture-gateway-token",
           reportGatewayRotation: true,
           resolveEnvironment: (environment) =>
             Effect.suspend(() => Effect.succeed({ ...environment, ...gatewayEnvironment })),

@@ -410,7 +410,7 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
     );
   });
 
-  it("pins an aix gateway's per-instance auth above Claude settings env values", () => {
+  it("keeps an aix gateway's credentials in the child environment, not inline settings", () => {
     const options = ClaudeAdapterV2.makeClaudeQueryOptions({
       modelSelection: CLAUDE_TEST_MODEL_SELECTION,
       nativeThreadId: "native-aix-gateway-auth",
@@ -438,10 +438,12 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
 
     assert.deepEqual((options.settings as { env?: Record<string, string> }).env, {
       ANTHROPIC_BASE_URL: "https://gateway.example.test",
-      ANTHROPIC_AUTH_TOKEN: "fresh-aix-token",
       ANTHROPIC_API_KEY: "",
       KEEP: "1",
     });
+    assert.notInclude(JSON.stringify(options.settings), "fresh-aix-token");
+    assert.notInclude(JSON.stringify(options.settings), "stale-settings-token");
+    assert.equal(options.env?.ANTHROPIC_AUTH_TOKEN, "fresh-aix-token");
     assert.equal(options.model, CLAUDE_TEST_MODEL_SELECTION.model);
   });
 
@@ -3717,10 +3719,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       assert.equal(harness.getOpenedOptions()?.env?.ANTHROPIC_API_KEY, "");
       const firstSettings = harness.getOpenedOptions()?.settings;
       assert.isObject(firstSettings);
-      assert.equal(
-        (firstSettings as { env?: Record<string, string> }).env?.ANTHROPIC_AUTH_TOKEN,
-        "fake-aix-token-before-rotation",
-      );
+      assert.notInclude(JSON.stringify(firstSettings), "fake-aix-token-before-rotation");
       currentAuthToken = "fake-aix-token-after-rotation";
       assert.equal(
         harness.getOpenedOptions()?.env?.ANTHROPIC_AUTH_TOKEN,
@@ -3741,10 +3740,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       );
       const nextSettings = harness.getOpenedOptions()?.settings;
       assert.isObject(nextSettings);
-      assert.equal(
-        (nextSettings as { env?: Record<string, string> }).env?.ANTHROPIC_AUTH_TOKEN,
-        "fake-aix-token-after-rotation",
-      );
+      assert.notInclude(JSON.stringify(nextSettings), "fake-aix-token-after-rotation");
       yield* harness.offerAndWait(
         makeResultFrame({
           uuid: "00000000-0000-4000-8000-000000009902",

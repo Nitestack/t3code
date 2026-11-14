@@ -20,10 +20,12 @@ const AIX_PROFILE_ENVIRONMENT_VARIABLE = "T3_AIX_PROFILE";
 
 class ClaudeAixProfileError extends Schema.TaggedError<ClaudeAixProfileError>()(
   "ClaudeAixProfileError",
-  { reason: Schema.Literal("invalid-reference") },
+  { reason: Schema.Literals(["invalid-reference", "settings-auth-conflict"]) },
 ) {
   override get message(): string {
-    return "The configured aix profile reference is invalid.";
+    return this.reason === "invalid-reference"
+      ? "The configured aix profile reference is invalid."
+      : "Remove conflicting Claude settings credentials before using an aix profile.";
   }
 }
 
@@ -69,10 +71,42 @@ export const resolveClaudeProviderInstanceEnvironment = Effect.fn(
   ];
 });
 
-export const claudeAixSettingsEnvironment = (environment: NodeJS.ProcessEnv) => ({
-  ANTHROPIC_BASE_URL: environment.ANTHROPIC_BASE_URL ?? "",
-  ANTHROPIC_API_KEY: environment.ANTHROPIC_API_KEY ?? "",
-  ANTHROPIC_AUTH_TOKEN: environment.ANTHROPIC_AUTH_TOKEN ?? "",
+export const claudeAixSettingsEnvironment = (
+  environment: NodeJS.ProcessEnv,
+  settingsEnvironment: Readonly<Record<string, string>> = {},
+) => {
+  const retained = Object.fromEntries(
+    Object.entries(settingsEnvironment).filter(
+      ([name]) => name !== "ANTHROPIC_API_KEY" && name !== "ANTHROPIC_AUTH_TOKEN",
+    ),
+  );
+  return {
+    ...retained,
+    ANTHROPIC_BASE_URL: environment.ANTHROPIC_BASE_URL ?? "",
+    ...(environment.ANTHROPIC_AUTH_TOKEN
+      ? { ANTHROPIC_API_KEY: "" }
+      : { ANTHROPIC_AUTH_TOKEN: "" }),
+  };
+};
+
+export const validateClaudeAixSettingsAuth = Effect.fn("validateClaudeAixSettingsAuth")(function* (
+  config: Pick<ClaudeSettings, "homePath">,
+  cwd: string | undefined,
+  environment: NodeJS.ProcessEnv,
+  launchSettingsEnvironment: Readonly<Record<string, string>> = {},
+) {
+  const settings = yield* readClaudeSettingsEnv(config, cwd, environment, {
+    forAixProfile: true,
+  });
+  const activeCredential = environment.ANTHROPIC_AUTH_TOKEN
+    ? "ANTHROPIC_AUTH_TOKEN"
+    : "ANTHROPIC_API_KEY";
+  if (
+    settings[activeCredential] !== undefined ||
+    launchSettingsEnvironment[activeCredential] !== undefined
+  ) {
+    return yield* new ClaudeAixProfileError({ reason: "settings-auth-conflict" });
+  }
 });
 
 export const resolveClaudeHomePath = Effect.fn("resolveClaudeHomePath")(function* (
