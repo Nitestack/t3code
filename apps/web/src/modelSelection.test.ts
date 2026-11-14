@@ -219,6 +219,37 @@ describe("scoped default model selections", () => {
 });
 
 describe("instance-scoped model selection", () => {
+  it("keeps aix catalog metadata and the exact selectable ID in picker options", () => {
+    const instanceId = ProviderInstanceId.make("aix-codex-work");
+    const metadata = {
+      family: "OpenAI GPT",
+      contextTokens: 128_000,
+      pricing: { inputPerMillionTokens: 2, outputPerMillionTokens: 8 },
+    };
+    const entry = deriveProviderInstanceEntries([provider({ instanceId, models: [] })])[0]!;
+    const settings = {
+      ...settingsWithProviderInstances(),
+      providerInstances: {
+        [instanceId]: {
+          driver: ProviderDriverKind.make("codex"),
+          config: {
+            customModels: [
+              { slug: "vendor/model:fast", name: "Readable Model", catalogMetadata: metadata },
+            ],
+          },
+        },
+      },
+    };
+
+    expect(getAppModelOptionsForInstance(settings, entry)).toContainEqual({
+      slug: "vendor/model:fast",
+      name: "Readable Model",
+      isCustom: true,
+      subProvider: "OpenAI GPT",
+      catalogMetadata: metadata,
+    });
+  });
+
   it("keeps custom models on the provider instance that declared them", () => {
     const providers = [
       provider({

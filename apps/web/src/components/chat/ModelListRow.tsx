@@ -10,12 +10,16 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
 import { modelPickerModelKey } from "./modelPickerKeys";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
+import { ModelCatalogDetails } from "./ModelCatalogDetails";
+import type { ServerProvider } from "@t3tools/contracts";
 
 export const ModelListRow = memo(function ModelListRow(props: {
   index: number;
   slug: string;
   name: string;
   subProvider?: string | undefined;
+  catalogMetadata?: ServerProvider["models"][number]["catalogMetadata"];
+  isAixModel?: boolean;
   instanceId: ProviderInstanceId;
   driverKind: ProviderDriverKind;
   providerDisplayName: string;
@@ -101,6 +105,13 @@ export const ModelListRow = memo(function ModelListRow(props: {
       </div>
 
       <div className="flex shrink-0 items-center gap-1.5">
+        {props.isAixModel || props.catalogMetadata ? (
+          <ModelCatalogDetails
+            modelId={props.slug}
+            name={getDisplayModelName(model)}
+            metadata={props.catalogMetadata}
+          />
+        ) : null}
         <Tooltip>
           <TooltipTrigger
             render={

@@ -1,4 +1,4 @@
-import type { ProviderDriverKind } from "@t3tools/contracts";
+import type { ProviderDriverKind, ServerProviderModel } from "@t3tools/contracts";
 import { resolveModelShortName } from "@t3tools/client-runtime/provider-clients";
 
 export type ModelEsque = {
@@ -7,6 +7,7 @@ export type ModelEsque = {
   shortName?: string | undefined;
   subProvider?: string | undefined;
   aliases?: ReadonlyArray<string> | undefined;
+  catalogMetadata?: ServerProviderModel["catalogMetadata"] | undefined;
   isDefault?: boolean | undefined;
   badge?: "new" | undefined;
   isLegacy?: boolean | undefined;

@@ -91,6 +91,41 @@ describe("routeAixModels", () => {
 });
 
 describe("aixDesiredInstances", () => {
+  it("carries catalog metadata through the managed custom-model config", () => {
+    const desired = aixDesiredInstances([
+      {
+        name: "work",
+        label: "Work",
+        routes: routeAixModels("litellm", [
+          {
+            id: "gpt-6.1-sol",
+            displayName: "Readable Model",
+            family: "Vendor Family",
+            contextTokens: 128_000,
+            maxOutputTokens: 16_000,
+            pricing: { inputPerMillionTokens: 2, outputPerMillionTokens: 8 },
+            reasoning: { efforts: ["low", "high"] },
+          },
+        ]),
+      },
+    ]);
+    const config = must(desired.get(ProviderInstanceId.make("aix-codex-work")))?.config;
+
+    expect(decodeCodexSettings(config).customModels).toEqual([
+      {
+        slug: "gpt-6.1-sol",
+        name: "Readable Model",
+        catalogMetadata: {
+          family: "Vendor Family",
+          contextTokens: 128_000,
+          maxOutputTokens: 16_000,
+          pricing: { inputPerMillionTokens: 2, outputPerMillionTokens: 8 },
+          reasoning: { efforts: ["low", "high"] },
+        },
+      },
+    ]);
+  });
+
   it("gives two profiles distinct, deterministic instances whose configs match the driver schemas", () => {
     const desired = aixDesiredInstances([
       { name: "work", label: "Work", routes: routeAixModels("litellm", LITELLM_MODELS) },

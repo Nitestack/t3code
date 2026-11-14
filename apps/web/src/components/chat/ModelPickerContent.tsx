@@ -43,7 +43,7 @@ import {
 import { ModelEsque } from "./providerIconUtils";
 import { isCommandPaletteOpen } from "../../commandPaletteBus";
 import { registerModelPickerContent } from "../../modelPickerVisibility";
-import { primaryServerKeybindingsAtom } from "../../state/server";
+import { primaryServerKeybindingsAtom, serverEnvironment } from "../../state/server";
 import {
   modelPickerJumpCommandForIndex,
   modelPickerJumpIndexFromCommand,
@@ -58,7 +58,8 @@ import { announce } from "~/lib/announce";
 import { cn } from "~/lib/utils";
 import { getVirtualizedScrollFadeClassName } from "../ui/scroll-area";
 import { TooltipProvider } from "../ui/tooltip";
-import { InlineButton } from "../ui/button";
+import { Button, InlineButton } from "../ui/button";
+import { RefreshCwIcon } from "lucide-react";
 import {
   isProviderInstancePickerReady,
   isProviderInstancePickerVisible,
@@ -66,6 +67,7 @@ import {
   type ProviderInstanceEntry,
 } from "../../providerInstances";
 import { providerModelKey, sortProviderModelItems } from "../../modelOrdering";
+import { aixCatalogStatus } from "./aixModelMetadata";
 
 type ModelPickerItem = {
   slug: string;
@@ -82,6 +84,8 @@ type ModelPickerItem = {
   continuationGroupKey?: string | undefined;
   isLegacy?: boolean | undefined;
   isUnavailable?: boolean | undefined;
+  catalogMetadata?: ModelEsque["catalogMetadata"];
+  isAixModel?: boolean;
 };
 
 export function resolveModelPickerSelectedModel(input: {
@@ -254,6 +258,57 @@ function ModelPickerProviderNotices({
   );
 }
 
+function AixCatalogControls(props: {
+  entry: ProviderInstanceEntry;
+  environmentId: EnvironmentId;
+  refreshing: boolean;
+  onRefresh: (instanceId: ProviderInstanceId) => void;
+}) {
+  const canRefresh = useAtomValue(
+    serverEnvironment.refreshProviders.permissionAtom(props.environmentId),
+  );
+  const status = aixCatalogStatus(props.entry.snapshot);
+  if (!status) return null;
+  const unavailable = status.kind !== "current";
+
+  return (
+    <div
+      className="flex shrink-0 items-center justify-between gap-2 border-b border-border/70 px-3 py-2"
+      role={unavailable ? "status" : undefined}
+      aria-live={unavailable ? "polite" : undefined}
+    >
+      <p
+        className={cn(
+          "min-w-0 text-xs leading-snug",
+          status.kind === "stale" && "text-warning-foreground",
+          status.kind === "unavailable" && "text-destructive-foreground",
+          status.kind === "current" && "text-muted-foreground",
+        )}
+      >
+        {status.kind === "stale"
+          ? `Stale catalog: ${status.message}`
+          : status.kind === "unavailable"
+            ? `Catalog unavailable: ${status.message}`
+            : status.message}
+        {props.refreshing ? " Refreshing…" : ""}
+      </p>
+      {canRefresh ? (
+        <Button
+          size="xs"
+          variant="ghost-muted"
+          className="shrink-0"
+          disabled={props.refreshing}
+          onClick={() => props.onRefresh(props.entry.instanceId)}
+          aria-label={`Refresh ${props.entry.displayName} catalog`}
+        >
+          <RefreshCwIcon aria-hidden="true" />
+          Refresh
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
 function ModelPickerList({
   listRef,
   itemKeys,
@@ -342,6 +397,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   onOpenProviderSetup?: (instanceId: ProviderInstanceId) => void;
   getModelDisabledReason?: (instanceId: ProviderInstanceId, model: string) => string | null;
   onInstanceModelChange: (instanceId: ProviderInstanceId, model: string) => void;
+  refreshingAixInstanceId?: ProviderInstanceId | null;
+  onRefreshAixCatalog?: (instanceId: ProviderInstanceId) => void;
   /** The owning popup moves focus here when it opens (its `initialFocus`). */
   searchInputRef: RefObject<HTMLInputElement | null>;
   /** Sits beside an effort column: fills the shared row, and stacks above it on narrow screens. */
@@ -571,6 +628,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           ...(model.badge ? { badge: model.badge } : {}),
           ...(model.isLegacy ? { isLegacy: true } : {}),
           ...(model.isUnavailable ? { isUnavailable: true } : {}),
+          ...(model.catalogMetadata ? { catalogMetadata: model.catalogMetadata } : {}),
+          ...(instanceId.startsWith("aix-") ? { isAixModel: true } : {}),
           instanceId,
           driverKind: entry.driverKind,
           instanceDisplayName: entry.displayName,
@@ -1011,6 +1070,17 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
               onTouchStart={(e) => e.stopPropagation()}
             />
 
+            {selectedEntry?.instanceId.startsWith("aix-") &&
+            props.environmentId !== null &&
+            props.onRefreshAixCatalog ? (
+              <AixCatalogControls
+                entry={selectedEntry}
+                environmentId={props.environmentId}
+                refreshing={props.refreshingAixInstanceId === selectedEntry.instanceId}
+                onRefresh={props.onRefreshAixCatalog}
+              />
+            ) : null}
+
             <ModelPickerList
               listRef={modelListRef}
               itemKeys={filteredItemKeys}
@@ -1044,6 +1114,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                     slug={model.slug}
                     name={model.name}
                     subProvider={model.subProvider}
+                    catalogMetadata={model.catalogMetadata}
+                    isAixModel={model.isAixModel === true}
                     instanceId={model.instanceId}
                     driverKind={model.driverKind}
                     providerDisplayName={model.instanceDisplayName}

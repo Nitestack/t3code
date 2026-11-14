@@ -59,6 +59,22 @@ describe("providerModelsFromSettings", () => {
     ]);
   });
 
+  it("keeps optional catalog metadata on a custom model", () => {
+    const catalogMetadata = {
+      family: "OpenAI GPT",
+      contextTokens: 128_000,
+      pricing: { inputPerMillionTokens: 2, outputPerMillionTokens: 8 },
+      reasoning: { efforts: ["low", "high"] as const },
+    };
+    const models = providerModelsFromSettings(
+      [],
+      [{ slug: "gateway/model", name: "Model", catalogMetadata }],
+      null,
+    );
+
+    expect(models[0]?.catalogMetadata).toEqual(catalogMetadata);
+  });
+
   it("renames a built-in model when a named entry uses its slug", () => {
     const capabilities = createModelCapabilities({ optionDescriptors: [] });
     const models = providerModelsFromSettings(

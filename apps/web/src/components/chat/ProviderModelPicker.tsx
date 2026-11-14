@@ -134,6 +134,9 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   const refreshProviders = useAtomCommand(serverEnvironment.refreshProviders, {
     reportFailure: false,
   });
+  const [refreshingAixInstanceId, setRefreshingAixInstanceId] = useState<ProviderInstanceId | null>(
+    null,
+  );
   const refreshModelCatalog = useEffectEvent(() => {
     const environmentId = props.environmentId;
     if (environmentId === null) return;
@@ -146,6 +149,15 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   useEffect(() => {
     if (isMenuOpen) refreshModelCatalog();
   }, [isMenuOpen]);
+  const refreshAixCatalog = (instanceId: ProviderInstanceId) => {
+    const environmentId = props.environmentId;
+    if (environmentId === null || refreshingAixInstanceId !== null) return;
+    setRefreshingAixInstanceId(instanceId);
+    void refreshProviders({ environmentId, input: { instanceId, refreshModels: true } }).then(
+      () => setRefreshingAixInstanceId(null),
+      () => setRefreshingAixInstanceId(null),
+    );
+  };
   const searchInputRef = useRef<HTMLInputElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popupRef = useRef<HTMLDivElement | null>(null);
@@ -306,6 +318,8 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           : (props.getModelDisabledReason?.(instanceId, model) ?? null)
       }
       onInstanceModelChange={handleInstanceModelChange}
+      refreshingAixInstanceId={refreshingAixInstanceId}
+      onRefreshAixCatalog={(instanceId) => void refreshAixCatalog(instanceId)}
       {...(docked
         ? {
             docked,
