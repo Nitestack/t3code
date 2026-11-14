@@ -12,6 +12,7 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 
+import { OpenCodeSettings } from "@t3tools/provider-opencode/settings";
 import { AixDiscoveryError } from "../provider/AixDiscovery.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { type CatalogModel, ModelCatalogFetchError } from "./ModelCatalog.ts";
@@ -31,6 +32,8 @@ const OPENCODE = ProviderDriverKind.make("opencode");
 const SENTINEL_KEY = "sk-aix-sentinel-do-not-persist";
 const decodeCodexSettings = Schema.decodeUnknownSync(CodexSettings);
 const decodeClaudeSettings = Schema.decodeUnknownSync(ClaudeSettings);
+const decodeOpenCodeSettings = Schema.decodeUnknownSync(OpenCodeSettings);
+const OPENCODE_INSTANCE = ProviderInstanceId.make("aix-opencode-work");
 
 const LITELLM_MODELS: ReadonlyArray<CatalogModel> = [
   { id: "gpt-6.1-sol", displayName: "GPT-6.1 Sol" },
@@ -59,12 +62,32 @@ const manualCodex = (): ProviderInstanceConfig => ({
 });
 
 describe("routeAixModels", () => {
-  it("routes only verified pairs and never produces an OpenCode-backed instance", () => {
-    const routes = routeAixModels("litellm", LITELLM_MODELS);
+  it("routes verified GPT to Codex and every other chat model, gpt-oss included, to OpenCode", () => {
+    const routes = routeAixModels("litellm", [
+      ...LITELLM_MODELS,
+      { id: "qwen3-235b", displayName: "Qwen 3 235B" },
+      { id: "gemini-2.5-pro", displayName: "Gemini 2.5 Pro" },
+      { id: "deepseek-v4", displayName: "DeepSeek V4" },
+    ]);
 
     expect(routes.get(CODEX)?.map((model) => model.id)).toEqual(["gpt-6.1-sol"]);
+    expect(routes.get(OPENCODE)?.map((model) => model.id)).toEqual([
+      "gpt-oss-120b",
+      "google/gemma-4-31b-it",
+      "qwen3-235b",
+      "gemini-2.5-pro",
+      "deepseek-v4",
+    ]);
     expect(routes.has(CLAUDE_CODE)).toBe(false);
+  });
+
+  it("never routes non-chat models to OpenCode", () => {
+    const routes = routeAixModels("litellm", [
+      { id: "text-embedding-3-large", displayName: "Text Embedding 3 Large" },
+    ]);
+
     expect(routes.has(OPENCODE)).toBe(false);
+    expect(routes.has(CODEX)).toBe(false);
   });
 
   it("allows only the verified native Claude model on a direct Anthropic endpoint", () => {
@@ -90,7 +113,11 @@ describe("aixDesiredInstances", () => {
       },
     ]);
 
-    expect([...desired.keys()]).toEqual(["aix-codex-work", "aix-claudeAgent-claude"]);
+    expect([...desired.keys()]).toEqual([
+      "aix-codex-work",
+      "aix-opencode-work",
+      "aix-claudeAgent-claude",
+    ]);
     const codex = must(desired.get(ProviderInstanceId.make("aix-codex-work")));
     expect(codex).toMatchObject({
       driver: CODEX,
@@ -105,6 +132,24 @@ describe("aixDesiredInstances", () => {
         must(desired.get(ProviderInstanceId.make("aix-claudeAgent-claude")))?.config,
       ).customModels,
     ).toHaveLength(1);
+  });
+
+  it("gives OpenCode instances provider-qualified slugs that keep the upstream model id", () => {
+    const opencode = must(desiredFor("work").get(ProviderInstanceId.make("aix-opencode-work")));
+
+    expect(opencode).toMatchObject({
+      driver: OPENCODE,
+      displayName: "Work · OpenCode",
+      enabled: true,
+      environment: [{ name: "T3_AIX_PROFILE", value: "work", sensitive: false }],
+      config: {
+        aixProfile: "work",
+        customModels: [
+          { slug: "t3_aix/gpt-oss-120b", name: "GPT-OSS 120B" },
+          { slug: "t3_aix/google/gemma-4-31b-it", name: "Gemma 4 31B IT" },
+        ],
+      },
+    });
   });
 
   it("skips a profile name that cannot form a valid instance id", () => {
@@ -123,6 +168,7 @@ describe("planAixInstanceSync", () => {
     });
     expect(first.map((mutation) => [mutation.operation, mutation.instanceId])).toEqual([
       ["create", "aix-codex-work"],
+      ["create", "aix-opencode-work"],
     ]);
 
     const current = Object.fromEntries(work) as ProviderInstanceConfigMap;
@@ -136,9 +182,11 @@ describe("planAixInstanceSync", () => {
       [ProviderInstanceId.make("aix-codex-work")]: manualCodex(),
     } as ProviderInstanceConfigMap;
 
-    expect(planAixInstanceSync({ current, desired: work, unavailableProfiles: new Set() })).toEqual(
-      [],
-    );
+    expect(
+      planAixInstanceSync({ current, desired: work, unavailableProfiles: new Set() }).map(
+        (mutation) => [mutation.operation, mutation.instanceId],
+      ),
+    ).toEqual([["create", "aix-opencode-work"]]);
   });
 
   it("disables only managed instances of a removed profile and keeps manual and default ones", () => {
@@ -210,6 +258,11 @@ describe("planAixInstanceSync", () => {
           instanceId: ProviderInstanceId.make("aix-codex-work"),
           instance: codexInstance("work"),
         },
+        {
+          operation: "create",
+          instanceId: OPENCODE_INSTANCE,
+          instance: must(work.get(OPENCODE_INSTANCE)),
+        },
       ],
     );
   });
@@ -271,12 +324,13 @@ describe("syncAixProviderInstances", () => {
       const afterFirst = yield* Ref.get(writes);
       yield* sync;
 
-      expect(afterFirst).toEqual(["aix-codex-work", "aix-claudeAgent-claude"]);
+      expect(afterFirst).toEqual(["aix-codex-work", "aix-opencode-work", "aix-claudeAgent-claude"]);
       expect(yield* Ref.get(writes)).toEqual(afterFirst);
       const settings = yield* (yield* ServerSettingsService).getSettings;
       expect(Object.keys(settings.providerInstances).sort()).toEqual([
         "aix-claudeAgent-claude",
         "aix-codex-work",
+        "aix-opencode-work",
       ]);
     }).pipe(Effect.provide(ServerSettingsService.layerTest())),
   );
@@ -370,6 +424,20 @@ describe("syncAixProviderInstances", () => {
           instance: { ...codexInstance("work"), enabled: false },
         },
       ]);
+    });
+
+    it("keeps the marker in the OpenCode config through persisted settings", () => {
+      const persisted = decodePersisted(
+        encodePersisted(
+          decodePersisted({
+            "aix-opencode-work": must(desiredFor("work").get(OPENCODE_INSTANCE)),
+          }),
+        ),
+      );
+
+      expect(decodeOpenCodeSettings(must(persisted[OPENCODE_INSTANCE]).config).aixProfile).toBe(
+        "work",
+      );
     });
 
     it("keeps the marker in the config each driver decodes from persisted settings", () => {

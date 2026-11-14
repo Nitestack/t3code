@@ -16,6 +16,7 @@ import { HttpClient } from "effect/http";
 import { ChildProcessSpawner } from "effect/process";
 
 import * as AixDiscovery from "../provider/AixDiscovery.ts";
+import { OPENCODE_AIX_PROVIDER_ID } from "../provider/OpenCodeAixLaunch.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import {
   type CatalogModel,
@@ -28,12 +29,13 @@ import { type AixModelRoute, routeCatalogModel } from "./ModelRouting.ts";
 
 /** Set to `1` on the server host to let aix profiles create provider instances. */
 const AIX_ENABLED_ENVIRONMENT_VARIABLE = "T3CODE_AIX";
-/** Read by the Codex and Claude drivers at launch. OpenCode does not read it, so it is excluded. */
+/** Read by the Codex, Claude, and OpenCode drivers at launch. */
 const AIX_PROFILE_VARIABLE = "T3_AIX_PROFILE";
 
 const CODEX = ProviderDriverKind.make("codex");
 const CLAUDE_CODE = ProviderDriverKind.make("claudeAgent");
-const SUPPORTED_DRIVERS: ReadonlyArray<ProviderDriverKind> = [CODEX, CLAUDE_CODE];
+const OPENCODE = ProviderDriverKind.make("opencode");
+const SUPPORTED_DRIVERS: ReadonlyArray<ProviderDriverKind> = [CODEX, CLAUDE_CODE, OPENCODE];
 
 export interface AixRoutedModel {
   readonly id: string;
@@ -45,7 +47,10 @@ export type AixRouteSource = "anthropic" | "litellm";
 const routeFor = (source: AixRouteSource, modelId: string): AixModelRoute => {
   if (source === "anthropic") return "anthropic-direct-messages";
   if (modelId.startsWith("claude-")) return "litellm-anthropic-messages";
-  if (modelId.startsWith("gpt-")) return "litellm-openai-responses";
+  // gpt-oss is an open-weight chat model served from the chat route, not the Responses API.
+  if (modelId.startsWith("gpt-") && !modelId.startsWith("gpt-oss")) {
+    return "litellm-openai-responses";
+  }
   return "litellm-openai-chat";
 };
 
@@ -92,7 +97,16 @@ const decodeOwnerMarker = Schema.decodeUnknownOption(OwnerMarker);
 const ownerProfile = (instance: ProviderInstanceConfig): string | undefined =>
   Option.getOrUndefined(decodeOwnerMarker(instance.config))?.aixProfile;
 
-const driverLabel = (driver: ProviderDriverKind) => (driver === CODEX ? "Codex" : "Claude Code");
+const driverLabel = (driver: ProviderDriverKind) => {
+  if (driver === CODEX) return "Codex";
+  if (driver === OPENCODE) return "OpenCode";
+  return "Claude Code";
+};
+
+// OpenCode parses a model slug at its first "/", so the provider prefix keeps upstream ids like
+// `google/gemma-4-31b-it` intact.
+const customModelSlug = (driver: ProviderDriverKind, modelId: string) =>
+  driver === OPENCODE ? `${OPENCODE_AIX_PROVIDER_ID}/${modelId}` : modelId;
 
 export function aixDesiredInstances(
   profiles: ReadonlyArray<AixObservedProfile>,
@@ -109,7 +123,10 @@ export function aixDesiredInstances(
         environment: [{ name: AIX_PROFILE_VARIABLE, value: profile.name, sensitive: false }],
         config: {
           aixProfile: profile.name,
-          customModels: models.map((model) => ({ slug: model.id, name: model.displayName })),
+          customModels: models.map((model) => ({
+            slug: customModelSlug(driver, model.id),
+            name: model.displayName,
+          })),
         },
       });
     }

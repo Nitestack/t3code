@@ -26,6 +26,8 @@ import {
   checkOpenCodeProviderStatus,
   loadOpenCode2Workspace,
   makeOpenCode2ModelLoader,
+  openCodeProviderModels,
+  openCode2ProviderModels,
   type OpenCode2Model,
   type OpenCode2Workspace,
 } from "./status.ts";
@@ -528,6 +530,67 @@ const checkProvider = Effect.fn("checkProvider")(function* (
 });
 
 it.layer(layerTest)("checkOpenCodeProviderStatus", (it) => {
+  it("filters aix-managed OpenCode catalogs by the settings marker and preserves upstream ids", () => {
+    const models: ReadonlyArray<OpenCode2Model> = [
+      { providerID: "t3_aix", id: "google/gemma-4-31b-it", name: "Gemma 4", variants: [] },
+      { providerID: "t3_aix", id: "qwen3-coder", name: "Qwen", variants: [] },
+      { providerID: "opencode", id: "big-pickle", name: "Big Pickle", variants: [] },
+    ];
+    const selected = openCode2ProviderModels(
+      makeOpenCodeSettings({
+        aixProfile: "work",
+        customModels: [{ slug: "t3_aix/google/gemma-4-31b-it", name: "Gemma 4 31B IT" }],
+      }),
+      models,
+    );
+
+    NodeAssert.deepEqual(
+      selected.map((model) => model.slug),
+      ["t3_aix/google/gemma-4-31b-it"],
+    );
+    NodeAssert.deepEqual(
+      openCode2ProviderModels(makeOpenCodeSettings(), models).map((model) => model.slug),
+      ["opencode/big-pickle", "t3_aix/google/gemma-4-31b-it", "t3_aix/qwen3-coder"],
+    );
+
+    const v1 = openCodeProviderModels(
+      makeOpenCodeSettings({
+        aixProfile: "work",
+        customModels: [{ slug: "t3_aix/google/gemma-4-31b-it", name: "Gemma 4 31B IT" }],
+      }),
+      {
+        providerList: {
+          connected: ["t3_aix", "opencode"],
+          all: [
+            {
+              id: "t3_aix",
+              name: "aix",
+              models: {
+                "google/gemma-4-31b-it": {
+                  id: "google/gemma-4-31b-it",
+                  name: "Gemma 4",
+                  variants: {},
+                },
+              },
+            },
+            {
+              id: "opencode",
+              name: "OpenCode",
+              models: { "big-pickle": { id: "big-pickle", name: "Big Pickle", variants: {} } },
+            },
+          ],
+          default: {},
+        },
+        agents: [],
+        skills: [],
+      } as unknown as OpenCodeRuntime.OpenCodeInventory,
+    );
+    NodeAssert.deepEqual(
+      v1?.map((model) => model.slug),
+      ["t3_aix/google/gemma-4-31b-it"],
+    );
+  });
+
   it.effect.each(["version", "inventory", "models", "empty-v1", "empty-v2"] as const)(
     "records %s discovery failures in the existing trace and logger",
     (failure) =>
