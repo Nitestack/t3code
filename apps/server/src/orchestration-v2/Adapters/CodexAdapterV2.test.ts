@@ -1372,6 +1372,8 @@ describe("CodexAdapterV2 post-settle continuation", () => {
     promptSuggestions: Effect.Effect<boolean> = Effect.succeed(false),
     onNotification: (method: string) => Effect.Effect<void> = () => Effect.void,
     models?: CodexAdapterV2.CodexAdapterV2Options["models"],
+    environment: NodeJS.ProcessEnv = {},
+    clientFactoryOverride?: CodexAdapterV2.CodexAppServerClientFactoryShape,
   ) =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
@@ -1386,7 +1388,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
         withConfigReads(transcript),
         beforeEmitInbound === undefined ? {} : { beforeEmitInbound },
       );
-      const clientFactory: CodexAdapterV2.CodexAppServerClientFactoryShape = {
+      const defaultClientFactory: CodexAdapterV2.CodexAppServerClientFactoryShape = {
         open: (openInput) =>
           Layer.build(CodexReplay.layerReplayWithDriver(driver)).pipe(
             Effect.mapError(
@@ -1428,10 +1430,11 @@ describe("CodexAdapterV2 post-settle continuation", () => {
             ),
           ),
       };
+      const clientFactory = clientFactoryOverride ?? defaultClientFactory;
       const adapter = yield* CodexAdapterV2.makeCodexAdapterV2({
         instanceId: CodexAdapterV2.CODEX_DEFAULT_INSTANCE_ID,
         settings: DEFAULT_CODEX_SETTINGS,
-        environment: {},
+        environment,
         clientFactory,
         ...(onUsageLimits ? { onUsageLimits } : {}),
         ...(models ? { models } : {}),
@@ -1512,6 +1515,467 @@ describe("CodexAdapterV2 post-settle continuation", () => {
         awaitTerminal: (count: number) => changes.until(() => terminalEvents().length >= count),
       };
     });
+
+  it.effect(
+    "rotates an idle aix Codex process between turns and resumes the same native thread",
+    () =>
+      Effect.gen(function* () {
+        const nativeThreadId = "aix-rotation-native-thread";
+        const firstTurnId = "aix-rotation-turn-a";
+        const secondTurnId = "aix-rotation-turn-b";
+        const scenario = "aix-credential-rotation";
+        const firstCompletion = yield* Deferred.make<void>();
+        let currentKey = "aix-key-a-sentinel";
+        const openedKeys: Array<string | undefined> = [];
+        const closedProcesses: Array<number> = [];
+        const firstEntries = [
+          ...codexReplayPreamble({
+            nativeThreadId,
+            nativeTurnId: firstTurnId,
+            prompt: "first turn",
+          }),
+          {
+            type: "emit_inbound" as const,
+            label: "turn completed",
+            frame: {
+              method: "turn/completed",
+              params: {
+                threadId: nativeThreadId,
+                turn: makeCodexReplayTurn({ id: firstTurnId, status: "completed" }),
+              },
+            },
+          },
+        ];
+        const secondPreamble = codexReplayPreamble({
+          nativeThreadId,
+          nativeTurnId: secondTurnId,
+          prompt: "second turn",
+        });
+        const threadStartResult = (
+          secondPreamble[4] as Extract<
+            CodexReplay.CodexAppServerReplayEntry,
+            { type: "emit_inbound" }
+          >
+        ).frame as { readonly result: unknown };
+        const secondEntries: Array<CodexReplay.CodexAppServerReplayEntry> = [
+          ...secondPreamble.slice(0, 3),
+          {
+            type: "expect_outbound",
+            label: "thread/resume",
+            frame: {
+              id: 2,
+              method: "thread/resume",
+              params: {
+                threadId: nativeThreadId,
+                excludeTurns: true,
+                cwd: "/workspace",
+                model: "gpt-5.4",
+                config: {
+                  ...CodexAdapterV2.CODEX_THREAD_CONFIG,
+                  [T3_THREAD_ENV_KEY]: `thread-${scenario}`,
+                },
+              },
+            },
+          },
+          {
+            type: "emit_inbound",
+            label: "thread/resume",
+            frame: { id: 2, result: threadStartResult.result },
+          },
+          ...secondPreamble.slice(5),
+          {
+            type: "emit_inbound",
+            label: "item/started/rotated-tool",
+            frame: {
+              method: "item/started",
+              params: {
+                item: {
+                  type: "mcpToolCall",
+                  id: "aix-rotation-tool",
+                  server: "fixture-server",
+                  tool: "lookup",
+                  status: "inProgress",
+                  arguments: { query: "rotated thread" },
+                },
+                threadId: nativeThreadId,
+                turnId: secondTurnId,
+                startedAtMs: 1782622440500,
+              },
+            },
+          },
+          {
+            type: "emit_inbound",
+            label: "item/completed/rotated-tool",
+            frame: {
+              method: "item/completed",
+              params: {
+                item: {
+                  type: "mcpToolCall",
+                  id: "aix-rotation-tool",
+                  server: "fixture-server",
+                  tool: "lookup",
+                  status: "completed",
+                  arguments: { query: "rotated thread" },
+                  result: { content: [{ type: "text", text: "continued tool result" }] },
+                },
+                threadId: nativeThreadId,
+                turnId: secondTurnId,
+                completedAtMs: 1782622441500,
+              },
+            },
+          },
+          {
+            type: "emit_inbound",
+            label: "turn completed",
+            frame: {
+              method: "turn/completed",
+              params: {
+                threadId: nativeThreadId,
+                turn: makeCodexReplayTurn({ id: secondTurnId, status: "completed" }),
+              },
+            },
+          },
+        ];
+        const transcripts = [
+          makeCodexReplayTranscript({ scenario: `${scenario}-a`, entries: firstEntries }),
+          makeCodexReplayTranscript({ scenario: `${scenario}-b`, entries: secondEntries }),
+        ];
+        const clientFactory: CodexAdapterV2.CodexAppServerClientFactoryShape = {
+          resolveAixLaunch: () =>
+            Effect.succeed({
+              environment: { T3_AIX_API_KEY: currentKey },
+              configArgs: ['model_provider="t3_aix"'],
+              extendEnv: false,
+            }),
+          open: (openInput) =>
+            Effect.gen(function* () {
+              const processIndex = openedKeys.length;
+              openedKeys.push(openInput.aixLaunch?.environment.T3_AIX_API_KEY);
+              yield* Effect.addFinalizer(() =>
+                Effect.sync(() => closedProcesses.push(processIndex)),
+              );
+              const transcript = transcripts[processIndex];
+              if (!transcript) return yield* Effect.die("Unexpected Codex process open in test.");
+              const driver = yield* CodexReplay.makeReplayDriver(
+                withConfigReads(transcript),
+                processIndex === 0
+                  ? {
+                      beforeEmitInbound: (entry) =>
+                        entry.label === "turn completed"
+                          ? Deferred.await(firstCompletion)
+                          : Effect.void,
+                    }
+                  : {},
+              );
+              const context = yield* Layer.build(CodexReplay.layerReplayWithDriver(driver)).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new ProviderAdapter.ProviderAdapterOpenSessionError({
+                      driver: CodexAdapterV2.CODEX_DRIVER_KIND,
+                      providerSessionId: openInput.providerSessionId,
+                      cause,
+                    }),
+                ),
+              );
+              return yield* Effect.service(CodexClient.CodexAppServerClient).pipe(
+                Effect.provide(context),
+              );
+            }),
+        };
+        const harness = yield* makeCodexReplayHarness(
+          transcripts[0]!,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          { T3_AIX_PROFILE: "rotating-profile" },
+          clientFactory,
+        );
+
+        yield* harness.runtime.startTurn(
+          makeCodexTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make("aix-rotation-attempt-a"),
+            text: "first turn",
+          }),
+        );
+        yield* harness.until(() =>
+          harness.events.some(
+            (event) =>
+              event.type === "provider_turn.updated" && event.providerTurn.status === "running",
+          ),
+        );
+        currentKey = "aix-key-b-sentinel";
+        assert.deepEqual(openedKeys, ["aix-key-a-sentinel"]);
+        assert.deepEqual(closedProcesses, []);
+
+        yield* Deferred.succeed(firstCompletion, undefined);
+        yield* harness.firstTerminal;
+        yield* harness.runtime.startTurn(
+          makeCodexTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make("aix-rotation-attempt-b"),
+            text: "second turn",
+          }),
+        );
+        yield* harness.awaitTerminal(2);
+
+        assert.equal(harness.providerThread.nativeThreadRef?.nativeId, nativeThreadId);
+        assert.deepEqual(openedKeys, ["aix-key-a-sentinel", "aix-key-b-sentinel"]);
+        assert.deepEqual(closedProcesses, [0]);
+        const completedTool = harness.events.find(
+          (event) =>
+            event.type === "turn_item.updated" &&
+            event.turnItem.type === "dynamic_tool" &&
+            event.turnItem.status === "completed",
+        );
+        assert.equal(completedTool?.type, "turn_item.updated");
+        if (
+          completedTool?.type === "turn_item.updated" &&
+          completedTool.turnItem.type === "dynamic_tool"
+        ) {
+          assert.deepEqual(completedTool.turnItem.output, [
+            { type: "text", text: "continued tool result" },
+          ]);
+        } else {
+          assert.fail("The rotated Codex client did not deliver the completed tool result.");
+        }
+        assert.equal(JSON.stringify(harness.events).includes("aix-key-a-sentinel"), false);
+        assert.equal(JSON.stringify(harness.events).includes("aix-key-b-sentinel"), false);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(
+            IdAllocator.layer,
+            McpProviderSessions.layer,
+            NodeServices.layer,
+            NodeCrypto.layer,
+          ),
+        ),
+      ),
+  );
+
+  it.effect(
+    "keeps the aix Codex process when a completed turn still owns a background command",
+    () =>
+      Effect.gen(function* () {
+        let currentKey = "aix-key-background-a-sentinel";
+        const openedKeys: Array<string | undefined> = [];
+        const closedProcesses: Array<number> = [];
+        const transcript = makeCodexReplayTranscript({
+          ...backgroundExecTranscript,
+          entries: backgroundExecTranscript.entries.slice(0, -1),
+        });
+        const clientFactory: CodexAdapterV2.CodexAppServerClientFactoryShape = {
+          resolveAixLaunch: () =>
+            Effect.succeed({
+              environment: { T3_AIX_API_KEY: currentKey },
+              configArgs: ['model_provider="t3_aix"'],
+              extendEnv: false,
+            }),
+          open: (openInput) =>
+            Effect.gen(function* () {
+              const processIndex = openedKeys.length;
+              openedKeys.push(openInput.aixLaunch?.environment.T3_AIX_API_KEY);
+              yield* Effect.addFinalizer(() =>
+                Effect.sync(() => closedProcesses.push(processIndex)),
+              );
+              if (processIndex !== 0)
+                return yield* Effect.die("Unexpected Codex process open in test.");
+              const driver = yield* CodexReplay.makeReplayDriver(withConfigReads(transcript));
+              const context = yield* Layer.build(CodexReplay.layerReplayWithDriver(driver)).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new ProviderAdapter.ProviderAdapterOpenSessionError({
+                      driver: CodexAdapterV2.CODEX_DRIVER_KIND,
+                      providerSessionId: openInput.providerSessionId,
+                      cause,
+                    }),
+                ),
+              );
+              return yield* Effect.service(CodexClient.CodexAppServerClient).pipe(
+                Effect.provide(context),
+              );
+            }),
+        };
+        const harness = yield* makeCodexReplayHarness(
+          transcript,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          { T3_AIX_PROFILE: "background-profile" },
+          clientFactory,
+        );
+        const firstTurn = makeCodexTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now: yield* DateTime.now,
+          attemptId: RunAttemptId.make("aix-background-attempt-a"),
+          text: BG_PROMPT,
+        });
+        yield* harness.runtime.startTurn(firstTurn);
+        yield* harness.awaitTerminal(1);
+        assert.isTrue(yield* harness.hasPendingBackgroundWork);
+
+        currentKey = "aix-key-background-b-sentinel";
+        const secondStart = yield* Effect.result(
+          harness.runtime.startTurn({
+            ...firstTurn,
+            attemptId: RunAttemptId.make("aix-background-attempt-b"),
+            runId: RunId.make("run-aix-background-attempt-b"),
+            rootNodeId: NodeId.make("node-aix-background-attempt-b"),
+          }),
+        );
+        assert.equal(secondStart._tag, "Failure");
+        if (secondStart._tag === "Failure") {
+          const error = secondStart.failure;
+          assert.isTrue(Predicate.isObject(error) && Predicate.isObject(error.cause));
+          if (Predicate.isObject(error) && Predicate.isObject(error.cause)) {
+            assert.equal(
+              error.cause.message,
+              "Codex aix credentials changed while the app-server still has active work. Finish that work and start the turn again.",
+            );
+          }
+        }
+        assert.deepEqual(openedKeys, ["aix-key-background-a-sentinel"]);
+        assert.deepEqual(closedProcesses, []);
+        assert.equal(JSON.stringify(secondStart).includes("aix-key-background-a-sentinel"), false);
+        assert.equal(JSON.stringify(secondStart).includes("aix-key-background-b-sentinel"), false);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(
+            IdAllocator.layer,
+            McpProviderSessions.layer,
+            NodeServices.layer,
+            NodeCrypto.layer,
+          ),
+        ),
+      ),
+  );
+
+  it.effect("reuses the same Codex process across turns when the session is not aix-backed", () =>
+    Effect.gen(function* () {
+      const nativeThreadId = "codex-non-aix-reuse-thread";
+      const firstTurnId = "codex-non-aix-turn-a";
+      const secondTurnId = "codex-non-aix-turn-b";
+      const scenario = "codex-non-aix-session-reuse";
+      const firstPreamble = codexReplayPreamble({
+        nativeThreadId,
+        nativeTurnId: firstTurnId,
+        prompt: "first turn",
+      });
+      const secondPreamble = codexReplayPreamble({
+        nativeThreadId,
+        nativeTurnId: secondTurnId,
+        prompt: "second turn",
+      });
+      const completion = (turnId: string, label: string) => ({
+        type: "emit_inbound" as const,
+        label,
+        frame: {
+          method: "turn/completed",
+          params: {
+            threadId: nativeThreadId,
+            turn: makeCodexReplayTurn({ id: turnId, status: "completed" }),
+          },
+        },
+      });
+      const transcript = makeCodexReplayTranscript({
+        scenario,
+        entries: [
+          ...firstPreamble,
+          completion(firstTurnId, "first turn completed"),
+          ...secondPreamble
+            .slice(5)
+            .map((entry) =>
+              entry.type !== "runtime_exit" &&
+              Predicate.isObject(entry.frame) &&
+              typeof entry.frame.id === "number"
+                ? withReplayRequestId(entry, entry.frame.id + 1)
+                : entry,
+            ),
+          completion(secondTurnId, "second turn completed"),
+        ],
+      });
+      let processOpens = 0;
+      const clientFactory: CodexAdapterV2.CodexAppServerClientFactoryShape = {
+        open: (openInput) =>
+          Effect.gen(function* () {
+            processOpens++;
+            const driver = yield* CodexReplay.makeReplayDriver(withConfigReads(transcript));
+            const context = yield* Layer.build(CodexReplay.layerReplayWithDriver(driver)).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ProviderAdapter.ProviderAdapterOpenSessionError({
+                    driver: CodexAdapterV2.CODEX_DRIVER_KIND,
+                    providerSessionId: openInput.providerSessionId,
+                    cause,
+                  }),
+              ),
+            );
+            return yield* Effect.service(CodexClient.CodexAppServerClient).pipe(
+              Effect.provide(context),
+            );
+          }),
+      };
+      const harness = yield* makeCodexReplayHarness(
+        transcript,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        {},
+        clientFactory,
+      );
+      const start = (attempt: string, text: string, now: DateTime.Utc) =>
+        makeCodexTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now,
+          attemptId: RunAttemptId.make(attempt),
+          text,
+        });
+
+      yield* harness.runtime.startTurn(
+        start("codex-non-aix-attempt-a", "first turn", yield* DateTime.now),
+      );
+      yield* harness.awaitTerminal(1);
+      yield* harness.runtime.startTurn(
+        start("codex-non-aix-attempt-b", "second turn", yield* DateTime.now),
+      );
+      yield* harness.awaitTerminal(2);
+
+      assert.equal(processOpens, 1);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        Layer.mergeAll(
+          IdAllocator.layer,
+          McpProviderSessions.layer,
+          NodeServices.layer,
+          NodeCrypto.layer,
+        ),
+      ),
+    ),
+  );
 
   it.effect("keeps native image views available to the clients", () =>
     Effect.gen(function* () {
