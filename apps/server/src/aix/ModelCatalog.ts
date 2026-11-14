@@ -103,7 +103,7 @@ const isNonNegative = (value: number) => value >= 0;
 const CHAT_MODES = new Set(["chat", "responses"]);
 const NON_MODEL_PROVIDERS = new Set(["a2a"]);
 
-function knownNonChatId(id: string): boolean {
+export function knownNonChatId(id: string): boolean {
   const lower = id.toLowerCase();
   const name = lower.split("/").at(-1) ?? lower;
   return (
