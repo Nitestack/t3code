@@ -18,6 +18,7 @@ const syncScript = NodeURL.fileURLToPath(new URL("./upstream-stable-sync.mjs", i
 
 async function createSyncFixture({
   releases = ["v0.1.9", "v0.1.10"],
+  releaseApiPages,
   prCreateError,
   releaseApiError,
   pullRequestApiError,
@@ -105,7 +106,30 @@ const output = (value) => process.stdout.write(JSON.stringify(value));
 const fail = (message) => { process.stderr.write(message + "\\n"); process.exit(1); };
 if (args[0] === "api" && args.some((arg) => arg.includes("/releases?"))) {
   if (state.releaseApiError) fail(state.releaseApiError);
-  output(state.releasePages);
+  const projectionIndex = args.indexOf("--jq");
+  const projection = projectionIndex < 0 ? undefined : args[projectionIndex + 1];
+  if (projection) {
+    if (projection !== "map({tag_name, name, draft, prerelease})") {
+      fail("unexpected releases projection");
+    }
+    const projectedPages = state.releasePages.map((page) =>
+      page.map((release) => ({
+        tag_name: release?.tag_name ?? null,
+        name: release?.name ?? null,
+        draft: release?.draft ?? null,
+        prerelease: release?.prerelease ?? null,
+      })),
+    );
+    const response = projectedPages.map((page) => JSON.stringify(page)).join("\\n");
+    state.releaseProjection = {
+      pages: projectedPages,
+      outputBytes: Buffer.byteLength(response),
+    };
+    fs.writeFileSync(statePath, JSON.stringify(state));
+    process.stdout.write(response);
+  } else {
+    output(state.releasePages);
+  }
 } else if (args[0] === "api" && args.includes("--method") && args.includes("POST")) {
   if (state.dispatchError) fail(state.dispatchError);
   const ref = args.find((arg) => arg.startsWith("ref="))?.slice(4);
@@ -136,10 +160,11 @@ if (args[0] === "api" && args.some((arg) => arg.includes("/releases?"))) {
     draft: false,
     prerelease: false,
   }));
+  const pages = releaseApiPages ?? [stableReleases.slice(0, 1), stableReleases.slice(1)];
   await NodeFSP.writeFile(
     statePath,
     JSON.stringify({
-      releasePages: [stableReleases.slice(0, 1), stableReleases.slice(1)],
+      releasePages: pages,
       pullRequests: [],
       runs: [],
       prCreateError,
@@ -458,6 +483,123 @@ NodeTest.test("reports a releases API error at the gh boundary", async () => {
     } finally {
       await NodeFSP.rm(fixture.root, { recursive: true, force: true });
     }
+  }
+});
+
+NodeTest.test("projects paginated release metadata before buffering large API bodies", async () => {
+  const releaseApiPages = [
+    [
+      {
+        tag_name: "v0.1.9",
+        name: "T3 Code 0.1.9",
+        draft: false,
+        prerelease: false,
+      },
+    ],
+    [
+      {
+        tag_name: "v0.1.10",
+        name: "T3 Code 0.1.10",
+        draft: false,
+        prerelease: false,
+        body: "x".repeat(1_100_000),
+        assets: [{ name: "release.zip", url: "https://example.invalid/release.zip" }],
+      },
+      {
+        tag_name: "v0.1.11-rc.1",
+        name: "T3 Code 0.1.11 RC",
+        draft: false,
+        prerelease: true,
+      },
+      {
+        tag_name: "v0.1.11",
+        name: "T3 Code 0.1.11",
+        draft: true,
+        prerelease: false,
+      },
+      {
+        tag_name: "v0.1.11",
+        name: "Maintainer test build",
+        draft: false,
+        prerelease: false,
+      },
+      {
+        tag_name: "v0.1.12-preview.1",
+        name: "Preview",
+        draft: false,
+        prerelease: false,
+      },
+      {
+        tag_name: "test-build-2026-11-13",
+        name: "T3 Code test",
+        draft: false,
+        prerelease: false,
+      },
+    ],
+  ];
+  const fixture = await createSyncFixture({
+    releases: ["v0.1.9", "v0.1.10"],
+    releaseApiPages,
+    dryRun: true,
+  });
+  try {
+    const rawReleaseBytes = Buffer.byteLength(JSON.stringify(releaseApiPages));
+    NodeAssert.ok(rawReleaseBytes > 1_048_576);
+
+    const result = fixture.runSync();
+    NodeAssert.equal(result.status, 0, result.output);
+    NodeAssert.match(result.output, /Upstream stable sync: v0\.1\.10/);
+    NodeAssert.match(result.output, /Dry run only/);
+
+    const state = await fixture.readState();
+    NodeAssert.deepEqual(state.releaseProjection.pages, [
+      [
+        {
+          tag_name: "v0.1.9",
+          name: "T3 Code 0.1.9",
+          draft: false,
+          prerelease: false,
+        },
+      ],
+      releaseApiPages[1].map(({ tag_name, name, draft, prerelease }) => ({
+        tag_name,
+        name,
+        draft,
+        prerelease,
+      })),
+    ]);
+    NodeAssert.ok(state.releaseProjection.outputBytes < 1_048_576);
+    const releaseCall = (await fixture.readCalls()).find((args) =>
+      args.some((argument) => argument.includes("/releases?")),
+    );
+    NodeAssert.ok(releaseCall.includes("--paginate"));
+    NodeAssert.ok(releaseCall.includes("--jq"));
+    NodeAssert.equal(releaseCall.includes("--slurp"), false);
+  } finally {
+    await NodeFSP.rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+NodeTest.test("rejects malformed projected release metadata", async () => {
+  const fixture = await createSyncFixture({
+    releaseApiPages: [
+      [
+        {
+          tag_name: "v0.1.10",
+          name: "T3 Code 0.1.10",
+          draft: false,
+          prerelease: "false",
+        },
+      ],
+    ],
+    dryRun: true,
+  });
+  try {
+    const result = fixture.runSync();
+    NodeAssert.equal(result.status, 1);
+    NodeAssert.match(result.output, /unexpected upstream release entry/);
+  } finally {
+    await NodeFSP.rm(fixture.root, { recursive: true, force: true });
   }
 });
 
