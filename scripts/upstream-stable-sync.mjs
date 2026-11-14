@@ -380,19 +380,36 @@ function readIntegratedMarker(mainRef, releases) {
 function getPublishedReleases() {
   const output = run(
     "gh",
-    ["api", "--paginate", "--slurp", `repos/${UPSTREAM_REPOSITORY}/releases?per_page=100`],
+    [
+      "api",
+      "--paginate",
+      "--jq",
+      "map({tag_name, name, draft, prerelease})",
+      `repos/${UPSTREAM_REPOSITORY}/releases?per_page=100`,
+    ],
     { githubOperation: "upstreamReleases" },
   );
   let pages;
   try {
-    pages = JSON.parse(output);
+    pages = output.split("\n").map((page) => JSON.parse(page));
   } catch {
     throw new Error("GitHub returned invalid JSON for the upstream releases API.");
   }
-  if (!Array.isArray(pages))
+  if (!pages.every(Array.isArray))
     throw new Error("GitHub returned an unexpected upstream releases response.");
   const releases = pages.flat(Infinity);
-  if (!releases.every((release) => release && typeof release === "object")) {
+  if (
+    !releases.every(
+      (release) =>
+        release &&
+        typeof release === "object" &&
+        !Array.isArray(release) &&
+        typeof release.tag_name === "string" &&
+        (release.name === null || typeof release.name === "string") &&
+        typeof release.draft === "boolean" &&
+        typeof release.prerelease === "boolean",
+    )
+  ) {
     throw new Error("GitHub returned an unexpected upstream release entry.");
   }
   return releases;
