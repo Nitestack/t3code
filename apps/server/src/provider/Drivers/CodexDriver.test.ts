@@ -378,6 +378,10 @@ it.layer(layerTest)("CodexDriver", (it) => {
         yield* fs.writeFileString(binaryPath, "#!/bin/sh\n");
         yield* fs.chmod(binaryPath, 0o755);
 
+        const hostEnvironment = {
+          ...(yield* HostProcess.Environment),
+          T3_AIX_PROFILE: "host-profile-marker",
+        };
         const instance = yield* CodexDriver.create({
           instanceId: ProviderInstanceId.make("codex-shadow"),
           displayName: "Codex test",
@@ -389,7 +393,8 @@ it.layer(layerTest)("CodexDriver", (it) => {
             homePath: sharedHome,
             shadowHomePath: shadowHome,
           },
-        });
+        }).pipe(Effect.provideService(HostProcess.Environment, hostEnvironment));
+        expect(hostEnvironment.T3_AIX_PROFILE).toBe("host-profile-marker");
 
         const capabilities = yield* instance.snapshot.resolveMaintenance();
         expect(capabilities.update).toMatchObject({

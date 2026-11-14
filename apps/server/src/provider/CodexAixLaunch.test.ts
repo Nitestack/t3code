@@ -124,6 +124,32 @@ it.effect("normalizes a prefixed URL to one final /v1", () =>
   }),
 );
 
+it.effect("rejects remote plaintext credentials while permitting loopback development", () =>
+  Effect.gen(function* () {
+    for (const endpoint of [
+      "http://remote.example",
+      "http://localhost.example",
+      "http://127.0.0.1",
+      "http://localhost",
+      "http://[::1]",
+    ]) {
+      const result = yield* Effect.result(
+        withAix(
+          resolveCodexAixLaunch({
+            environment: { T3_AIX_PROFILE: "fixture" },
+            launchArgs: "",
+          }),
+          (profile) => ({ stdout: profileJson(profile, sentinelA, endpoint) }),
+        ),
+      );
+      const loopback = ["127.0.0.1", "localhost", "[::1]"].includes(new URL(endpoint).hostname);
+      assert.equal(result._tag, loopback ? "Success" : "Failure");
+      if (result._tag === "Failure")
+        assert.equal(JSON.stringify(result).includes(sentinelA), false);
+    }
+  }),
+);
+
 it.effect("applies key rotation only to a later native process launch", () =>
   Effect.gen(function* () {
     let currentKey = sentinelA;

@@ -1816,7 +1816,9 @@ export const createCodexAdapterV2 = Effect.fn("CodexAdapterV2.createCodexAdapter
     homePath: homeLayout.effectiveHomePath ?? "",
   } satisfies CodexSettings;
 
-  const processEnvironment = yield* mergeProviderInstanceEnvironment(environment, hostEnvironment);
+  const processEnvironment = {
+    ...(yield* mergeProviderInstanceEnvironment(environment, hostEnvironment)),
+  };
   if (!environment.some(({ name }) => name === "T3_AIX_PROFILE")) {
     delete processEnvironment.T3_AIX_PROFILE;
   }

@@ -209,10 +209,9 @@ export const CodexDriver: ProviderDriver<
     const installation = yield* CodexInstallation.CodexInstallation;
     const modelCatalog = yield* ModelCatalog.ModelCatalog;
     const currentCatalog = modelCatalog.current(DRIVER_KIND);
-    const processEnv = yield* mergeProviderInstanceEnvironment(
-      environment,
-      yield* HostProcess.Environment,
-    );
+    const processEnv = {
+      ...(yield* mergeProviderInstanceEnvironment(environment, yield* HostProcess.Environment)),
+    };
     if (aixProfiles.length === 0) delete processEnv.T3_AIX_PROFILE;
     const environmentHome = processEnv.CODEX_HOME;
     const homeConfig =

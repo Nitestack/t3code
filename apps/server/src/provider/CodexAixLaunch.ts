@@ -10,10 +10,19 @@ const API_KEY_ENV = "T3_AIX_API_KEY";
 
 export class CodexAixLaunchError extends Schema.TaggedError<CodexAixLaunchError>()(
   "CodexAixLaunchError",
-  { reason: Schema.Literals(["invalid-profile", "unsupported-endpoint", "launch-conflict"]) },
+  {
+    reason: Schema.Literals([
+      "invalid-profile",
+      "unsupported-endpoint",
+      "launch-conflict",
+      "insecure-endpoint",
+    ]),
+  },
 ) {
   override get message(): string {
     switch (this.reason) {
+      case "insecure-endpoint":
+        return "Codex aix gateway authentication requires HTTPS outside loopback.";
       case "invalid-profile":
         return "The aix profile reference is invalid or could not be resolved.";
       case "unsupported-endpoint":
@@ -103,11 +112,19 @@ export const resolveCodexAixLaunch = Effect.fn("CodexAixLaunch.resolve")(functio
     return yield* new CodexAixLaunchError({ reason: "launch-conflict" });
   }
 
-  const resolved = yield* AixDiscovery.resolveEnvironment(profileName, {
-    endpointKind: "litellm",
-  }).pipe(Effect.mapError(() => new CodexAixLaunchError({ reason: "invalid-profile" })));
+  const resolved = yield* AixDiscovery.resolveEnvironment(profileName).pipe(
+    Effect.mapError(() => new CodexAixLaunchError({ reason: "invalid-profile" })),
+  );
   if (resolved.endpointKind === "anthropic") {
     return yield* new CodexAixLaunchError({ reason: "unsupported-endpoint" });
+  }
+
+  const endpoint = new URL(resolved.endpoint);
+  if (
+    endpoint.protocol === "http:" &&
+    !["localhost", "127.0.0.1", "[::1]"].includes(endpoint.hostname)
+  ) {
+    return yield* new CodexAixLaunchError({ reason: "insecure-endpoint" });
   }
 
   const environment = { ...input.environment };
