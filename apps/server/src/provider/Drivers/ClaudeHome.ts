@@ -1,4 +1,8 @@
-import type { ClaudeSettings, ProviderInstanceEnvironment } from "@t3tools/contracts";
+import type {
+  ClaudeSettings,
+  ProviderInstanceEnvironment,
+  ResolvedProviderInstanceEnvironment,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -8,9 +12,51 @@ import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 
+import * as AixDiscovery from "../AixDiscovery.ts";
 import { readClaudeSettingsEnv } from "./ClaudeSkills.ts";
 
 const quotePath = Schema.encodeSync(Schema.fromJsonString(Schema.String));
+const AIX_PROFILE_ENVIRONMENT_VARIABLE = "T3_AIX_PROFILE";
+
+class ClaudeAixProfileError extends Schema.TaggedError<ClaudeAixProfileError>()(
+  "ClaudeAixProfileError",
+  { reason: Schema.Literals(["invalid-reference", "unsupported-endpoint"]) },
+) {
+  override get message(): string {
+    return this.reason === "invalid-reference"
+      ? "The configured aix profile reference is invalid."
+      : "The selected aix profile endpoint is not supported by Claude.";
+  }
+}
+
+export const resolveClaudeProviderInstanceEnvironment = Effect.fn(
+  "resolveClaudeProviderInstanceEnvironment",
+)(function* (environment: ResolvedProviderInstanceEnvironment | undefined) {
+  const profileReferences =
+    environment?.filter((variable) => variable.name === AIX_PROFILE_ENVIRONMENT_VARIABLE) ?? [];
+  if (profileReferences.length === 0) return environment ?? [];
+  const [profileReference] = profileReferences;
+  if (
+    profileReferences.length !== 1 ||
+    profileReference === undefined ||
+    profileReference.sensitive ||
+    typeof profileReference.value !== "string" ||
+    profileReference.value.trim().length === 0
+  ) {
+    return yield* new ClaudeAixProfileError({ reason: "invalid-reference" });
+  }
+
+  const resolved = yield* AixDiscovery.resolveEnvironment(profileReference.value.trim());
+  if (resolved.endpointKind !== "anthropic") {
+    return yield* new ClaudeAixProfileError({ reason: "unsupported-endpoint" });
+  }
+
+  return [
+    ...(environment ?? []).filter((variable) => variable.name !== AIX_PROFILE_ENVIRONMENT_VARIABLE),
+    { name: "ANTHROPIC_BASE_URL", value: resolved.endpoint, sensitive: false },
+    { name: "ANTHROPIC_API_KEY", value: resolved.apiKey, sensitive: true },
+  ];
+});
 
 export const resolveClaudeHomePath = Effect.fn("resolveClaudeHomePath")(function* (
   config: Pick<ClaudeSettings, "homePath">,

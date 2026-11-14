@@ -106,6 +106,30 @@ const noSpawn = ChildProcessSpawner.make(() =>
 const encodeCredentials = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 
 it.layer(layerTest)("CodexDriver", (it) => {
+  it.effect("rejects aix profile references without exposing instance credentials", () =>
+    Effect.gen(function* () {
+      const result = yield* Effect.result(
+        CodexDriver.create({
+          instanceId: ProviderInstanceId.make("codex-aix-unsupported"),
+          displayName: "Aix profile",
+          enabled: true,
+          environment: [
+            { name: "T3_AIX_PROFILE", value: "research", sensitive: false },
+            { name: "ANTHROPIC_API_KEY", value: "fake-aix-key-must-not-leak", sensitive: true },
+          ],
+          config: CodexDriver.defaultConfig(),
+        }),
+      );
+
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect(result.failure.message).toContain("Aix profiles are not supported by Codex.");
+        expect(result.failure.message).not.toContain("fake-aix-key-must-not-leak");
+        expect(JSON.stringify(result.failure)).not.toContain("fake-aix-key-must-not-leak");
+      }
+    }),
+  );
+
   const checkManagedAccount = (replacementTiming: "unchanged" | "during-probe") =>
     Effect.gen(function* () {
       const instanceId = ProviderInstanceId.make("restored-managed-account");

@@ -3378,6 +3378,8 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     > &
       Partial<Pick<ClaudeAdapterV2.ClaudeAgentSdkQuerySession, "listPermissionRules">>;
     readonly environment?: NodeJS.ProcessEnv;
+    readonly restartProcessForNewTurn?: boolean;
+    readonly resolveProcessEnvironment?: ClaudeAdapterV2.ClaudeAdapterV2Options["resolveProcessEnvironment"];
     readonly subagentLaunchToolUseId?: string;
     readonly subagentModel?: string;
     readonly nativeSessionId?: string;
@@ -3446,6 +3448,10 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         settings: options?.settings ?? DEFAULT_CLAUDE_SETTINGS,
         ...(options?.modelCatalog === undefined ? {} : { modelCatalog: options.modelCatalog }),
         environment: options?.environment ?? {},
+        ...(options?.restartProcessForNewTurn === true ? { restartProcessForNewTurn: true } : {}),
+        ...(options?.resolveProcessEnvironment === undefined
+          ? {}
+          : { resolveProcessEnvironment: options.resolveProcessEnvironment }),
         attachmentsDir,
         fileSystem,
         path: yield* Path.Path,
@@ -3643,6 +3649,72 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       };
     });
   const makeWakeHarness = makeWakeHarnessWithOptions();
+
+  it.effect("resolves a rotated aix credential for the next Claude process only", () =>
+    Effect.gen(function* () {
+      let currentApiKey = "fake-aix-key-before-rotation";
+      const harness = yield* makeWakeHarnessWithOptions({
+        freshQueueOnReopen: true,
+        restartProcessForNewTurn: true,
+        resolveProcessEnvironment: () =>
+          Effect.succeed({
+            ANTHROPIC_BASE_URL: "https://api.anthropic.com",
+            ANTHROPIC_API_KEY: currentApiKey,
+          }),
+      });
+      const turn = (ordinal: number) =>
+        makeClaudeTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now: DateTime.makeUnsafe(0),
+          attemptId: RunAttemptId.make(`aix-rotation-${ordinal}`),
+          text: "Continue.",
+          attachments: [],
+          providerTurnOrdinal: ordinal,
+        });
+
+      yield* harness.runtime.startTurn(turn(1));
+      assert.equal(
+        harness.getOpenedOptions()?.env?.ANTHROPIC_API_KEY,
+        "fake-aix-key-before-rotation",
+      );
+      currentApiKey = "fake-aix-key-after-rotation";
+      assert.equal(
+        harness.getOpenedOptions()?.env?.ANTHROPIC_API_KEY,
+        "fake-aix-key-before-rotation",
+      );
+      yield* harness.offerAndWait(
+        makeResultFrame({
+          uuid: "00000000-0000-4000-8000-000000009901",
+          result: "First process completed.",
+        }),
+      );
+      yield* harness.awaitTerminal(1);
+
+      yield* harness.runtime.startTurn(turn(2));
+      assert.equal(
+        harness.getOpenedOptions()?.env?.ANTHROPIC_API_KEY,
+        "fake-aix-key-after-rotation",
+      );
+      yield* harness.offerAndWait(
+        makeResultFrame({
+          uuid: "00000000-0000-4000-8000-000000009902",
+          result: "Second process completed.",
+        }),
+      );
+      yield* harness.awaitTerminal(2);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        Layer.mergeAll(
+          IdAllocator.layer,
+          McpProviderSessions.layer,
+          NodeServices.layer,
+          NodeCrypto.layer,
+        ),
+      ),
+    ),
+  );
 
   it.effect("resumes the session a /clear selected after the Claude process is replaced", () =>
     Effect.gen(function* () {
