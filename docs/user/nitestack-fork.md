@@ -1,45 +1,48 @@
 # Nitestack/t3code fork
 
 Nitestack/t3code is a soft fork of [T3 Code](https://github.com/pingdotgg/t3code), created by
-pingdotgg and distributed under the MIT License. The fork develops runtime support for [aix](https://github.com/Nitestack/aix)
+pingdotgg and distributed under the MIT License. It preserves T3's supported providers, threads,
+and remote access while developing runtime support for [aix](https://github.com/Nitestack/aix)
 API-key profiles and client-side Work/Personal views of connected environments.
-
-## What works today
-
-The source checkout includes T3's web and desktop clients, provider integrations, remote access,
-portable handoffs, and a Work/Personal view in web and desktop. The view is a development preview:
-the real-client pass across two environments, including active-task and notification behavior, is
-still open. It only filters what the client shows; it is not an access-control or data-isolation
-boundary.
-
-The server contains aix discovery and LiteLLM catalog modules, but no supported setting or command
-activates aix profiles, and there is no aix profile/model picker or thread profile switch. T3's
-existing handoffs continue to work for its supported providers; they do not select aix profiles.
-Installing aix alone does not enable aix in T3.
 
 ## aix profiles and native compatibility
 
 Use the [aix setup and profile guide](https://github.com/Nitestack/aix/blob/main/README.md) to
-configure aix itself. This fork does not yet offer an aix activation control. Keep API keys in aix's
-credential handling rather than adding them to T3 settings or Nix configuration.
+configure aix itself. This fork does not yet provide a supported T3 control to activate aix
+profiles or select their models. Installing aix alone does not make its profiles available in T3.
 
-The [native compatibility findings](../fork/t01-native-agent-spike.md) record partial results for
-Codex, Claude Code, and OpenCode. One direct Anthropic Claude route completed a tool-using turn; a
-Codex run failed before a tool or final response; two OpenCode runs did not echo the requested model
-ID. These results do not approve general aix routing. Profile isolation, credential rotation, and
-profile-switch handoff remain unverified. See [portable handoffs](./portable-handoffs.md) for T3's
-existing context-transfer behavior.
+Partial aix development work exists, but there is no end-user setup flow. The only credential path
+implemented so far is scoped to direct Anthropic Claude profiles; its fixture coverage does not
+establish a working native T3 Claude CLI flow. LiteLLM profiles and OpenCode are not available as
+aix product features. A Codex probe failed before a tool result or final response, but that single
+result does not establish general incompatibility. The
+[native compatibility report](../fork/t01-native-agent-spike.md) records the tested combinations
+and evidence limits.
 
-## Catalog and Work/Personal status
+The direct Anthropic Claude probe completed a tool call and final response for the requested model.
+It does not validate LiteLLM aliases or arbitrary models. The T3 credential-boundary fixtures are
+offline tests; they are not proof of a live aix profile flow. API keys remain in aix's credential
+handling and should not be added to T3 settings or Nix configuration.
 
-Catalog discovery and normalization code is present, but it does not populate a user-facing aix
-picker. There is no supported catalog refresh command or stale-cache behavior for aix profiles.
-Installing aix or changing its profile will not activate T3 catalog refresh.
+There is no user-facing aix picker, manual catalog refresh, or stale-catalog behavior. T3's existing
+[portable handoffs](./portable-handoffs.md) continue to work for supported provider switches, but
+aix profile switching and its context handoff have not been verified.
 
-The web and desktop Work/Personal view uses locally stored environment classifications. The
-integrated real-client pass is still open, so do not rely on it to verify active-task or
-cross-scope notification behavior. The view does not change server permissions, running tasks, or
-data access. For actual server separation, use distinct T3 data directories as described below.
+## Work/Personal and mobile
+
+The web and desktop source includes a Work/Personal view that filters connected environments using
+locally stored classifications. It is a preview: the full real-client pass across two environments,
+including search routes, active-task behavior, and notifications, remains open. The view is only a
+client-side filter. It does not provide access control or isolate server data. For actual server
+separation, run separate T3 data directories using `T3CODE_HOME` as described in the
+[isolated Nix launch guide](./install.md#t3-code-fork-nix).
+
+An Android variant and build workflow are in the source, but there is no verified signed APK or
+published fork download. See the
+[Android build guide](../operations/android-fork-apk.md) for build status; upstream Android
+downloads are not fork builds. The official Android and iOS apps are unchanged upstream clients,
+and their compatibility with a fork server has not been established. The official iOS app has no
+fork-specific Work/Personal switch.
 
 ## Run the source checkout
 
@@ -55,46 +58,37 @@ T3CODE_HOME="$HOME/.t3-nitestack" vp run dev
 
 Open the local address printed at startup. Set up a supported T3 provider on the machine running
 the server before starting a thread. Give every independent server a separate `T3CODE_HOME`,
-including an original T3 server. For NixOS development, see the [pinned development shell guide](../operations/devenv.md).
-Connect other clients using the existing [remote access guide](./remote-access.md). Live
-fork-client and official-mobile compatibility with a fork server remains unverified.
+including an original T3 server. For NixOS development, see the
+[pinned development shell guide](../operations/devenv.md). Connect other clients using the existing
+[remote access guide](./remote-access.md).
 
-## Nix and clients
+## Nix install
 
 The repository has a pinned source flake for `x86_64-linux`, with separate `t3code-fork` and
 `t3code-fork-desktop` commands. It builds the application from a reviewed source commit; there is
 no published fork binary package. Follow the [Nix install and isolated launch instructions](./install.md#t3-code-fork-nix).
-Nix installs the application only. It does not configure aix profiles or place API keys or
-resolved endpoints in the store. A Linux smoke ran nixpkgs T3 `0.1.8` alongside fork build
-`0.1.9-fork.f54c668`; both returned HTTP 200 with separate T3 homes, Electron locks, and
-environment IDs, and cleanup was verified. The smoke did not change or test an aix profile.
-
-There are no published Nitestack desktop installers or verified signed Android APKs. The source
-includes an Android variant and [build workflow instructions](../operations/android-fork-apk.md),
-but signing-secret setup, a successful signed release build, and an install smoke test remain open.
-The official Android and iOS apps are unchanged upstream clients. The iOS app has no fork-specific
-Work/Personal switch, and live compatibility of official mobile clients with a fork server has not
-been established.
+Nix installs the application only. It does not configure aix profiles or place API keys or resolved
+endpoints in the store. The Linux coexistence smoke used separate data homes and desktop locks; it
+did not configure or test an aix profile.
 
 ## Updates
 
-A guarded stable-release sync workflow is present in the source, scheduled daily at 23:37 UTC.
-Manual dispatch defaults to a dry run, which creates no PR. A non-dry-run is intended to propose a
-reviewable PR when it finds a new stable upstream release; no successful sync dispatch or sync PR
-has been demonstrated. It does not auto-merge or publish a fork release. The first push-triggered
-fixture run failed during checkout before the sync script started, and the fork's GitHub token
-policy currently prevents PR creation. A narrow CI repair is in progress.
-See the [workflow source](../../.github/workflows/upstream-stable-sync.yml).
+The source includes a guarded workflow for checking stable upstream releases. It runs daily, and
+manual dispatch defaults to a dry run that creates no PR. A
+[manual dry run](https://github.com/Nitestack/t3code/actions/runs/43554789828) completed an
+up-to-date check successfully. A non-dry-run is intended to propose a PR when a new stable release
+is found; automatic PR creation remains unverified and is currently blocked by the repository's
+Actions policy. The workflow does not auto-merge or publish a fork release. See the
+[workflow source](../../.github/workflows/upstream-stable-sync.yml).
 
-Until a reviewed update is available on the fork's remote, update a clean source checkout to the
-fork's current `main` with:
+To update a clean source checkout to the fork's current `main`:
 
 ```sh
 git pull --ff-only origin main
 vp i
 ```
 
-Then restart with the same `T3CODE_HOME`. Before upgrading, keep a copy of that data directory:
+Then restart with the same `T3CODE_HOME`. Before upgrading, keep a copy of that data directory;
 checking out older source does not roll back database migrations. To return to a known-good source
 revision, stop the server and run `git switch --detach <known-good-commit>`, then `vp i` and restart.
 Do not use the upstream desktop updater or Nix package to update this fork.
