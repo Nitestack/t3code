@@ -699,7 +699,41 @@ jobs:
         run: node apps/web/node_modules/playwright/cli.js install --with-deps --only-shell chromium
 
       - name: Test web
-        run: vp run --filter @t3tools/web test
+        env:
+          DEBUG: pw:browser
+        run: |
+          memory_events=/sys/fs/cgroup/memory.events
+          memory_peak=/sys/fs/cgroup/memory.peak
+          if [ -r "$memory_events" ]; then
+            echo "::group::Runner cgroup memory before web tests"
+            echo "memory.events"
+            cat "$memory_events"
+            if [ -r "$memory_peak" ]; then
+              echo "memory.peak bytes"
+              cat "$memory_peak"
+            fi
+            echo "::endgroup::"
+          else
+            echo "Runner cgroup memory counters unavailable"
+          fi
+
+          set +e
+          vp run --filter @t3tools/web test
+          test_status=$?
+          set -e
+
+          if [ -r "$memory_events" ]; then
+            echo "::group::Runner cgroup memory after web tests"
+            echo "memory.events"
+            cat "$memory_events"
+            if [ -r "$memory_peak" ]; then
+              echo "memory.peak bytes"
+              cat "$memory_peak"
+            fi
+            echo "::endgroup::"
+          fi
+
+          exit "$test_status"
 
   fork_desktop:
     name: Fork Desktop Build
