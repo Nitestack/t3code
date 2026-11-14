@@ -20,6 +20,10 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
+import * as Sink from "effect/Sink";
+import * as Stream from "effect/Stream";
+import { ChildProcessSpawner } from "effect/process";
+import * as ChildProcess from "effect/process/ChildProcess";
 import { createModelSelection } from "@t3tools/shared/model";
 import { expect } from "vite-plus/test";
 
@@ -59,6 +63,10 @@ interface FakeCodexInput {
   requiredCwd?: string;
   requireInstructions?: string;
   requireMcpServersOff?: ReadonlyArray<string>;
+  aixProfile?: string;
+  aixApiKey?: string;
+  requireAixKey?: string;
+  requireModel?: string;
 }
 
 function makeFakeCodexBinary(dir: string, input: FakeCodexInput) {
@@ -78,6 +86,9 @@ function makeFakeCodexBinary(dir: string, input: FakeCodexInput) {
     stderr: input.stderr ?? null,
     output: input.output,
     exitCode: input.exitCode ?? 0,
+    aixProfile: input.aixProfile ?? null,
+    requireAixKey: input.requireAixKey ?? null,
+    requireModel: input.requireModel ?? null,
   });
   return Effect.gen(function* () {
     const path = yield* Path.Path;
@@ -89,6 +100,8 @@ function makeFakeCodexBinary(dir: string, input: FakeCodexInput) {
         `const check = ${check};`,
         "const args = process.argv.slice(2);",
         'const isMcpList = args.includes("mcp") && args.includes("list");',
+        'if (check.requireAixKey !== null && process.env.T3_AIX_API_KEY !== check.requireAixKey) fail("missing aix credential", 14);',
+        'if (check.requireAixKey !== null && process.env.OPENAI_API_KEY !== undefined) fail("host credential leaked into aix child", 15);',
         ...(input.lifecycle === undefined
           ? []
           : [
@@ -163,6 +176,9 @@ function makeFakeCodexBinary(dir: string, input: FakeCodexInput) {
         "if (check.requireArg !== null && !originalArgs.includes(` ${check.requireArg} `)) {",
         '  fail("missing arg: " + check.requireArg, 8);',
         "}",
+        "if (check.requireModel !== null && !originalArgs.includes(`--model ${check.requireModel}`)) {",
+        '  fail("wrong selected model", 16);',
+        "}",
         "if (check.forbidArg !== null && originalArgs.includes(` ${check.forbidArg} `)) {",
         '  fail("forbidden arg: " + check.forbidArg, 9);',
         "}",
@@ -217,9 +233,49 @@ function withFakeCodexEnv<A, E, R>(
       launchArgs: input.launchArgs,
       customModels: input.customModels,
     });
+    const parentSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const aixSpawner =
+      input.aixProfile === undefined
+        ? parentSpawner
+        : ChildProcessSpawner.make((command) => {
+            if (ChildProcess.isStandardCommand(command) && command.command === "aix") {
+              const encoder = new TextEncoder();
+              return Effect.succeed(
+                ChildProcessSpawner.makeHandle({
+                  pid: ChildProcessSpawner.ProcessId(900_000_421),
+                  exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(0)),
+                  isRunning: Effect.succeed(false),
+                  kill: () => Effect.void,
+                  unref: Effect.succeed(Effect.void),
+                  stdin: Sink.drain,
+                  stdout: Stream.make(
+                    encoder.encode(
+                      JSON.stringify({
+                        AIX_PROFILE: input.aixProfile,
+                        OPENAI_API_KEY: input.aixApiKey ?? "aix-title-test-key",
+                        OPENAI_BASE_URL: "https://gateway.test/tenant/v1",
+                      }),
+                    ),
+                  ),
+                  stderr: Stream.empty,
+                  all: Stream.empty,
+                  getInputFd: () => Sink.drain,
+                  getOutputFd: () => Stream.empty,
+                }),
+              );
+            }
+            return parentSpawner.spawn(command);
+          });
     const textGeneration = yield* makeCodexTextGeneration(
       config,
-      input.environment === undefined ? undefined : { ...process.env, ...input.environment },
+      input.environment === undefined && input.aixProfile === undefined
+        ? undefined
+        : {
+            ...process.env,
+            ...input.environment,
+            ...(input.aixProfile === undefined ? {} : { T3_AIX_PROFILE: input.aixProfile }),
+            ...(input.aixProfile === undefined ? {} : { OPENAI_API_KEY: "host-auth-sentinel" }),
+          },
       Effect.succeed(
         (input.models ?? []).map((slug) => ({
           slug,
@@ -236,8 +292,10 @@ function withFakeCodexEnv<A, E, R>(
             revision: "test",
           })
         : undefined,
+    ).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, aixSpawner));
+    return yield* effectFn(textGeneration).pipe(
+      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, aixSpawner),
     );
-    return yield* effectFn(textGeneration);
   }).pipe(Effect.scoped);
 }
 
@@ -315,6 +373,64 @@ it.layer(layerCodexTextGenerationTest)("CodexTextGeneration", (it) => {
             expect(result.title).toBe("Live title");
           }),
       ),
+  );
+
+  it.effect(
+    "keeps the selected aix model for title generation without host auth or effort overrides",
+    () =>
+      withFakeCodexEnv(
+        {
+          output: JSON.stringify({ title: "Aix title" }),
+          aixProfile: "engineering",
+          aixApiKey: "aix-title-test-key",
+          requireAixKey: "aix-title-test-key",
+          models: ["gpt-6-astra"],
+          requireArg: 'model_provider="t3_aix"',
+          requireModel: "gateway/raw-model",
+          forbidArg: "aix-title-test-key",
+          forbidReasoningEffort: true,
+        },
+        (textGeneration) =>
+          textGeneration.generateThreadTitle({
+            cwd: process.cwd(),
+            message: "Describe this change",
+            modelSelection: createModelSelection(
+              ProviderInstanceId.make("codex"),
+              "gateway/raw-model",
+              [{ id: "reasoningEffort", value: "none" }],
+            ),
+          }),
+      ),
+  );
+
+  it.effect("redacts an aix API key echoed by a failed title process", () =>
+    withFakeCodexEnv(
+      {
+        output: "",
+        exitCode: 1,
+        stderr: "gateway rejected request containing aix-title-error-sentinel",
+        aixProfile: "engineering",
+        aixApiKey: "aix-title-error-sentinel",
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const result = yield* Effect.result(
+            textGeneration.generateThreadTitle({
+              cwd: process.cwd(),
+              message: "Describe this change",
+              modelSelection: createModelSelection(
+                ProviderInstanceId.make("codex"),
+                "gateway/raw-model",
+              ),
+            }),
+          );
+          expect(result._tag).toBe("Failure");
+          expect(JSON.stringify(result).includes("aix-title-error-sentinel")).toBe(false);
+          if (result._tag === "Failure") {
+            expect(result.failure.message).toContain("[redacted]");
+          }
+        }),
+    ),
   );
 
   it.effect("drops the requested model's options when falling back to another model", () =>

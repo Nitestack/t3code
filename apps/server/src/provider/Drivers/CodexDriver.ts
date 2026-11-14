@@ -167,11 +167,28 @@ export const CodexDriver: ProviderDriver<
     enabled,
     config,
   }) {
-    if (environment.some(({ name }) => name === "T3_AIX_PROFILE")) {
+    const aixProfiles = environment.filter(({ name }) => name === "T3_AIX_PROFILE");
+    if (
+      aixProfiles.length > 1 ||
+      aixProfiles.some(
+        (variable) =>
+          typeof variable.value !== "string" ||
+          variable.value.trim().length === 0 ||
+          variable.value !== variable.value.trim() ||
+          variable.sensitive,
+      )
+    ) {
       return yield* new ProviderDriverError({
         driver: DRIVER_KIND,
         instanceId,
-        detail: "Aix profiles are not supported by Codex.",
+        detail: "The aix profile reference is invalid or could not be resolved.",
+      });
+    }
+    if (aixProfiles.length > 0 && config.setupMode === "managed") {
+      return yield* new ProviderDriverError({
+        driver: DRIVER_KIND,
+        instanceId,
+        detail: "Codex aix profiles are not supported by managed setup mode.",
       });
     }
     if (config.setupMode === "managed")
@@ -196,6 +213,7 @@ export const CodexDriver: ProviderDriver<
       environment,
       yield* HostProcess.Environment,
     );
+    if (aixProfiles.length === 0) delete processEnv.T3_AIX_PROFILE;
     const environmentHome = processEnv.CODEX_HOME;
     const homeConfig =
       !config.homePath.trim() && environmentHome?.trim()

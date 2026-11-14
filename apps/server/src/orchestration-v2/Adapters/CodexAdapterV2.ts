@@ -123,6 +123,7 @@ import {
 } from "../../provider/EventNdjsonLogger.ts";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
 import { codexAppServerArgs, resolveCodexLaunchArgs } from "../../provider/codexLaunchArgs.ts";
+import { resolveCodexAixLaunch } from "../../provider/CodexAixLaunch.ts";
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
 import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
@@ -1708,16 +1709,31 @@ export const layerAppServerClientFactory: Layer.Layer<
     return CodexAppServerClientFactory.of({
       open: Effect.fn("CodexAdapterV2.open")(function* (input) {
         const scope = yield* Scope.Scope;
-        const environment = {
+        const processEnvironment = {
           ...codexAppServerEnvironment(input.environment),
           ...(input.settings.homePath ? { CODEX_HOME: input.settings.homePath } : {}),
         };
+        const launchArgs = resolveCodexLaunchArgs(input.settings.launchArgs, input.environment);
+        const aixLaunch = yield* resolveCodexAixLaunch({
+          environment: processEnvironment,
+          launchArgs,
+        }).pipe(
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+          Effect.mapError(
+            (cause) =>
+              new ProviderAdapter.ProviderAdapterOpenSessionError({
+                driver: CODEX_PROVIDER,
+                providerSessionId: input.providerSessionId,
+                cause: new Error(cause.message),
+              }),
+          ),
+        );
+        const environment = aixLaunch.environment;
         const command = yield* makeCodexAppServerSpawnCommand({
           command: input.settings.binaryPath || "codex",
-          args: codexAppServerArgs(
-            resolveCodexLaunchArgs(input.settings.launchArgs, input.environment),
-          ),
+          args: [...codexAppServerArgs(launchArgs), ...aixLaunch.configArgs],
           env: environment,
+          extendEnv: aixLaunch.extendEnv,
           threadId: input.threadId,
         }).pipe(Effect.provideService(AgentScope, agentScope));
         const handle = yield* spawner.spawn(command).pipe(
@@ -1800,10 +1816,15 @@ export const createCodexAdapterV2 = Effect.fn("CodexAdapterV2.createCodexAdapter
     homePath: homeLayout.effectiveHomePath ?? "",
   } satisfies CodexSettings;
 
+  const processEnvironment = yield* mergeProviderInstanceEnvironment(environment, hostEnvironment);
+  if (!environment.some(({ name }) => name === "T3_AIX_PROFILE")) {
+    delete processEnvironment.T3_AIX_PROFILE;
+  }
+
   return yield* makeCodexAdapterV2({
     instanceId,
     settings,
-    environment: yield* mergeProviderInstanceEnvironment(environment, hostEnvironment),
+    environment: processEnvironment,
     clientFactory,
     digest,
     fileSystem,
