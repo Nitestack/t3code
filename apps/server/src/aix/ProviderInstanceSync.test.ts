@@ -536,10 +536,15 @@ describe("syncAixProviderInstances", () => {
       source: AixSyncSource,
       cache: AixSyncCache,
       force = false,
+      onStatusChange?: (profile: string) => Effect.Effect<void>,
     ) =>
-      syncAixProviderInstances({ enabled: true, source, cache, force }).pipe(
-        Effect.provideService(ServerSettingsService, counted),
-      );
+      syncAixProviderInstances({
+        enabled: true,
+        source,
+        cache,
+        force,
+        ...(onStatusChange === undefined ? {} : { onStatusChange }),
+      }).pipe(Effect.provideService(ServerSettingsService, counted));
 
     effectIt.effect("a repeat refresh inside the 24h TTL reads neither aix nor LiteLLM", () =>
       Effect.gen(function* () {
@@ -610,24 +615,30 @@ describe("syncAixProviderInstances", () => {
       Effect.gen(function* () {
         const { counted } = yield* countingSettings;
         const cache = yield* makeAixSyncCache;
+        const published = yield* Ref.make<ReadonlyArray<string>>([]);
+        const publish = (profile: string) => Ref.update(published, (all) => [...all, profile]);
         const source = sourceFor();
-        yield* refreshWith(counted, source, cache);
-        yield* refreshWith(
-          counted,
-          sourceFor({
-            fetchLiteLlmCatalog: () =>
-              Effect.fail(
-                new ModelCatalogFetchError({ stage: "models", reason: "request", status: 503 }),
-              ),
-          }),
-          cache,
-          true,
-        );
-        expect((yield* Ref.get(cache.staleByProfile)).get("work")?.code).toBe("request-503");
+        const failing = sourceFor({
+          fetchLiteLlmCatalog: () =>
+            Effect.fail(
+              new ModelCatalogFetchError({ stage: "models", reason: "request", status: 503 }),
+            ),
+        });
+        yield* refreshWith(counted, source, cache, false, publish);
+        expect(yield* Ref.get(published)).toEqual([]);
 
-        yield* refreshWith(counted, source, cache, true);
+        yield* refreshWith(counted, failing, cache, true, publish);
+        expect((yield* Ref.get(cache.staleByProfile)).get("work")?.code).toBe("request-503");
+        expect(yield* Ref.get(published)).toEqual(["work"]);
+
+        yield* TestClock.adjust("1 hour");
+        yield* refreshWith(counted, failing, cache, true, publish);
+        expect(yield* Ref.get(published)).toEqual(["work"]);
+
+        yield* refreshWith(counted, source, cache, true, publish);
 
         expect((yield* Ref.get(cache.staleByProfile)).has("work")).toBe(false);
+        expect(yield* Ref.get(published)).toEqual(["work", "work"]);
       }).pipe(Effect.provide(aixTestLayer)),
     );
 

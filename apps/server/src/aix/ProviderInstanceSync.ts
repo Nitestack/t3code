@@ -304,6 +304,7 @@ export const syncAixProviderInstances = Effect.fn("AixProviderInstanceSync.sync"
     readonly source: AixSyncSource;
     readonly cache?: AixSyncCache;
     readonly force?: boolean;
+    readonly onStatusChange?: (profile: string) => Effect.Effect<void>;
   }) {
     const settings = yield* ServerSettingsService;
     const cache = input.cache ?? (yield* makeAixSyncCache);
@@ -313,6 +314,7 @@ export const syncAixProviderInstances = Effect.fn("AixProviderInstanceSync.sync"
         const unavailableProfiles = new Set<string>();
         const observedProfiles: Array<AixObservedProfile> = [];
 
+        const previousStaleByProfile = yield* Ref.get(cache.staleByProfile);
         if (input.enabled) {
           const listing = yield* cache.profiles
             .read("profiles", input.source.listProfiles, { force, failureCode })
@@ -397,6 +399,21 @@ export const syncAixProviderInstances = Effect.fn("AixProviderInstanceSync.sync"
             });
           }
           yield* Ref.set(cache.staleByProfile, staleByProfile);
+        }
+
+        if (input.onStatusChange !== undefined) {
+          const currentStaleByProfile = yield* Ref.get(cache.staleByProfile);
+          const profiles = new Set([
+            ...previousStaleByProfile.keys(),
+            ...currentStaleByProfile.keys(),
+          ]);
+          for (const profile of profiles) {
+            const before = previousStaleByProfile.get(profile);
+            const after = currentStaleByProfile.get(profile);
+            if (before?.since !== after?.since || before?.code !== after?.code) {
+              yield* input.onStatusChange(profile);
+            }
+          }
         }
 
         // Read after the slow aix and catalog calls, so a manual instance that appeared meanwhile is seen.
@@ -525,21 +542,17 @@ const make = Effect.gen(function* () {
   const refresh = Effect.fn("AixProviderInstanceSync.refresh")(function* (input: {
     readonly force: boolean;
   }) {
-    const previous = yield* Ref.get(cache.staleByProfile);
-    yield* syncAixFromEnvironment(environment, source, { cache, force: input.force }).pipe(
+    yield* syncAixProviderInstances({
+      enabled: environment[AIX_ENABLED_ENVIRONMENT_VARIABLE] === "1",
+      source,
+      cache,
+      force: input.force,
+      onStatusChange: (profile) => PubSub.publish(profileStatusChanges, profile),
+    }).pipe(
       Effect.provideService(Digest.Digest, digest),
       Effect.catchCause((cause) => Effect.logError("aix provider instance sync failed", cause)),
       Effect.provideService(ServerSettingsService, settings),
     );
-    const current = yield* Ref.get(cache.staleByProfile);
-    const profiles = new Set([...previous.keys(), ...current.keys()]);
-    for (const profile of profiles) {
-      const before = previous.get(profile);
-      const after = current.get(profile);
-      if (before?.since !== after?.since || before?.code !== after?.code) {
-        yield* PubSub.publish(profileStatusChanges, profile);
-      }
-    }
   });
 
   yield* refresh({ force: false }).pipe(Effect.forkScoped);

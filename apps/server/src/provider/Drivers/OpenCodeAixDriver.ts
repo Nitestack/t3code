@@ -108,6 +108,7 @@ export const makeOpenCodeAixDriver = <R>(
                   Stream.mapEffect(() => snapshot.getSnapshot),
                   Stream.mapEffect(withCatalogStatus),
                 ),
+                { haltStrategy: "left" },
               ),
             },
           };

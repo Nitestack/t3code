@@ -13,7 +13,6 @@ import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
-import * as Ref from "effect/Ref";
 
 import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
 import { OpenCodeDriver } from "@t3tools/provider-opencode/server";
@@ -161,46 +160,73 @@ it.effect("marks aix OpenCode snapshots stale after a failed catalog refresh", (
   ),
 );
 
+const signalledInstance = Effect.fn("test.signalledInstance")(function* (
+  baseChanges: Stream.Stream<never>,
+) {
+  const statuses = yield* Queue.unbounded<{ since: number; code: string } | undefined>();
+  const changes = yield* Queue.unbounded<string>();
+  const counts = { snapshotReads: 0, refreshes: 0 };
+  const provider = { status: "ready", message: undefined } as never;
+  const snapshot = {
+    resolveMaintenance: () => Effect.succeed({} as never),
+    getSnapshot: Effect.sync(() => ({ ...(provider as object), revision: ++counts.snapshotReads })),
+    refresh: Effect.sync(() => {
+      counts.refreshes++;
+      return provider;
+    }),
+    streamChanges: baseChanges,
+    applyUsageLimits: () => Effect.void,
+  } as unknown as ProviderInstance["snapshot"];
+  const driver = makeOpenCodeAixDriver(() => Effect.succeed({ snapshot } as ProviderInstance));
+  const aixSync = AixProviderInstanceSync.of({
+    refresh: () => Effect.void,
+    getProfileStatus: () => Queue.take(statuses),
+    streamProfileStatusChanges: Stream.fromQueue(changes),
+  });
+  const aixInstance = yield* driver
+    .create(
+      input({ aixProfile: "work" }, [{ name: "T3_AIX_PROFILE", value: "work", sensitive: false }]),
+    )
+    .pipe(Effect.provideService(AixProviderInstanceSync, aixSync));
+  return { aixInstance, aixSync, statuses, changes, counts };
+});
+
 it.effect("publishes aix catalog status transitions without refreshing OpenCode", () =>
   run(
     Effect.gen(function* () {
-      const status = yield* Ref.make<{ since: number; code: string } | undefined>(undefined);
-      const changes = yield* Queue.unbounded<string>();
-      const provider = { status: "ready", message: undefined } as never;
-      const snapshot = {
-        resolveMaintenance: () => Effect.succeed({} as never),
-        getSnapshot: Effect.succeed(provider),
-        refresh: Effect.succeed(provider),
-        streamChanges: Stream.empty,
-        applyUsageLimits: () => Effect.void,
-      } as ProviderInstance["snapshot"];
-      const instance = { snapshot } as ProviderInstance;
-      const driver = makeOpenCodeAixDriver(() => Effect.succeed(instance));
-      const aixSync = AixProviderInstanceSync.of({
-        refresh: () => Effect.void,
-        getProfileStatus: () => Ref.get(status),
-        streamProfileStatusChanges: Stream.fromQueue(changes),
-      });
-      const aixInstance = yield* driver
-        .create(
-          input({ aixProfile: "work" }, [
-            { name: "T3_AIX_PROFILE", value: "work", sensitive: false },
-          ]),
-        )
-        .pipe(Effect.provideService(AixProviderInstanceSync, aixSync));
-      const output = yield* Queue.unbounded<unknown>();
-      yield* aixInstance.snapshot.streamChanges.pipe(
-        Stream.provideService(AixProviderInstanceSync, aixSync),
-        Stream.runForEach((value) => Queue.offer(output, value)),
-        Effect.forkChild,
+      const { aixInstance, aixSync, statuses, changes, counts } = yield* signalledInstance(
+        Stream.never,
       );
-      yield* Ref.set(status, { since: 0, code: "request-503" });
-      yield* Queue.offer(changes, "work");
-      expect(yield* Queue.take(output)).toMatchObject({ status: "warning" });
+      yield* Queue.offerAll(statuses, [{ since: 0, code: "request-503" }, undefined]);
+      yield* Queue.offerAll(changes, ["work", "work"]);
 
-      yield* Ref.set(status, undefined);
-      yield* Queue.offer(changes, "work");
-      expect(yield* Queue.take(output)).toMatchObject({ status: "ready" });
+      const output = yield* aixInstance.snapshot.streamChanges.pipe(
+        Stream.provideService(AixProviderInstanceSync, aixSync),
+        Stream.take(2),
+        Stream.runCollect,
+      );
+
+      expect(Array.from(output)).toMatchObject([
+        { status: "warning", revision: 1 },
+        { status: "ready", revision: 2 },
+      ]);
+      expect(counts.refreshes).toBe(0);
+    }),
+    unusedRuntime,
+  ),
+);
+
+it.effect("stops forwarding profile signals once the instance stream ends", () =>
+  run(
+    Effect.gen(function* () {
+      const { aixInstance, aixSync } = yield* signalledInstance(Stream.empty);
+
+      const output = yield* aixInstance.snapshot.streamChanges.pipe(
+        Stream.provideService(AixProviderInstanceSync, aixSync),
+        Stream.runCollect,
+      );
+
+      expect(Array.from(output)).toEqual([]);
     }),
     unusedRuntime,
   ),
