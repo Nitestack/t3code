@@ -14,10 +14,12 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
+import * as Stream from "effect/Stream";
 import * as Digest from "effect/crypto/Digest";
 import * as Hex from "effect/encoding/Hex";
 import { HttpClient } from "effect/http";
@@ -489,6 +491,7 @@ export class AixProviderInstanceSync extends Context.Service<
     readonly getProfileStatus: (
       profileName: string,
     ) => Effect.Effect<AixCatalogCache.StaleMarker | undefined>;
+    readonly streamProfileStatusChanges: Stream.Stream<string>;
   }
 >()("t3/aix/ProviderInstanceSync/AixProviderInstanceSync") {}
 
@@ -500,6 +503,16 @@ export const getAixProfileStatus = (profileName: string) =>
     ),
   );
 
+export const streamAixProfileStatusChanges = (profileName: string) =>
+  Effect.serviceOption(AixProviderInstanceSync).pipe(
+    Effect.map(Option.getOrUndefined),
+    Effect.map((service) =>
+      service === undefined
+        ? Stream.empty
+        : service.streamProfileStatusChanges.pipe(Stream.filter((name) => name === profileName)),
+    ),
+  );
+
 const make = Effect.gen(function* () {
   const environment = yield* HostProcess.Environment;
   const settings = yield* ServerSettingsService;
@@ -507,15 +520,26 @@ const make = Effect.gen(function* () {
   const backgroundPolicy = yield* BackgroundPolicy.BackgroundPolicy;
   const source = yield* liveSource;
   const cache = yield* makeAixSyncCache;
+  const profileStatusChanges = yield* PubSub.unbounded<string>();
 
   const refresh = Effect.fn("AixProviderInstanceSync.refresh")(function* (input: {
     readonly force: boolean;
   }) {
+    const previous = yield* Ref.get(cache.staleByProfile);
     yield* syncAixFromEnvironment(environment, source, { cache, force: input.force }).pipe(
       Effect.provideService(Digest.Digest, digest),
       Effect.catchCause((cause) => Effect.logError("aix provider instance sync failed", cause)),
       Effect.provideService(ServerSettingsService, settings),
     );
+    const current = yield* Ref.get(cache.staleByProfile);
+    const profiles = new Set([...previous.keys(), ...current.keys()]);
+    for (const profile of profiles) {
+      const before = previous.get(profile);
+      const after = current.get(profile);
+      if (before?.since !== after?.since || before?.code !== after?.code) {
+        yield* PubSub.publish(profileStatusChanges, profile);
+      }
+    }
   });
 
   yield* refresh({ force: false }).pipe(Effect.forkScoped);
@@ -532,6 +556,7 @@ const make = Effect.gen(function* () {
         return (yield* Ref.get(cache.staleByProfile)).get(profileName);
       },
     ),
+    streamProfileStatusChanges: Stream.fromPubSub(profileStatusChanges),
   });
 });
 

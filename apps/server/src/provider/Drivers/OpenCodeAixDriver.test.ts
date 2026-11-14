@@ -10,8 +10,10 @@ import * as Scope from "effect/Scope";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import { ChildProcessSpawner } from "effect/process";
 import * as Option from "effect/Option";
+import * as Queue from "effect/Queue";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
+import * as Ref from "effect/Ref";
 
 import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
 import { OpenCodeDriver } from "@t3tools/provider-opencode/server";
@@ -96,6 +98,7 @@ const testServices = (runtime: OpenCodeRuntime.OpenCodeRuntime["Service"]) =>
       AixProviderInstanceSync.of({
         refresh: () => Effect.void,
         getProfileStatus: () => Effect.succeed({ since: 0, code: "request-503" }),
+        streamProfileStatusChanges: Stream.empty,
       }),
     ),
   );
@@ -137,16 +140,67 @@ it.effect("marks aix OpenCode snapshots stale after a failed catalog refresh", (
         ]),
       );
       const current = yield* aixInstance.snapshot.getSnapshot;
+      const refreshed = yield* aixInstance.snapshot.refresh;
       const streamed = yield* aixInstance.snapshot.streamChanges.pipe(Stream.runHead);
 
       expect(current).toMatchObject({
         status: "warning",
         message: "aix catalog stale since 1970-01-01T00:00:00.000Z (request-503).",
       });
+      expect(refreshed).toMatchObject({
+        status: "warning",
+        message: "aix catalog stale since 1970-01-01T00:00:00.000Z (request-503).",
+      });
+
       expect(Option.getOrThrow(streamed)).toMatchObject({
         status: "warning",
         message: "aix catalog stale since 1970-01-01T00:00:00.000Z (request-503).",
       });
+    }),
+    unusedRuntime,
+  ),
+);
+
+it.effect("publishes aix catalog status transitions without refreshing OpenCode", () =>
+  run(
+    Effect.gen(function* () {
+      const status = yield* Ref.make<{ since: number; code: string } | undefined>(undefined);
+      const changes = yield* Queue.unbounded<string>();
+      const provider = { status: "ready", message: undefined } as never;
+      const snapshot = {
+        resolveMaintenance: () => Effect.succeed({} as never),
+        getSnapshot: Effect.succeed(provider),
+        refresh: Effect.succeed(provider),
+        streamChanges: Stream.empty,
+        applyUsageLimits: () => Effect.void,
+      } as ProviderInstance["snapshot"];
+      const instance = { snapshot } as ProviderInstance;
+      const driver = makeOpenCodeAixDriver(() => Effect.succeed(instance));
+      const aixSync = AixProviderInstanceSync.of({
+        refresh: () => Effect.void,
+        getProfileStatus: () => Ref.get(status),
+        streamProfileStatusChanges: Stream.fromQueue(changes),
+      });
+      const aixInstance = yield* driver
+        .create(
+          input({ aixProfile: "work" }, [
+            { name: "T3_AIX_PROFILE", value: "work", sensitive: false },
+          ]),
+        )
+        .pipe(Effect.provideService(AixProviderInstanceSync, aixSync));
+      const output = yield* Queue.unbounded<unknown>();
+      yield* aixInstance.snapshot.streamChanges.pipe(
+        Stream.provideService(AixProviderInstanceSync, aixSync),
+        Stream.runForEach((value) => Queue.offer(output, value)),
+        Effect.forkChild,
+      );
+      yield* Ref.set(status, { since: 0, code: "request-503" });
+      yield* Queue.offer(changes, "work");
+      expect(yield* Queue.take(output)).toMatchObject({ status: "warning" });
+
+      yield* Ref.set(status, undefined);
+      yield* Queue.offer(changes, "work");
+      expect(yield* Queue.take(output)).toMatchObject({ status: "ready" });
     }),
     unusedRuntime,
   ),

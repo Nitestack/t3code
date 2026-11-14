@@ -10,7 +10,11 @@ import * as OpenCodeRuntime from "@t3tools/provider-opencode/server/OpenCodeRunt
 import type { OpenCodeSettings } from "@t3tools/provider-opencode/settings";
 
 import * as ServerConfig from "../../config.ts";
-import { getAixProfileStatus, withAixCatalogStatus } from "../../aix/ProviderInstanceSync.ts";
+import {
+  getAixProfileStatus,
+  streamAixProfileStatusChanges,
+  withAixCatalogStatus,
+} from "../../aix/ProviderInstanceSync.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import {
   OPENCODE_AIX_PROVIDER_ID,
@@ -82,22 +86,33 @@ export const makeOpenCodeAixDriver = <R>(
     });
     return yield* createOpenCodeInstance(input).pipe(
       Effect.provideService(OpenCodeRuntime.OpenCodeRuntime, { ...base, ...aixRuntime }),
-      Effect.map((instance) => {
-        const withCatalogStatus = (provider: Parameters<typeof withAixCatalogStatus>[0]) =>
-          getAixProfileStatus(profileReference.profile).pipe(
-            Effect.map((stale) => withAixCatalogStatus(provider, stale)),
+      Effect.flatMap((instance) =>
+        Effect.gen(function* () {
+          const profileStatusChanges = yield* streamAixProfileStatusChanges(
+            profileReference.profile,
           );
-        const snapshot = instance.snapshot;
-        return {
-          ...instance,
-          snapshot: {
-            ...snapshot,
-            getSnapshot: snapshot.getSnapshot.pipe(Effect.flatMap(withCatalogStatus)),
-            refresh: snapshot.refresh.pipe(Effect.flatMap(withCatalogStatus)),
-            streamChanges: snapshot.streamChanges.pipe(Stream.mapEffect(withCatalogStatus)),
-          },
-        };
-      }),
+          const withCatalogStatus = (provider: Parameters<typeof withAixCatalogStatus>[0]) =>
+            getAixProfileStatus(profileReference.profile).pipe(
+              Effect.map((stale) => withAixCatalogStatus(provider, stale)),
+            );
+          const snapshot = instance.snapshot;
+          return {
+            ...instance,
+            snapshot: {
+              ...snapshot,
+              getSnapshot: snapshot.getSnapshot.pipe(Effect.flatMap(withCatalogStatus)),
+              refresh: snapshot.refresh.pipe(Effect.flatMap(withCatalogStatus)),
+              streamChanges: Stream.merge(
+                snapshot.streamChanges.pipe(Stream.mapEffect(withCatalogStatus)),
+                profileStatusChanges.pipe(
+                  Stream.mapEffect(() => snapshot.getSnapshot),
+                  Stream.mapEffect(withCatalogStatus),
+                ),
+              ),
+            },
+          };
+        }),
+      ),
     );
   }),
 });
