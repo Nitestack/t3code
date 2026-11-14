@@ -306,12 +306,25 @@ it("limits an active draft's destinations after a manual scope switch", async ()
   selectScope("one");
   await screen.render(true);
   expect(screen.current.draftKey).not.toBeNull();
+  const draftKey = screen.current.draftKey!;
+  act(() => screen.current.setPrompt("draft content"));
   expect(screen.current.environments.map((value) => value.environmentId)).toEqual(["one"]);
 
   selectScope("two");
   await screen.render(true);
   expect(screen.current.selectedProject?.environmentId).toBe("two");
   expect(screen.current.environments.map((value) => value.environmentId)).toEqual(["two"]);
+  expect(screen.current.draftKey).toBe(draftKey);
+  expect(screen.current.prompt).toBe("draft content");
+  expect(screen.snapshot(draftKey).project).toEqual({ environmentId: "two", projectId: "b" });
+
+  selectScope("one");
+  await screen.render(false);
+  expect(screen.snapshot(draftKey).project?.environmentId).toBe("two");
+  await screen.render(true);
+  expect(screen.current.selectedProject?.environmentId).toBe("one");
+  expect(screen.snapshot(draftKey).project).toEqual({ environmentId: "one", projectId: "a" });
+  expect(screen.current.prompt).toBe("draft content");
 });
 
 it("owns a status stream only while the draft is active, retaining draft choices on reopen", async () => {

@@ -368,15 +368,29 @@ export function NewTaskFlowProvider(
   const serverConfigs = useServerConfigs();
   const { connectedEnvironments } = useRemoteConnectionStatus();
   const selectedProjectDraftKey = selectedProject ? activeDraftKey : null;
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- creates the persistent draft in the new-task flow store once a project is selected, before the composer mounts
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- keeps the persistent draft's project stamp aligned with the composer's selected destination
   useEffect(() => {
     // A route that names a draft binds that draft, or returns to the picker.
-    if (
-      props.active === false ||
-      props.routeDraftId !== undefined ||
-      activeDraftKey !== null ||
-      selectedProject === null
-    ) {
+    if (props.active === false || props.routeDraftId !== undefined || selectedProject === null) {
+      return;
+    }
+    if (activeDraftKey !== null) {
+      if (!mobileScope.enabled || submitting) return;
+      const stamp = getComposerDraftSnapshot(activeDraftKey).project;
+      if (stamp === undefined) return;
+      if (
+        stamp.environmentId === selectedProject.environmentId &&
+        stamp.projectId === selectedProject.id
+      )
+        return;
+      retargetNewTaskDraft(activeDraftKey, {
+        environmentId: selectedProject.environmentId,
+        projectId: selectedProject.id,
+      });
+      updateNewTaskFlowState(flowKey, {
+        environmentId: selectedProject.environmentId,
+        projectKey: scopedProjectKey(selectedProject.environmentId, selectedProject.id),
+      });
       return;
     }
     // Creates the persistent draft once the project selection is ready; the key must exist before the composer mounts.
@@ -386,7 +400,15 @@ export function NewTaskFlowProvider(
         projectId: selectedProject.id,
       }),
     });
-  }, [activeDraftKey, flowKey, selectedProject, props.active, props.routeDraftId]);
+  }, [
+    activeDraftKey,
+    flowKey,
+    selectedProject,
+    props.active,
+    props.routeDraftId,
+    mobileScope.enabled,
+    submitting,
+  ]);
   const activePendingKey =
     props.active === false
       ? null
