@@ -1,11 +1,16 @@
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
-import { type ClaudeSettings, TextGenerationError } from "@t3tools/contracts";
+import {
+  type ClaudeSettings,
+  type ProviderSetupError,
+  TextGenerationError,
+} from "@t3tools/contracts";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 
 import * as TextGenerationOperations from "@t3tools/provider-core/server/textGenerationOperations";
@@ -97,9 +102,11 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
   claudeSettings: ClaudeSettings,
   environment?: NodeJS.ProcessEnv,
   modelCatalog: Effect.Effect<ClaudeModelCatalog> = Effect.succeed(BUNDLED_CLAUDE_MODEL_CATALOG),
+  resolveEnvironment?: Effect.Effect<NodeJS.ProcessEnv, ProviderSetupError>,
 ) {
   const commandSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
   const claudeEnvironment = yield* makeClaudeEnvironment(claudeSettings, environment);
   const scopedModelCatalog = modelCatalog.pipe(
     Effect.map((catalog) => scopeClaudeModelCatalog(catalog, claudeSettings.customModels)),
@@ -200,6 +207,22 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
     const runClaudeCommand = Effect.fn("runClaudeJson.runClaudeCommand")(function* (
       noSessionPersistence: boolean,
     ) {
+      const processEnvironment = resolveEnvironment
+        ? yield* resolveEnvironment.pipe(
+            Effect.flatMap((freshEnvironment) =>
+              makeClaudeEnvironment(claudeSettings, freshEnvironment).pipe(
+                Effect.provideService(Path.Path, path),
+              ),
+            ),
+            Effect.mapError(
+              () =>
+                new TextGenerationError({
+                  operation,
+                  detail: "Claude profile credentials could not be refreshed.",
+                }),
+            ),
+          )
+        : claudeEnvironment;
       const workingDirectory =
         operation === "generateThreadTitle"
           ? yield* fileSystem
@@ -241,10 +264,10 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
           "--permission-mode",
           "dontAsk",
         ],
-        { env: claudeEnvironment },
+        { env: processEnvironment },
       );
       const command = ChildProcess.make(spawnCommand.command, spawnCommand.args, {
-        env: claudeEnvironment,
+        env: processEnvironment,
         cwd: workingDirectory,
         shell: spawnCommand.shell,
         stdin: {

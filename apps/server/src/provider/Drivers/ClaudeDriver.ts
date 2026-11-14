@@ -1,4 +1,4 @@
-import { ClaudeSettings, ProviderDriverKind } from "@t3tools/contracts";
+import { ClaudeSettings, ProviderDriverKind, ProviderSetupError } from "@t3tools/contracts";
 import * as Cache from "effect/Cache";
 import * as Duration from "effect/Duration";
 import * as SecureRandom from "effect/crypto/SecureRandom";
@@ -19,6 +19,7 @@ import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
 import {
   createClaudeAdapterV2,
+  ClaudeAgentSdkQueryRunnerError,
   type ClaudeAdapterV2DriverEnv,
 } from "../../orchestration-v2/Adapters/ClaudeAdapterV2.ts";
 import { ProviderDriverError } from "../Errors.ts";
@@ -52,6 +53,7 @@ import {
   makeClaudeCapabilitiesCacheKey,
   makeClaudeContinuationGroupKey,
   mergeClaudeProcessEnvironment,
+  resolveClaudeProviderInstanceEnvironment,
   resolveClaudeHomePath,
 } from "./ClaudeHome.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -111,7 +113,49 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
     const modelCatalog = catalogService
       .current(DRIVER_KIND)
       .pipe(Effect.map(resolveClaudeModelCatalog));
-    const processEnv = yield* mergeClaudeProcessEnvironment(config, environment, process.env);
+    const resolvedEnvironment = yield* resolveClaudeProviderInstanceEnvironment(environment).pipe(
+      Effect.mapError(
+        (cause) =>
+          new ProviderDriverError({
+            driver: DRIVER_KIND,
+            instanceId,
+            detail: "Failed to resolve the configured Claude profile environment.",
+            cause,
+          }),
+      ),
+    );
+    const processEnv = yield* mergeClaudeProcessEnvironment(
+      config,
+      resolvedEnvironment,
+      process.env,
+    );
+    const resolvesAixProfile = environment.some(({ name }) => name === "T3_AIX_PROFILE");
+    const resolveProcessEnvironment = resolvesAixProfile
+      ? () =>
+          resolveClaudeProviderInstanceEnvironment(environment).pipe(
+            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+            Effect.mapError(
+              () =>
+                new ClaudeAgentSdkQueryRunnerError({
+                  method: "resolveEnvironment",
+                  cause: new Error("Claude profile credentials could not be refreshed."),
+                }),
+            ),
+            Effect.map((freshEnvironment) => {
+              const freshEndpoint = freshEnvironment.find(
+                ({ name }) => name === "ANTHROPIC_BASE_URL",
+              )?.value;
+              const freshApiKey = freshEnvironment.find(
+                ({ name }) => name === "ANTHROPIC_API_KEY",
+              )?.value;
+              return {
+                ...processEnv,
+                ...(freshEndpoint === undefined ? {} : { ANTHROPIC_BASE_URL: freshEndpoint }),
+                ...(freshApiKey === undefined ? {} : { ANTHROPIC_API_KEY: freshApiKey }),
+              };
+            }),
+          )
+      : undefined;
     const fallbackContinuationIdentity = defaultProviderContinuationIdentity({
       driverKind: DRIVER_KIND,
       instanceId,
@@ -151,7 +195,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
         instanceId,
         displayName,
         accentColor,
-        environment,
+        environment: resolvedEnvironment,
         enabled,
         config,
       },
@@ -159,6 +203,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
         scopedLimitNames,
         onUsageLimits: (update) => snapshot.applyUsageLimits(update),
         modelCatalog,
+        ...(resolvesAixProfile ? { restartProcessForNewTurn: true } : {}),
+        ...(resolveProcessEnvironment === undefined ? {} : { resolveProcessEnvironment }),
       },
     ).pipe(
       Effect.mapError(
@@ -175,6 +221,16 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
       effectiveConfig,
       processEnv,
       modelCatalog,
+      resolveProcessEnvironment?.().pipe(
+        Effect.mapError(
+          () =>
+            new ProviderSetupError({
+              instanceId,
+              operation: "resolveEnvironment",
+              detail: "Claude profile credentials could not be refreshed.",
+            }),
+        ),
+      ),
     );
 
     // Per-instance capabilities cache: keyed on binary + resolved HOME so

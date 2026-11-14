@@ -167,6 +167,13 @@ export const CodexDriver: ProviderDriver<
     enabled,
     config,
   }) {
+    if (environment.some(({ name }) => name === "T3_AIX_PROFILE")) {
+      return yield* new ProviderDriverError({
+        driver: DRIVER_KIND,
+        instanceId,
+        detail: "Aix profiles are not supported by Codex.",
+      });
+    }
     if (config.setupMode === "managed")
       return yield* makeManagedCodexProvider({
         instanceId,
