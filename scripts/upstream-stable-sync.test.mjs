@@ -20,6 +20,7 @@ async function createSyncFixture({
   releases = ["v0.1.9", "v0.1.10"],
   prCreateError,
   releaseApiError,
+  pullRequestApiError,
   dispatchError,
   dryRun = false,
 } = {}) {
@@ -111,6 +112,7 @@ if (args[0] === "api" && args.some((arg) => arg.includes("/releases?"))) {
   state.runs.push({ databaseId: state.runs.length + 1, event: "workflow_dispatch", branch: ref, status: "queued" });
   fs.writeFileSync(statePath, JSON.stringify(state));
 } else if (args[0] === "pr" && args[1] === "list") {
+  if (state.pullRequestApiError) fail(state.pullRequestApiError);
   const fields = args[args.indexOf("--json") + 1].split(",");
   output(state.pullRequests.map((pr) => Object.fromEntries(fields.map((field) => [field, pr[field]]))));
 } else if (args[0] === "pr" && args[1] === "create") {
@@ -142,6 +144,7 @@ if (args[0] === "api" && args.some((arg) => arg.includes("/releases?"))) {
       runs: [],
       prCreateError,
       releaseApiError,
+      pullRequestApiError,
       dispatchError,
     }),
   );
@@ -259,10 +262,53 @@ NodeTest.test(
   },
 );
 
-NodeTest.test("reports GitHub 404 and API rate-limit failures clearly", () => {
-  NodeAssert.match(classifyGitHubFailure("HTTP 404: Not Found"), /404/);
-  NodeAssert.match(classifyGitHubFailure("API rate limit exceeded for user"), /rate limit/i);
-  NodeAssert.match(classifyGitHubFailure("socket closed"), /GitHub request failed/);
+NodeTest.test("classifies GitHub failures by operation without exposing raw errors", () => {
+  const sentinel = "SENTINEL_PRIVATE_GH_ERROR_TEXT";
+  const releasesFailure = classifyGitHubFailure(
+    `gh: HTTP 404: ${sentinel}`,
+    "upstreamReleases",
+  );
+  NodeAssert.match(releasesFailure, /upstream releases lookup/i);
+  NodeAssert.match(releasesFailure, /404/);
+  NodeAssert.doesNotMatch(releasesFailure, new RegExp(sentinel));
+
+  const prsFailure = classifyGitHubFailure(
+    `GraphQL: Resource not accessible by integration (${sentinel})`,
+    "openSyncPullRequests",
+  );
+  NodeAssert.match(prsFailure, /open sync pull-request lookup/i);
+  NodeAssert.match(prsFailure, /permission denied/i);
+  NodeAssert.doesNotMatch(prsFailure, new RegExp(sentinel));
+
+  NodeAssert.match(
+    classifyGitHubFailure("API rate limit exceeded for user", "upstreamReleases"),
+    /rate limit/i,
+  );
+  NodeAssert.match(
+    classifyGitHubFailure("socket closed", "openSyncPullRequests"),
+    /GitHub request failed.*open sync pull-request lookup/i,
+  );
+});
+
+NodeTest.test("reports whether releases or open-PR lookup failed without leaking stderr", async () => {
+  const sentinel = "SENTINEL_PRIVATE_GH_ERROR_TEXT";
+  for (const [failure, operation] of [
+    [{ releaseApiError: `gh: HTTP 403: ${sentinel}` }, /upstream releases lookup.*403/],
+    [
+      { pullRequestApiError: `GraphQL: Resource not accessible by integration (${sentinel})` },
+      /open sync pull-request lookup.*permission denied/,
+    ],
+  ]) {
+    const fixture = await createSyncFixture(failure);
+    try {
+      const result = fixture.runSync();
+      NodeAssert.equal(result.status, 1, result.output);
+      NodeAssert.match(result.output, operation);
+      NodeAssert.doesNotMatch(result.output, new RegExp(sentinel));
+    } finally {
+      await NodeFSP.rm(fixture.root, { recursive: true, force: true });
+    }
+  }
 });
 
 NodeTest.test("a 0.1.9 release already in main is a true no-op", async () => {
@@ -401,7 +447,7 @@ NodeTest.test(
 
 NodeTest.test("reports a releases API error at the gh boundary", async () => {
   for (const [releaseApiError, expected] of [
-    ["HTTP 404: Not Found", /GitHub returned 404.*releases/i],
+    ["HTTP 404: Not Found", /upstream releases lookup failed with HTTP 404/i],
     ["HTTP 403: API rate limit exceeded for user", /rate limit/i],
   ]) {
     const fixture = await createSyncFixture({ releaseApiError });
