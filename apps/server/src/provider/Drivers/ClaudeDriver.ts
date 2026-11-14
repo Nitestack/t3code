@@ -1,4 +1,4 @@
-import { ClaudeSettings, ProviderDriverKind } from "@t3tools/contracts";
+import { ClaudeSettings, ProviderDriverKind, ProviderSetupError } from "@t3tools/contracts";
 import * as Cache from "effect/Cache";
 import * as Duration from "effect/Duration";
 import * as SecureRandom from "effect/crypto/SecureRandom";
@@ -221,6 +221,16 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
       effectiveConfig,
       processEnv,
       modelCatalog,
+      resolveProcessEnvironment?.().pipe(
+        Effect.mapError(
+          () =>
+            new ProviderSetupError({
+              instanceId,
+              operation: "resolveEnvironment",
+              detail: "Claude profile credentials could not be refreshed.",
+            }),
+        ),
+      ),
     );
 
     // Per-instance capabilities cache: keyed on binary + resolved HOME so

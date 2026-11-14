@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
-import { ClaudeSettings, ProviderInstanceId } from "@t3tools/contracts";
+import { ClaudeSettings, ProviderInstanceId, ProviderSetupError } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { createModelSelection } from "@t3tools/shared/model";
 import * as Effect from "effect/Effect";
@@ -67,6 +67,10 @@ function withFakeClaudeEnv<A, E, R>(
     configDirMustBe?: string;
     cwdMustNotBe?: string;
     claudeConfig?: Partial<ClaudeSettings>;
+    environment?: NodeJS.ProcessEnv;
+    resolveEnvironment?: (
+      environment: NodeJS.ProcessEnv,
+    ) => Effect.Effect<NodeJS.ProcessEnv, ProviderSetupError>;
   },
   effectFn: (textGeneration: TextGeneration.TextGeneration["Service"]) => Effect.Effect<A, E, R>,
 ) {
@@ -97,6 +101,7 @@ function withFakeClaudeEnv<A, E, R>(
         Object.entries(fakeClaudeEnv).filter(([, value]) => value !== undefined),
       ),
       PATH: `${binDir}${pathDelimiter}${hostEnv.PATH ?? ""}`,
+      ...input.environment,
     };
 
     const config = decodeClaudeSettings(input.claudeConfig ?? {});
@@ -104,12 +109,67 @@ function withFakeClaudeEnv<A, E, R>(
       config,
       environment,
       Effect.succeed(SYNTHETIC_CLAUDE_MODEL_CATALOG),
+      input.resolveEnvironment?.(environment),
     );
     return yield* effectFn(textGeneration);
   }).pipe(Effect.scoped);
 }
 
 it.layer(layerClaudeTextGenerationTest)("ClaudeTextGeneration", (it) => {
+  it.effect("refreshes profile credentials for each text-generation process", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const expectedKeyPath = yield* fs.makeTempFileScoped();
+      let apiKey = "fixture-original-key";
+      let resolutionFails = false;
+      yield* fs.writeFileString(expectedKeyPath, apiKey);
+      return yield* withFakeClaudeEnv(
+        {
+          output: JSON.stringify({ structured_output: { title: "Rotation verified" } }),
+          environment: {
+            ANTHROPIC_API_KEY: apiKey,
+            T3_FAKE_CLAUDE_API_KEY_FILE: expectedKeyPath,
+          },
+          resolveEnvironment: (environment) =>
+            Effect.suspend(() =>
+              resolutionFails
+                ? Effect.fail(
+                    new ProviderSetupError({
+                      instanceId: ProviderInstanceId.make("claudeAgent"),
+                      operation: "resolveEnvironment",
+                      detail: "fixture-private-resolution-detail",
+                    }),
+                  )
+                : Effect.succeed({ ...environment, ANTHROPIC_API_KEY: apiKey }),
+            ),
+        },
+        (textGeneration) =>
+          Effect.gen(function* () {
+            const request = {
+              cwd: process.cwd(),
+              message: "thread title",
+              modelSelection: {
+                instanceId: ProviderInstanceId.make("claudeAgent"),
+                model: SYNTHETIC_CLAUDE_STANDARD_MODEL,
+              },
+            };
+            expect((yield* textGeneration.generateThreadTitle(request)).title).toBe(
+              "Rotation verified",
+            );
+            apiKey = "fixture-rotated-key";
+            yield* fs.writeFileString(expectedKeyPath, apiKey);
+            expect((yield* textGeneration.generateThreadTitle(request)).title).toBe(
+              "Rotation verified",
+            );
+            resolutionFails = true;
+            const error = yield* Effect.flip(textGeneration.generateThreadTitle(request));
+            expect(error.detail).toBe("Claude profile credentials could not be refreshed.");
+            expect(JSON.stringify(error)).not.toContain("fixture-private-resolution-detail");
+          }),
+      );
+    }),
+  );
+
   it.effect(
     "keeps canonical built-in capabilities when a custom model collides with its alias",
     () =>

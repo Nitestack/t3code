@@ -70,6 +70,11 @@ if (configDirMustBe && process.env.CLAUDE_CONFIG_DIR !== configDirMustBe) {
   fail("CLAUDE_CONFIG_DIR was " + (process.env.CLAUDE_CONFIG_DIR ?? ""), 5);
 }
 
+const apiKeyFile = process.env.T3_FAKE_CLAUDE_API_KEY_FILE;
+if (apiKeyFile && process.env.ANTHROPIC_API_KEY !== NodeFS.readFileSync(apiKeyFile, "utf8")) {
+  fail("text-generation process used stale profile credentials", 17);
+}
+
 const stderrText = process.env.T3_FAKE_CLAUDE_STDERR;
 if (stderrText) {
   process.stderr.write(stderrText + "\n");
