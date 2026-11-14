@@ -1453,6 +1453,27 @@ const makeReplaceableCodexClient = Effect.fn("CodexAdapterV2.makeReplaceableCode
     const unknownRequestRegistrations: Array<(client: Client) => Effect.Effect<void>> = [];
     const unknownNotificationRegistrations: Array<(client: Client) => Effect.Effect<void>> = [];
     const retiring = new WeakSet<object>();
+    const activityPermit = yield* Semaphore.make(1);
+    let activeCalls = 0;
+    const useClient = <A, E, R>(use: () => Effect.Effect<A, E, R>, source?: Client) =>
+      Effect.acquireUseRelease(
+        activityPermit.withPermit(
+          Effect.sync(() => {
+            if (source !== undefined && retiring.has(source)) return false;
+            activeCalls++;
+            return true;
+          }),
+        ),
+        (acquired) => (acquired ? Effect.suspend(use) : Effect.interrupt),
+        (acquired) =>
+          acquired
+            ? activityPermit.withPermit(
+                Effect.sync(() => {
+                  activeCalls--;
+                }),
+              )
+            : Effect.void,
+      );
     const watch = (client: Client) =>
       client.awaitTermination.pipe(
         Effect.catch((cause) =>
@@ -1471,47 +1492,83 @@ const makeReplaceableCodexClient = Effect.fn("CodexAdapterV2.makeReplaceableCode
     const raw: Client["raw"] = {
       ...initial.raw,
       request: (method, payload) =>
-        Ref.get(current).pipe(Effect.flatMap((active) => active.raw.request(method, payload))),
+        useClient(() =>
+          Ref.get(current).pipe(Effect.flatMap((active) => active.raw.request(method, payload))),
+        ),
     };
     const client: Client = {
       raw,
       awaitTermination: Deferred.await(termination),
       request: (method, payload) =>
-        Ref.get(current).pipe(Effect.flatMap((active) => active.request(method, payload))),
+        useClient(() =>
+          Ref.get(current).pipe(Effect.flatMap((active) => active.request(method, payload))),
+        ),
       notify: (method, payload) =>
-        Ref.get(current).pipe(Effect.flatMap((active) => active.notify(method, payload))),
+        useClient(() =>
+          Ref.get(current).pipe(Effect.flatMap((active) => active.notify(method, payload))),
+        ),
       handleServerNotification: (method, handler) => {
-        const registration = (target: Client) => target.handleServerNotification(method, handler);
-        return Ref.get(current).pipe(
-          Effect.flatMap(registration),
-          Effect.tap(() => Effect.sync(() => notificationRegistrations.push(registration))),
+        const registration = (target: Client) =>
+          target.handleServerNotification(method, (payload) =>
+            useClient(() => handler(payload), target),
+          );
+        return useClient(() =>
+          Ref.get(current).pipe(
+            Effect.flatMap(registration),
+            Effect.tap(() => Effect.sync(() => notificationRegistrations.push(registration))),
+          ),
         );
       },
       handleServerRequest: (method, handler) => {
-        const registration = (target: Client) => target.handleServerRequest(method, handler);
-        return Ref.get(current).pipe(
-          Effect.flatMap(registration),
-          Effect.tap(() => Effect.sync(() => requestRegistrations.push(registration))),
+        const registration = (target: Client) =>
+          target.handleServerRequest(method, (payload) =>
+            useClient(() => handler(payload), target),
+          );
+        return useClient(() =>
+          Ref.get(current).pipe(
+            Effect.flatMap(registration),
+            Effect.tap(() => Effect.sync(() => requestRegistrations.push(registration))),
+          ),
         );
       },
       handleUnknownServerRequest: (handler) => {
-        const registration = (target: Client) => target.handleUnknownServerRequest(handler);
-        return Ref.get(current).pipe(
-          Effect.flatMap(registration),
-          Effect.tap(() => Effect.sync(() => unknownRequestRegistrations.push(registration))),
+        const registration = (target: Client) =>
+          target.handleUnknownServerRequest((method, params) =>
+            useClient(() => handler(method, params), target),
+          );
+        return useClient(() =>
+          Ref.get(current).pipe(
+            Effect.flatMap(registration),
+            Effect.tap(() => Effect.sync(() => unknownRequestRegistrations.push(registration))),
+          ),
         );
       },
       handleUnknownServerNotification: (handler) => {
-        const registration = (target: Client) => target.handleUnknownServerNotification(handler);
-        return Ref.get(current).pipe(
-          Effect.flatMap(registration),
-          Effect.tap(() => Effect.sync(() => unknownNotificationRegistrations.push(registration))),
+        const registration = (target: Client) =>
+          target.handleUnknownServerNotification((method, params) =>
+            useClient(() => handler(method, params), target),
+          );
+        return useClient(() =>
+          Ref.get(current).pipe(
+            Effect.flatMap(registration),
+            Effect.tap(() =>
+              Effect.sync(() => unknownNotificationRegistrations.push(registration)),
+            ),
+          ),
         );
       },
     };
 
     return {
       client,
+      withIdle: <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+        activityPermit.withPermit(
+          Effect.suspend<A, E | CodexAixRotationError, R>(() =>
+            activeCalls === 0
+              ? effect
+              : Effect.fail(new CodexAixRotationError({ reason: "active-work" })),
+          ),
+        ),
       prepare: Effect.fn("CodexAdapterV2.prepareCodexClient")(function* (next: Client) {
         for (const registrations of [
           notificationRegistrations,
@@ -7602,19 +7659,38 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               Effect.mapError(() => new CodexAixRotationError({ reason: "restart-failed" })),
               Effect.onError(() => Scope.close(nextScope, Exit.void).pipe(Effect.ignore)),
             );
-            if (yield* hasUnsafeAixWork) {
-              yield* Scope.close(nextScope, Exit.void);
-              return yield* new CodexAixRotationError({ reason: "active-work" });
-            }
-
-            yield* replaceableClient.markRetiring(currentClient);
-            if (clientScope !== undefined) yield* Scope.close(clientScope, Exit.void);
-            clientScope = nextScope;
-            activeAixLaunch = refreshed;
-            clientGeneration++;
-            yield* replaceableClient
-              .activate(nextClient)
-              .pipe(Effect.provideService(Scope.Scope, scope));
+            const previousScope = clientScope;
+            yield* turnTerminalizationPermit
+              .withPermits(1)(
+                replaceableClient.withIdle(
+                  Effect.gen(function* () {
+                    if (yield* hasUnsafeAixWork) {
+                      return yield* new CodexAixRotationError({ reason: "active-work" });
+                    }
+                    yield* replaceableClient.markRetiring(currentClient);
+                    clientScope = nextScope;
+                    activeAixLaunch = refreshed;
+                    clientGeneration++;
+                    yield* replaceableClient
+                      .activate(nextClient)
+                      .pipe(Effect.provideService(Scope.Scope, scope));
+                  }).pipe(Effect.uninterruptible),
+                ),
+              )
+              .pipe(
+                Effect.onError(() =>
+                  clientScope === nextScope
+                    ? Effect.void
+                    : Scope.close(nextScope, Exit.void).pipe(Effect.ignore),
+                ),
+                Effect.ensuring(
+                  Effect.suspend(() =>
+                    clientScope === nextScope && previousScope !== undefined
+                      ? Scope.close(previousScope, Exit.void)
+                      : Effect.void,
+                  ),
+                ),
+              );
 
             const nativeThreadId = yield* getNativeThreadId(turnInput.providerThread).pipe(
               Effect.mapError(() => new CodexAixRotationError({ reason: "restart-failed" })),

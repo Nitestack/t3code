@@ -69,7 +69,8 @@ const conflictsWithNativeLaunchArgs = (launchArgs: string): boolean => {
       arg === "--profile" ||
       arg === "-p" ||
       arg.startsWith("--profile=") ||
-      arg.startsWith("-p=") ||
+      (arg.startsWith("-p") && !arg.startsWith("--")) ||
+      (arg.startsWith("-m") && !arg.startsWith("--")) ||
       arg === "--model" ||
       arg.startsWith("--model=")
     ) {
@@ -79,7 +80,9 @@ const conflictsWithNativeLaunchArgs = (launchArgs: string): boolean => {
       ? arg.slice("--config=".length)
       : arg.startsWith("-c=")
         ? arg.slice("-c=".length)
-        : undefined;
+        : arg.startsWith("-c") && arg.length > 2
+          ? arg.slice(2)
+          : undefined;
     const hasConfigValue = arg === "--config" || arg === "-c";
     const configValue = hasConfigValue ? args[index + 1] : inlineConfig;
     if (

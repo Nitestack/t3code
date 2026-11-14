@@ -1525,10 +1525,12 @@ describe("CodexAdapterV2 post-settle continuation", () => {
         const secondTurnId = "aix-rotation-turn-b";
         const scenario = "aix-credential-rotation";
         const firstCompletion = yield* Deferred.make<void>();
+        const snapshotEntered = yield* Deferred.make<void>();
+        const releaseSnapshot = yield* Deferred.make<void>();
         let currentKey = "aix-key-a-sentinel";
         const openedKeys: Array<string | undefined> = [];
         const closedProcesses: Array<number> = [];
-        const firstEntries = [
+        const firstEntries: Array<CodexReplay.CodexAppServerReplayEntry> = [
           ...codexReplayPreamble({
             nativeThreadId,
             nativeTurnId: firstTurnId,
@@ -1546,6 +1548,25 @@ describe("CodexAdapterV2 post-settle continuation", () => {
             },
           },
         ];
+        firstEntries.push(
+          {
+            type: "expect_outbound",
+            label: "snapshot request",
+            frame: {
+              id: 4,
+              method: "thread/read",
+              params: { threadId: nativeThreadId, includeTurns: true },
+            },
+          },
+          {
+            type: "emit_inbound",
+            label: "snapshot response",
+            frame: {
+              id: 4,
+              result: (firstEntries[4] as { frame: { result: unknown } }).frame.result,
+            },
+          },
+        );
         const secondPreamble = codexReplayPreamble({
           nativeThreadId,
           nativeTurnId: secondTurnId,
@@ -1654,7 +1675,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
               yield* Effect.addFinalizer(() =>
                 Effect.sync(() => closedProcesses.push(processIndex)),
               );
-              const transcript = transcripts[processIndex];
+              const transcript = transcripts[processIndex === 0 ? 0 : 1];
               if (!transcript) return yield* Effect.die("Unexpected Codex process open in test.");
               const driver = yield* CodexReplay.makeReplayDriver(
                 withConfigReads(transcript),
@@ -1663,7 +1684,11 @@ describe("CodexAdapterV2 post-settle continuation", () => {
                       beforeEmitInbound: (entry) =>
                         entry.label === "turn completed"
                           ? Deferred.await(firstCompletion)
-                          : Effect.void,
+                          : entry.label === "snapshot response"
+                            ? Deferred.succeed(snapshotEntered, undefined).pipe(
+                                Effect.andThen(Deferred.await(releaseSnapshot)),
+                              )
+                            : Effect.void,
                     }
                   : {},
               );
@@ -1717,6 +1742,27 @@ describe("CodexAdapterV2 post-settle continuation", () => {
 
         yield* Deferred.succeed(firstCompletion, undefined);
         yield* harness.firstTerminal;
+        const snapshot = yield* harness.runtime
+          .readThreadSnapshot({ providerThread: harness.providerThread })
+          .pipe(Effect.forkScoped);
+        yield* Deferred.await(snapshotEntered);
+        const blocked = yield* harness.runtime
+          .startTurn(
+            makeCodexTestTurnInput({
+              threadId: harness.threadId,
+              providerThread: harness.providerThread,
+              now: yield* DateTime.now,
+              attemptId: RunAttemptId.make("aix-concurrent-snapshot"),
+              text: "second turn",
+            }),
+          )
+          .pipe(Effect.exit);
+        assert.isTrue(Exit.isFailure(blocked));
+        assert.deepEqual(closedProcesses, [1]);
+        yield* Deferred.succeed(releaseSnapshot, undefined);
+        const read = yield* Fiber.join(snapshot);
+        assert.equal(read.providerThread.nativeThreadRef?.nativeId, nativeThreadId);
+
         yield* harness.runtime.startTurn(
           makeCodexTestTurnInput({
             threadId: harness.threadId,
@@ -1729,8 +1775,12 @@ describe("CodexAdapterV2 post-settle continuation", () => {
         yield* harness.awaitTerminal(2);
 
         assert.equal(harness.providerThread.nativeThreadRef?.nativeId, nativeThreadId);
-        assert.deepEqual(openedKeys, ["aix-key-a-sentinel", "aix-key-b-sentinel"]);
-        assert.deepEqual(closedProcesses, [0]);
+        assert.deepEqual(openedKeys, [
+          "aix-key-a-sentinel",
+          "aix-key-b-sentinel",
+          "aix-key-b-sentinel",
+        ]);
+        assert.deepEqual(closedProcesses, [1, 0]);
         const completedTool = harness.events.find(
           (event) =>
             event.type === "turn_item.updated" &&

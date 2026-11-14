@@ -199,6 +199,11 @@ it.effect(
           "--config=model_provider=other",
           "--model other",
           "--profile local",
+          "-m other",
+          "-mother",
+          "-pLOCAL",
+          "-cmodel_provider=other",
+          "-cmodel=other",
         ],
         (launchArgs) =>
           Effect.result(
@@ -217,7 +222,7 @@ it.effect(
       assert.equal(anthropic._tag, "Failure");
       assert.deepEqual(
         conflicts.map(({ _tag }) => _tag),
-        ["Failure", "Failure", "Failure", "Failure"],
+        Array(conflicts.length).fill("Failure"),
       );
       assert.equal(JSON.stringify([anthropic, conflicts]).includes(sentinelA), false);
     }),
