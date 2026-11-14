@@ -9,14 +9,17 @@ import * as Path from "effect/Path";
 import * as Scope from "effect/Scope";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import { ChildProcessSpawner } from "effect/process";
+import * as Option from "effect/Option";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 
+import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
 import { OpenCodeDriver } from "@t3tools/provider-opencode/server";
 import * as OpenCodeRuntime from "@t3tools/provider-opencode/server/OpenCodeRuntime";
 import type { OpenCodeSettings } from "@t3tools/provider-opencode/settings";
 
 import * as ServerConfig from "../../config.ts";
+import { AixProviderInstanceSync } from "../../aix/ProviderInstanceSync.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeOpenCodeAixDriver } from "./OpenCodeAixDriver.ts";
 
@@ -88,6 +91,13 @@ const testServices = (runtime: OpenCodeRuntime.OpenCodeRuntime["Service"]) =>
     ),
     Layer.succeed(OpenCodeRuntime.OpenCodeRuntime, runtime),
     Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, aixSpawner),
+    Layer.succeed(
+      AixProviderInstanceSync,
+      AixProviderInstanceSync.of({
+        refresh: () => Effect.void,
+        getProfileStatus: () => Effect.succeed({ since: 0, code: "request-503" }),
+      }),
+    ),
   );
 
 type TestEnv =
@@ -104,6 +114,43 @@ const run = <A, E>(
 ) => Effect.scoped(effect.pipe(Effect.provide(testServices(runtime))));
 
 const unusedRuntime = makeRuntime([]);
+
+it.effect("marks aix OpenCode snapshots stale after a failed catalog refresh", () =>
+  run(
+    Effect.gen(function* () {
+      const provider = { status: "ready", message: undefined } as never;
+      const snapshot = {
+        resolveMaintenance: () => Effect.succeed({} as never),
+        getSnapshot: Effect.succeed(provider),
+        refresh: Effect.succeed(provider),
+        streamChanges: Stream.make(provider),
+        applyUsageLimits: () => Effect.void,
+      } as ProviderInstance["snapshot"];
+      const instance = {
+        snapshot,
+      } as ProviderInstance;
+      const driver = makeOpenCodeAixDriver(() => Effect.succeed(instance));
+
+      const aixInstance = yield* driver.create(
+        input({ aixProfile: "work" }, [
+          { name: "T3_AIX_PROFILE", value: "work", sensitive: false },
+        ]),
+      );
+      const current = yield* aixInstance.snapshot.getSnapshot;
+      const streamed = yield* aixInstance.snapshot.streamChanges.pipe(Stream.runHead);
+
+      expect(current).toMatchObject({
+        status: "warning",
+        message: "aix catalog stale since 1970-01-01T00:00:00.000Z (request-503).",
+      });
+      expect(Option.getOrThrow(streamed)).toMatchObject({
+        status: "warning",
+        message: "aix catalog stale since 1970-01-01T00:00:00.000Z (request-503).",
+      });
+    }),
+    unusedRuntime,
+  ),
+);
 
 it.effect("keeps an OpenCode instance without the aix marker on the manual path", () =>
   run(

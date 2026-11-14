@@ -3,12 +3,14 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import { ChildProcessSpawner } from "effect/process";
+import * as Stream from "effect/Stream";
 import type { ProviderDriver, ProviderUsageReaderEnv } from "@t3tools/provider-core/server/driver";
 import { OpenCodeDriver } from "@t3tools/provider-opencode/server";
 import * as OpenCodeRuntime from "@t3tools/provider-opencode/server/OpenCodeRuntime";
 import type { OpenCodeSettings } from "@t3tools/provider-opencode/settings";
 
 import * as ServerConfig from "../../config.ts";
+import { getAixProfileStatus, withAixCatalogStatus } from "../../aix/ProviderInstanceSync.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import {
   OPENCODE_AIX_PROVIDER_ID,
@@ -80,6 +82,22 @@ export const makeOpenCodeAixDriver = <R>(
     });
     return yield* createOpenCodeInstance(input).pipe(
       Effect.provideService(OpenCodeRuntime.OpenCodeRuntime, { ...base, ...aixRuntime }),
+      Effect.map((instance) => {
+        const withCatalogStatus = (provider: Parameters<typeof withAixCatalogStatus>[0]) =>
+          getAixProfileStatus(profileReference.profile).pipe(
+            Effect.map((stale) => withAixCatalogStatus(provider, stale)),
+          );
+        const snapshot = instance.snapshot;
+        return {
+          ...instance,
+          snapshot: {
+            ...snapshot,
+            getSnapshot: snapshot.getSnapshot.pipe(Effect.flatMap(withCatalogStatus)),
+            refresh: snapshot.refresh.pipe(Effect.flatMap(withCatalogStatus)),
+            streamChanges: snapshot.streamChanges.pipe(Stream.mapEffect(withCatalogStatus)),
+          },
+        };
+      }),
     );
   }),
 });
