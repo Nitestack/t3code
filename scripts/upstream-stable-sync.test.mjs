@@ -264,10 +264,7 @@ NodeTest.test(
 
 NodeTest.test("classifies GitHub failures by operation without exposing raw errors", () => {
   const sentinel = "SENTINEL_PRIVATE_GH_ERROR_TEXT";
-  const releasesFailure = classifyGitHubFailure(
-    `gh: HTTP 404: ${sentinel}`,
-    "upstreamReleases",
-  );
+  const releasesFailure = classifyGitHubFailure(`gh: HTTP 404: ${sentinel}`, "upstreamReleases");
   NodeAssert.match(releasesFailure, /upstream releases lookup/i);
   NodeAssert.match(releasesFailure, /404/);
   NodeAssert.doesNotMatch(releasesFailure, new RegExp(sentinel));
@@ -290,26 +287,29 @@ NodeTest.test("classifies GitHub failures by operation without exposing raw erro
   );
 });
 
-NodeTest.test("reports whether releases or open-PR lookup failed without leaking stderr", async () => {
-  const sentinel = "SENTINEL_PRIVATE_GH_ERROR_TEXT";
-  for (const [failure, operation] of [
-    [{ releaseApiError: `gh: HTTP 403: ${sentinel}` }, /upstream releases lookup.*403/],
-    [
-      { pullRequestApiError: `GraphQL: Resource not accessible by integration (${sentinel})` },
-      /open sync pull-request lookup.*permission denied/,
-    ],
-  ]) {
-    const fixture = await createSyncFixture(failure);
-    try {
-      const result = fixture.runSync();
-      NodeAssert.equal(result.status, 1, result.output);
-      NodeAssert.match(result.output, operation);
-      NodeAssert.doesNotMatch(result.output, new RegExp(sentinel));
-    } finally {
-      await NodeFSP.rm(fixture.root, { recursive: true, force: true });
+NodeTest.test(
+  "reports whether releases or open-PR lookup failed without leaking stderr",
+  async () => {
+    const sentinel = "SENTINEL_PRIVATE_GH_ERROR_TEXT";
+    for (const [failure, operation] of [
+      [{ releaseApiError: `gh: HTTP 403: ${sentinel}` }, /upstream releases lookup.*403/],
+      [
+        { pullRequestApiError: `GraphQL: Resource not accessible by integration (${sentinel})` },
+        /open sync pull-request lookup.*permission denied/,
+      ],
+    ]) {
+      const fixture = await createSyncFixture(failure);
+      try {
+        const result = fixture.runSync();
+        NodeAssert.equal(result.status, 1, result.output);
+        NodeAssert.match(result.output, operation);
+        NodeAssert.doesNotMatch(result.output, new RegExp(sentinel));
+      } finally {
+        await NodeFSP.rm(fixture.root, { recursive: true, force: true });
+      }
     }
-  }
-});
+  },
+);
 
 NodeTest.test("a 0.1.9 release already in main is a true no-op", async () => {
   const fixture = await createSyncFixture({ releases: ["v0.1.9"] });

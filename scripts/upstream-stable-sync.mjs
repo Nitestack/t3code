@@ -10,6 +10,9 @@ const BRANCH_PREFIX = "automation/upstream-stable-";
 const GITHUB_OPERATION_LABELS = new Map([
   ["upstreamReleases", "upstream releases lookup"],
   ["openSyncPullRequests", "open sync pull-request lookup"],
+  ["workflowRuns", "CI workflow-run lookup"],
+  ["workflowDispatch", "CI workflow dispatch"],
+  ["createSyncPullRequest", "sync pull-request creation"],
 ]);
 
 const TEST_RELEASE_LABEL =
@@ -109,11 +112,7 @@ export function mergeStableRelease({ targetTag, mainRef, branch, tagRef, cwd = p
   }
 }
 
-function run(
-  command,
-  args,
-  { githubOperation, cwd = process.cwd(), allowFailure = false } = {},
-) {
+function run(command, args, { githubOperation, cwd = process.cwd(), allowFailure = false } = {}) {
   try {
     return NodeChildProcess.execFileSync(command, args, {
       cwd,
@@ -244,7 +243,7 @@ function findWorkflowDispatch(branch) {
           "--json",
           "databaseId,status,conclusion",
         ],
-        { githubRequest: true },
+        { githubOperation: "workflowRuns" },
       ),
     );
   } catch (error) {
@@ -269,7 +268,7 @@ function dispatchForkCi(branch) {
         "-f",
         `ref=${branch}`,
       ],
-      { githubRequest: true },
+      { githubOperation: "workflowDispatch" },
     );
   } catch (error) {
     const details = `${error.message} ${error.cause?.message ?? ""} ${error.cause?.stderr ?? ""}`;
@@ -309,7 +308,7 @@ function createSyncPullRequest(branch, targetTag, bodyPath) {
         "--body-file",
         bodyPath,
       ],
-      { githubRequest: true },
+      { githubOperation: "createSyncPullRequest" },
     );
   } catch (error) {
     const stderr = String(error.cause?.stderr ?? error.message ?? "");
