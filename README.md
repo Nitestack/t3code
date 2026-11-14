@@ -32,16 +32,18 @@ The repository includes a pinned source flake for `x86_64-linux`, with separate 
 `t3code-fork-desktop` commands. It builds the fork from a reviewed source commit; it is not a
 published fork binary. See the [Nix install and isolated launch guide](./docs/user/install.md#t3-code-fork-nix).
 
-Mobile access from this fork is currently disabled. The repository has an Android variant and
-build workflow, but there is no verified signed APK or published fork download. The official iOS
+The repository has an Android variant and build workflow, but there is no verified signed APK or
+published fork download. The official iOS
 app is unchanged and has no fork Work/Personal switch; official mobile-client compatibility with
 the fork server has not been established. See the [Android build guide](./docs/operations/android-fork-apk.md).
 
 ## Upstream updates
 
 A guarded stable-release sync workflow checks upstream daily and supports manual dispatch. Manual
-dry runs create no PR. A follow-up dry run is pending, and no sync PR has been demonstrated.
-Repository Actions permissions currently prevent the workflow from creating PRs. The workflow
+dry runs create no PR. A [manual dry run](https://github.com/Nitestack/t3code/actions/runs/43554789828)
+completed an up-to-date check successfully. A non-dry-run is intended to propose a PR when it finds
+a new stable release; that PR path remains unverified and is currently blocked by the repository's
+Actions policy. The workflow
 does not auto-merge or publish a fork release. See the
 [fork update guide](./docs/user/nitestack-fork.md#updates).
 

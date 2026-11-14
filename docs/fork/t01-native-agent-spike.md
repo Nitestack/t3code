@@ -15,15 +15,15 @@ The reviewed probe harness reported 33 offline fixture checks and 5 pending-RPC 
 passing. The offline fixtures inject a sentinel into raw fields and exercise the normalizer and
 serializer; they do not prove that an endpoint supports a model. The harness was not included in
 this checkout, so these counts are recorded as supplied results rather than as commands another
-checkout can replay. The review fixed pending-RPC timeouts across all three phases. No new live
-requests were made while updating this report.
+checkout can replay. The review fixed pending-RPC timeouts across all three phases. No model
+requests were made for this documentation update.
 
 The live harness reported that its scan of normalized runtime output and final output did not match
 the actual resolved key. This was not independently rescanned during review. The harness declared
 a sentinel but did not inject it into runtime input; its false `sentinelLeakObserved` value only
 records the absence of that unused value and is not evidence of runtime sentinel redaction. The
-original v5 report's claim that this was a live sentinel-redaction test is withdrawn. The offline
-sentinel fixture is separate evidence and was not rerun for this correction.
+live probe therefore provides no runtime sentinel-redaction proof. The injected-sentinel fixture
+is separate offline evidence and was not rerun for this correction.
 
 Retained successful calls reported `$0.0083248` for Claude, `$0.00301269` for GPT-OSS through
 OpenCode, and `$0.00795365537` for Gemma through OpenCode: `$0.01929114537` in known CLI-reported

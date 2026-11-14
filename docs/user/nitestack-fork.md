@@ -34,11 +34,11 @@ The web and desktop source includes a Work/Personal view that filters connected 
 locally stored classifications. It is a preview: the full real-client pass across two environments,
 including search routes, active-task behavior, and notifications, remains open. The view is only a
 client-side filter. It does not provide access control or isolate server data. For actual server
-separation, run separate T3 data directories; the `T3CODE_HOME` and `--base-dir` options are
-described in the [isolated Nix launch guide](./install.md#t3-code-fork-nix).
+separation, run separate T3 data directories using `T3CODE_HOME` as described in the
+[isolated Nix launch guide](./install.md#t3-code-fork-nix).
 
-Mobile access from this fork is currently disabled. An Android variant and build workflow are in
-the source, but there is no verified signed APK or published fork download. See the
+An Android variant and build workflow are in the source, but there is no verified signed APK or
+published fork download. See the
 [Android build guide](../operations/android-fork-apk.md) for build status; upstream Android
 downloads are not fork builds. The official Android and iOS apps are unchanged upstream clients,
 and their compatibility with a fork server has not been established. The official iOS app has no
@@ -74,9 +74,11 @@ did not configure or test an aix profile.
 ## Updates
 
 The source includes a guarded workflow for checking stable upstream releases. It runs daily, and
-manual dispatch defaults to a dry run that creates no PR. The next upstream release lookup is
-pending, and no sync PR has been demonstrated. Repository Actions permissions currently prevent
-the workflow from creating PRs. It does not auto-merge or publish a fork release. See the
+manual dispatch defaults to a dry run that creates no PR. A
+[manual dry run](https://github.com/Nitestack/t3code/actions/runs/43554789828) completed an
+up-to-date check successfully. A non-dry-run is intended to propose a PR when a new stable release
+is found; automatic PR creation remains unverified and is currently blocked by the repository's
+Actions policy. The workflow does not auto-merge or publish a fork release. See the
 [workflow source](../../.github/workflows/upstream-stable-sync.yml).
 
 To update a clean source checkout to the fork's current `main`:
