@@ -37,6 +37,9 @@ published fork download. The official iOS
 app is unchanged and has no fork Work/Personal switch; official mobile-client compatibility with
 the fork server has not been established. See the [Android build guide](./docs/operations/android-fork-apk.md).
 
+Fork release assets, when available, are listed under [Nitestack/t3code releases](https://github.com/Nitestack/t3code/releases).
+Upstream downloads install original T3.
+
 ## Upstream updates
 
 A guarded stable-release sync workflow checks upstream daily and supports manual dispatch. Manual
