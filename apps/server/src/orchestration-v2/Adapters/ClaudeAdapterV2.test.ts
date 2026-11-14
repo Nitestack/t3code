@@ -3689,8 +3689,17 @@ describe("ClaudeAdapterV2 background wake turns", () => {
 
   it.effect("resolves a rotated aix gateway credential for the next Claude process only", () =>
     Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const homePath = yield* fs.makeTempDirectoryScoped({ prefix: "claude-aix-guard-" });
+      const settingsPath = NodePath.join(homePath, "settings.json");
+      let closed = 0;
       let currentAuthToken = "fake-aix-token-before-rotation";
       const harness = yield* makeWakeHarnessWithOptions({
+        settings: { ...DEFAULT_CLAUDE_SETTINGS, homePath },
+        close: () =>
+          Effect.sync(() => {
+            closed++;
+          }),
         freshQueueOnReopen: true,
         restartProcessForNewTurn: true,
         resolveProcessEnvironment: () =>
@@ -3733,7 +3742,20 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       );
       yield* harness.awaitTerminal(1);
 
-      yield* harness.runtime.startTurn(turn(2));
+      yield* fs.writeFileString(
+        settingsPath,
+        JSON.stringify({
+          env: { ANTHROPIC_AUTH_TOKEN: "private-settings-sentinel" },
+        }),
+      );
+      const rejected = yield* harness.runtime.startTurn(turn(2)).pipe(Effect.exit);
+      assert.isTrue(Exit.isFailure(rejected));
+      assert.notInclude(JSON.stringify(rejected), "private-settings-sentinel");
+      assert.equal(closed, 0);
+      assert.strictEqual(harness.getOpenedOptions()?.settings, firstSettings);
+      yield* fs.remove(settingsPath);
+      yield* harness.runtime.startTurn(turn(3));
+      assert.equal(closed, 1);
       assert.equal(
         harness.getOpenedOptions()?.env?.ANTHROPIC_AUTH_TOKEN,
         "fake-aix-token-after-rotation",

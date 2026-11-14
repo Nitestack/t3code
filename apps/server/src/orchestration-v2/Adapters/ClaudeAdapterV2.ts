@@ -12145,7 +12145,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               : yield* adapterOptions.resolveProcessEnvironment();
           if (adapterOptions.resolveProcessEnvironment !== undefined) {
             yield* validateClaudeAixSettingsAuth(
-              adapterOptions.settings ?? { homePath: "" },
+              adapterOptions.settings,
               turnInput.runtimePolicy.cwd ?? undefined,
               processEnvironment,
               launchArgSettings?.env,

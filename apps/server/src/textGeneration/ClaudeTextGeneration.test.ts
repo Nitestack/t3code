@@ -174,6 +174,55 @@ it.layer(layerClaudeTextGenerationTest)("ClaudeTextGeneration", (it) => {
     }),
   );
 
+  it.effect("rejects conflicting title credentials before spawning without exposing them", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const homePath = yield* fs.makeTempDirectoryScoped({ prefix: "claude-title-guard-" });
+      const settingsPath = path.join(homePath, "settings.json");
+      const startedPath = path.join(homePath, "started");
+      yield* fs.writeFileString(
+        settingsPath,
+        JSON.stringify({
+          env: { ANTHROPIC_AUTH_TOKEN: "private-title-settings-sentinel" },
+        }),
+      );
+      return yield* withFakeClaudeEnv(
+        {
+          output: JSON.stringify({ structured_output: { title: "Guard verified" } }),
+          claudeConfig: { homePath },
+          environment: {
+            ANTHROPIC_BASE_URL: "https://gateway.example.test",
+            ANTHROPIC_API_KEY: "",
+            ANTHROPIC_AUTH_TOKEN: "fake-profile-token",
+            T3_FAKE_CLAUDE_STARTED_FILE: startedPath,
+          },
+          resolveEnvironment: (environment) => Effect.succeed(environment),
+        },
+        (textGeneration) =>
+          Effect.gen(function* () {
+            const request = {
+              cwd: homePath,
+              message: "thread title",
+              modelSelection: {
+                instanceId: ProviderInstanceId.make("claudeAgent"),
+                model: SYNTHETIC_CLAUDE_STANDARD_MODEL,
+              },
+            };
+            const error = yield* Effect.flip(textGeneration.generateThreadTitle(request));
+            expect(error.detail).toContain("conflicting");
+            expect(JSON.stringify(error)).not.toContain("private-title-settings-sentinel");
+            expect(yield* fs.exists(startedPath)).toBe(false);
+            yield* fs.remove(settingsPath);
+            expect((yield* textGeneration.generateThreadTitle(request)).title).toBe(
+              "Guard verified",
+            );
+            expect(yield* fs.exists(startedPath)).toBe(true);
+          }),
+      );
+    }),
+  );
+
   it.effect("routes title processes through the refreshed aix gateway auth", () =>
     Effect.gen(function* () {
       let gatewayEnvironment = {

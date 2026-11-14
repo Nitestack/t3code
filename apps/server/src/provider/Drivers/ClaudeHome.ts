@@ -20,9 +20,12 @@ const AIX_PROFILE_ENVIRONMENT_VARIABLE = "T3_AIX_PROFILE";
 
 class ClaudeAixProfileError extends Schema.TaggedError<ClaudeAixProfileError>()(
   "ClaudeAixProfileError",
-  { reason: Schema.Literals(["invalid-reference", "settings-auth-conflict"]) },
+  { reason: Schema.Literals(["invalid-reference", "settings-auth-conflict", "insecure-endpoint"]) },
 ) {
   override get message(): string {
+    if (this.reason === "insecure-endpoint") {
+      return "Claude aix gateway authentication requires HTTPS outside loopback.";
+    }
     return this.reason === "invalid-reference"
       ? "The configured aix profile reference is invalid."
       : "Remove conflicting Claude settings credentials before using an aix profile.";
@@ -48,6 +51,13 @@ export const resolveClaudeProviderInstanceEnvironment = Effect.fn(
 
   const resolved = yield* AixDiscovery.resolveEnvironment(profileReference.value.trim());
   const directAnthropic = resolved.endpointKind === "anthropic";
+  const endpoint = new URL(resolved.endpoint);
+  if (
+    endpoint.protocol === "http:" &&
+    !["localhost", "127.0.0.1", "[::1]"].includes(endpoint.hostname)
+  ) {
+    return yield* new ClaudeAixProfileError({ reason: "insecure-endpoint" });
+  }
 
   return [
     ...(environment ?? []).filter(

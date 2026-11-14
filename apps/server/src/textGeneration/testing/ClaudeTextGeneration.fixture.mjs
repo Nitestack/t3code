@@ -1,5 +1,9 @@
 import * as NodeFS from "node:fs";
 
+if (process.env.T3_FAKE_CLAUDE_STARTED_FILE) {
+  NodeFS.writeFileSync(process.env.T3_FAKE_CLAUDE_STARTED_FILE, "started", { mode: 0o600 });
+}
+
 const argv = process.argv.slice(2);
 const args = argv.join(" ");
 

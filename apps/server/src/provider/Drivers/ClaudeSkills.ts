@@ -567,13 +567,12 @@ const SettingsEnv = Schema.Struct({
 const decodeSettingsEnv = Schema.decodeUnknownEffect(
   fromLenientJson(Schema.Struct({ env: Schema.optional(SettingsEnv) })),
 );
-const AixSettingsEnv = Schema.Struct({
-  ...SettingsEnv.fields,
-  ANTHROPIC_API_KEY: Schema.optional(Schema.String),
-  ANTHROPIC_AUTH_TOKEN: Schema.optional(Schema.String),
-});
+type ClaudeSettingsEnvironment = typeof SettingsEnv.Type &
+  Partial<Record<"ANTHROPIC_API_KEY" | "ANTHROPIC_AUTH_TOKEN", true>>;
 const decodeAixSettingsEnv = Schema.decodeUnknownEffect(
-  fromLenientJson(Schema.Struct({ env: Schema.optional(AixSettingsEnv) })),
+  fromLenientJson(
+    Schema.Struct({ env: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)) }),
+  ),
 );
 
 /** User and managed env by default; aix also checks project env for authentication conflicts. */
@@ -582,12 +581,12 @@ export const readClaudeSettingsEnv = Effect.fn("readClaudeSettingsEnv")(function
   cwd: string | undefined,
   environment: NodeJS.ProcessEnv,
   options: { readonly forAixProfile?: boolean } = {},
-): Effect.fn.Return<typeof AixSettingsEnv.Type, never, FileSystem.FileSystem | Path.Path> {
+): Effect.fn.Return<ClaudeSettingsEnvironment, never, FileSystem.FileSystem | Path.Path> {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const platform = yield* HostProcess.Platform;
   const configDirPath = yield* resolveClaudeConfigDirPath(config, environment, cwd);
-  const settingsEnv: typeof AixSettingsEnv.Type = {};
+  const settingsEnv: ClaudeSettingsEnvironment = {};
   const repositoryRoot = options.forAixProfile && cwd ? yield* findRepositoryRoot(cwd) : undefined;
   const settingsPaths = claudeSettingsPaths(
     path,
@@ -597,20 +596,44 @@ export const readClaudeSettingsEnv = Effect.fn("readClaudeSettingsEnv")(function
     environment,
     repositoryRoot,
   );
+  const managedPath = options.forAixProfile
+    ? claudeManagedSettingsPath(path, platform, environment)
+    : undefined;
+  const dropInDirectory =
+    managedPath === undefined
+      ? undefined
+      : path.join(path.dirname(managedPath), "managed-settings.d");
+  const dropIns =
+    dropInDirectory === undefined
+      ? []
+      : yield* fileSystem
+          .readDirectory(dropInDirectory)
+          .pipe(Effect.orElseSucceed(() => [] as string[]));
   for (const settingsPath of [
     ...(repositoryRoot !== undefined && repositoryRoot !== cwd
       ? [path.join(repositoryRoot, ".claude", "settings.json")]
       : []),
     ...settingsPaths,
+    ...dropIns
+      .filter((name) => name.endsWith(".json"))
+      .sort()
+      .map((name) => path.join(dropInDirectory!, name)),
   ]) {
     const contents = yield* fileSystem
       .readFileString(settingsPath)
       .pipe(Effect.orElseSucceed(() => undefined));
     if (contents === undefined) continue;
-    const parsed = yield* (
-      options.forAixProfile ? decodeAixSettingsEnv(contents) : decodeSettingsEnv(contents)
-    ).pipe(Effect.orElseSucceed(() => undefined));
-    Object.assign(settingsEnv, parsed?.env);
+    if (options.forAixProfile) {
+      const parsed = yield* decodeAixSettingsEnv(contents).pipe(
+        Effect.orElseSucceed(() => undefined),
+      );
+      for (const name of ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"] as const) {
+        if (Object.hasOwn(parsed?.env ?? {}, name)) settingsEnv[name] = true;
+      }
+    } else {
+      const parsed = yield* decodeSettingsEnv(contents).pipe(Effect.orElseSucceed(() => undefined));
+      Object.assign(settingsEnv, parsed?.env);
+    }
   }
   return settingsEnv;
 });

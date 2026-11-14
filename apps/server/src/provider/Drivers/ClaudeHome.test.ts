@@ -9,6 +9,7 @@ import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import { ChildProcessSpawner } from "effect/process";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 
@@ -95,6 +96,8 @@ it.layer(NodeServices.layer)("ClaudeHome", (it) => {
           for (const file of [
             path.join(homePath, "settings.json"),
             path.join(projectRoot, ".claude", "settings.json"),
+            path.join(projectRoot, ".claude", "settings.local.json"),
+            path.join(cwd, ".claude", "settings.json"),
             path.join(cwd, ".claude", "settings.local.json"),
           ]) {
             yield* fs.writeFileString(file, JSON.stringify({ env: { [name]: aixSecret } }));
@@ -114,8 +117,77 @@ it.layer(NodeServices.layer)("ClaudeHome", (it) => {
           );
           expect(masked.reason).toBe("settings-auth-conflict");
           yield* validateClaudeAixSettingsAuth(config, cwd, environment);
+          for (const value of [null, false, 0, {}]) {
+            const file = path.join(homePath, "settings.json");
+            yield* fs.writeFileString(
+              file,
+              JSON.stringify({ env: { ANTHROPIC_BASE_URL: null, [name]: value } }),
+            );
+            const malformed = yield* Effect.flip(
+              validateClaudeAixSettingsAuth(config, cwd, environment),
+            );
+            expect(malformed.reason).toBe("settings-auth-conflict");
+            yield* fs.remove(file);
+          }
         }
       }).pipe(Effect.scoped),
+  );
+
+  it.effect("rejects active credentials in managed settings drop-ins", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "t3-aix-managed-auth-" });
+      const dropIns = path.join(directory, "ClaudeCode", "managed-settings.d");
+      yield* fs.makeDirectory(dropIns, { recursive: true });
+      yield* fs.writeFileString(
+        path.join(dropIns, "a.json"),
+        JSON.stringify({ env: { ANTHROPIC_API_KEY: null } }),
+      );
+      yield* fs.writeFileString(
+        path.join(dropIns, "b.json"),
+        JSON.stringify({ env: { ANTHROPIC_AUTH_TOKEN: false } }),
+      );
+      for (const name of ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"] as const) {
+        const error = yield* Effect.flip(
+          validateClaudeAixSettingsAuth({ homePath: directory }, undefined, {
+            PROGRAMDATA: directory,
+            [name]: "selected-profile-key",
+          }).pipe(Effect.provideService(HostProcess.Platform, "win32")),
+        );
+        expect(error.reason).toBe("settings-auth-conflict");
+      }
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("requires TLS for remote Bearer endpoints and permits loopback development", () =>
+    Effect.gen(function* () {
+      for (const endpoint of ["http://hub.example.test:4000", "http://localhost.example.test"]) {
+        const error = yield* withAixProfiles(
+          Effect.flip(
+            resolveClaudeProviderInstanceEnvironment([
+              { name: "T3_AIX_PROFILE", value: "gateway", sensitive: false },
+            ]),
+          ),
+          { gateway: { endpoint, apiKey: aixSecret } },
+        );
+        expect(error.reason).toBe("insecure-endpoint");
+        expect(JSON.stringify(error)).not.toContain(aixSecret);
+      }
+      for (const endpoint of [
+        "http://127.0.0.1:4000",
+        "http://localhost:4000",
+        "http://[::1]:4000",
+      ]) {
+        const resolved = yield* withAixProfiles(
+          resolveClaudeProviderInstanceEnvironment([
+            { name: "T3_AIX_PROFILE", value: "gateway", sensitive: false },
+          ]),
+          { gateway: { endpoint, apiKey: aixSecret } },
+        );
+        expect(resolved.find(({ name }) => name === "ANTHROPIC_AUTH_TOKEN")?.value).toBe(aixSecret);
+      }
+    }),
   );
 
   describe("Claude home resolution", () => {
