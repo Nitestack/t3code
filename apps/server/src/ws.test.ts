@@ -1314,6 +1314,7 @@ it.effect("on-demand clients get provider config without workspace snapshots", (
           Stream.tap(() => Queue.offer(pulled, undefined)),
         ),
         refresh: () => Effect.sync(() => registryProviders),
+        refreshInstance: () => Effect.sync(() => registryProviders),
         reloadSecretsAndRefresh: () => Effect.sync(() => registryProviders),
         invalidateModelCaches: () => Effect.void,
         refreshWorkspaceSnapshot: () => Effect.sync(() => registryProviders),
@@ -1590,7 +1591,7 @@ it.effect("on-demand clients get provider config without workspace snapshots", (
       _tag: "Request",
       id: RpcMessage.RequestId("refresh-models"),
       tag: WS_METHODS.serverRefreshProviders,
-      payload: { refreshModels: true, omitProviders: true },
+      payload: { instanceId, refreshModels: true, omitProviders: true },
       headers: Headers.empty,
     });
     assert.deepEqual(yield* Queue.take(responses), { providers: [] });
@@ -1600,7 +1601,7 @@ it.effect("on-demand clients get provider config without workspace snapshots", (
       _tag: "Request",
       id: RpcMessage.RequestId("reload-secrets"),
       tag: WS_METHODS.serverRefreshProviders,
-      payload: { reloadSecrets: true, omitProviders: true },
+      payload: { instanceId, reloadSecrets: true, omitProviders: true },
       headers: Headers.empty,
     });
     assert.deepEqual(yield* Queue.take(responses), { providers: [] });

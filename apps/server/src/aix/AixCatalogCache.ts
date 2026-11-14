@@ -5,7 +5,7 @@ import * as Result from "effect/Result";
 import * as Semaphore from "effect/Semaphore";
 
 /** Profile lists and per-profile catalogs are re-read at most once per TTL unless forced. */
-export const CATALOG_TTL = Duration.hours(24);
+const CATALOG_TTL = Duration.hours(24);
 const CATALOG_TTL_MILLIS = Duration.toMillis(CATALOG_TTL);
 
 export interface StaleMarker {
@@ -33,6 +33,7 @@ export interface CatalogCache<A> {
     options: CatalogReadOptions<E>,
   ) => Effect.Effect<CatalogRead<A>, E>;
   readonly retain: (keep: (key: string) => boolean) => Effect.Effect<void>;
+  readonly isExpired: (key: string) => Effect.Effect<boolean>;
 }
 
 interface Entry<A> {
@@ -104,5 +105,15 @@ export const make = Effect.fn("AixCatalogCache.make")(function* <A>() {
     );
   });
 
-  return { read, retain } satisfies CatalogCache<A>;
+  const isExpired = Effect.fn("AixCatalogCache.isExpired")(function* (key: string) {
+    return yield* lock.withPermits(1)(
+      Effect.gen(function* () {
+        const entry = entries.get(key);
+        if (entry === undefined) return true;
+        return (yield* Clock.currentTimeMillis) - entry.fetchedAt >= CATALOG_TTL_MILLIS;
+      }),
+    );
+  });
+
+  return { read, retain, isExpired } satisfies CatalogCache<A>;
 });

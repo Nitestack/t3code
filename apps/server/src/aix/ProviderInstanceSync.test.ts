@@ -7,8 +7,11 @@ import {
   ProviderInstanceConfigMap,
 } from "@t3tools/contracts";
 import { it as effectIt } from "@effect/vitest";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Digest from "effect/crypto/Digest";
@@ -26,6 +29,7 @@ import {
   makeAixSyncCache,
   planAixInstanceSync,
   routeAixModels,
+  runAixCatalogRefreshLoop,
   syncAixFromEnvironment,
   syncAixProviderInstances,
   withAixCatalogStatus,
@@ -120,13 +124,44 @@ describe("aixDesiredInstances", () => {
 });
 
 describe("withAixCatalogStatus", () => {
-  it("publishes a secret-free warning with the refresh timestamp and failure code", () => {
+  it("downgrades ready to warning with a secret-free refresh note", () => {
     const provider = { status: "ready", message: undefined } as never;
 
     expect(withAixCatalogStatus(provider, { since: 0, code: "request-503" })).toMatchObject({
       status: "warning",
       message: "aix catalog stale since 1970-01-01T00:00:00.000Z (request-503).",
     });
+  });
+
+  it("keeps errors and appends the stale note to their message", () => {
+    expect(
+      withAixCatalogStatus({ status: "error", message: "Codex binary is missing" } as never, {
+        since: 0,
+        code: "request-503",
+      }),
+    ).toMatchObject({
+      status: "error",
+      message:
+        "Codex binary is missing aix catalog stale since 1970-01-01T00:00:00.000Z (request-503).",
+    });
+  });
+
+  it("keeps warnings and appends the stale note to their message", () => {
+    expect(
+      withAixCatalogStatus(
+        { status: "warning", message: "Authentication needs attention" } as never,
+        { since: 0, code: "request-503" },
+      ),
+    ).toMatchObject({
+      status: "warning",
+      message:
+        "Authentication needs attention aix catalog stale since 1970-01-01T00:00:00.000Z (request-503).",
+    });
+  });
+
+  it("leaves disabled providers untouched", () => {
+    const provider = { status: "disabled", message: "Provider disabled" } as never;
+    expect(withAixCatalogStatus(provider, { since: 0, code: "request-503" })).toBe(provider);
   });
 });
 
@@ -297,6 +332,84 @@ describe("syncAixProviderInstances", () => {
         "aix-codex-work",
       ]);
     }).pipe(Effect.provide(aixTestLayer)),
+  );
+
+  effectIt.effect("does not overlap concurrent profile syncs", () =>
+    Effect.gen(function* () {
+      const { counted, writes } = yield* countingSettings;
+      const cache = yield* makeAixSyncCache;
+      const profileReadsStarted = yield* Queue.unbounded<void>();
+      const activeReads = yield* Ref.make(0);
+      const maxActiveReads = yield* Ref.make(0);
+      const base = sourceFor();
+      const source = sourceFor({
+        listProfiles: Effect.succeed([{ name: "work", label: "Work" }]),
+        resolveEnvironment: (profileName) =>
+          Effect.gen(function* () {
+            const active = yield* Ref.updateAndGet(activeReads, (count) => count + 1);
+            yield* Ref.update(maxActiveReads, (maximum) => Math.max(maximum, active));
+            yield* Queue.offer(profileReadsStarted, undefined);
+            yield* Effect.sleep("1 hour");
+            yield* Ref.update(activeReads, (count) => count - 1);
+            return yield* base.resolveEnvironment(profileName);
+          }),
+      });
+      const runSync = () =>
+        syncAixProviderInstances({ enabled: true, source, cache }).pipe(
+          Effect.provideService(ServerSettingsService, counted),
+        );
+      const concurrent = yield* Effect.forEach([1, 2], runSync, {
+        concurrency: "unbounded",
+        discard: true,
+      }).pipe(Effect.forkChild);
+
+      yield* Queue.take(profileReadsStarted);
+      yield* TestClock.adjust("1 hour");
+      yield* Queue.take(profileReadsStarted);
+      yield* TestClock.adjust("1 hour");
+      yield* Fiber.join(concurrent);
+
+      expect(yield* Ref.get(maxActiveReads)).toBe(1);
+      expect(yield* Ref.get(writes)).toEqual(["aix-codex-work"]);
+    }).pipe(Effect.provide(aixTestLayer)),
+  );
+
+  effectIt.effect("hourly refresh catches up after provider background work resumes", () =>
+    Effect.gen(function* () {
+      const cache = yield* makeAixSyncCache;
+      const slowLoad = Effect.sleep("2 hours").pipe(Effect.as([{ name: "work", label: "Work" }]));
+      const loading = yield* Effect.forkChild(
+        cache.profiles.read("profiles", slowLoad, {
+          force: false,
+          failureCode: () => "catalog-error",
+        }),
+      );
+      yield* TestClock.adjust("2 hours");
+      yield* Fiber.join(loading);
+
+      const leaseAvailable = yield* Ref.make(false);
+      const refreshes = yield* Ref.make<ReadonlyArray<boolean>>([]);
+      const caughtUp = yield* Deferred.make<void>();
+      const loop = yield* runAixCatalogRefreshLoop({
+        cache,
+        shouldRunScopeWork: Ref.get(leaseAvailable),
+        refresh: ({ force }) =>
+          Ref.update(refreshes, (previous) => [...previous, force]).pipe(
+            Effect.tap(() => Deferred.succeed(caughtUp, undefined)),
+          ),
+      }).pipe(Effect.forkChild);
+
+      yield* TestClock.adjust("23 hours");
+      expect(yield* Ref.get(refreshes)).toEqual([]);
+      yield* TestClock.adjust("1 hour");
+      expect(yield* Ref.get(refreshes)).toEqual([]);
+
+      yield* Ref.set(leaseAvailable, true);
+      yield* TestClock.adjust("1 hour");
+      yield* Deferred.await(caughtUp);
+      expect(yield* Ref.get(refreshes)).toEqual([true]);
+      yield* Fiber.interrupt(loop);
+    }),
   );
 
   effectIt.effect("writes nothing when aix cannot list profiles", () =>

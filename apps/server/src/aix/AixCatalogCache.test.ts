@@ -53,6 +53,25 @@ describe("AixCatalogCache", () => {
     }),
   );
 
+  effectIt.effect("starts the TTL after a slow load finishes", () =>
+    Effect.gen(function* () {
+      const cache = yield* AixCatalogCache.make<string>();
+      const options = { force: false, failureCode };
+
+      const loading = yield* Effect.forkChild(
+        cache.read("slow", Effect.sleep("2 hours").pipe(Effect.as("ready")), options),
+      );
+      yield* TestClock.adjust("2 hours");
+      yield* Fiber.join(loading);
+      yield* TestClock.adjust("23 hours");
+      yield* TestClock.adjust("59 minutes");
+      expect(yield* cache.isExpired("slow")).toBe(false);
+
+      yield* TestClock.adjust("1 minute");
+      expect(yield* cache.isExpired("slow")).toBe(true);
+    }),
+  );
+
   effectIt.effect("a forced read bypasses the TTL immediately", () =>
     Effect.gen(function* () {
       const cache = yield* AixCatalogCache.make<string>();

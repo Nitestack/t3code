@@ -2440,11 +2440,14 @@ export const layerWsRpc = (
               yield* invalidateSettingsSecrets(secretResolver, serverSettings.getSettings);
             }
             // Await refresh; RPC scope closure would interrupt a fork before the hub answered.
-            if (input.instanceId === undefined) {
+            const forceAixRefresh = input.refreshModels === true || input.reloadSecrets === true;
+            if (input.instanceId === undefined || forceAixRefresh) {
               // Explicit refreshes bypass the aix catalog TTL; other callers read through it.
               yield* aixProviderInstanceSync.refresh({
-                force: input.refreshModels === true || input.reloadSecrets === true,
+                force: forceAixRefresh,
               });
+            }
+            if (input.instanceId === undefined) {
               yield* usageLimitSources.refresh;
             }
             let providers = yield* input.cwd !== undefined && input.instanceId !== undefined
