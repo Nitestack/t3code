@@ -32,12 +32,18 @@ it("routes only the exact live-probed model and route pairs to their native agen
   );
 });
 
-it("routes other Claude models to Claude Code as unvalidated candidates", () => {
+it("rejects native Claude combinations outside the exact live-probed pair", () => {
   expect(outcome(route("claude-sonnet-5-5", "anthropic-direct-messages"))).toBe(
-    "claudeAgent:unvalidated",
+    "unroutable:no-verified-agent",
   );
   expect(outcome(route("claude-opus-5-5", "litellm-anthropic-messages"))).toBe(
-    "claudeAgent:unvalidated",
+    "unroutable:no-verified-agent",
+  );
+  expect(outcome(route("claude-sonnet-5-5", "litellm-anthropic-messages"))).toBe(
+    "unroutable:no-verified-agent",
+  );
+  expect(outcome(route("claude-unknown", "anthropic-direct-messages"))).toBe(
+    "unroutable:no-verified-agent",
   );
 });
 

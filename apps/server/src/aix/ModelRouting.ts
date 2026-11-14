@@ -59,11 +59,12 @@ function agentFor(id: string, routeKind: AixModelRoute, reasoningOverride: boole
   const claudeFamily = id.startsWith("claude-");
   switch (routeKind) {
     case "anthropic-direct-messages":
-      return claudeFamily && !id.includes("*")
+      if (!claudeFamily || id.includes("*")) return { reason: "claude-direct-only" };
+      return id === "claude-opus-5-5"
         ? { driverKind: CLAUDE_CODE }
-        : { reason: "claude-direct-only" };
+        : { reason: "no-verified-agent" };
     case "litellm-anthropic-messages":
-      return claudeFamily ? { driverKind: CLAUDE_CODE } : { reason: "no-verified-agent" };
+      return { reason: "no-verified-agent" };
     case "litellm-openai-responses":
       if (id !== "gpt-6.1-sol") return { reason: "no-verified-agent" };
       return reasoningOverride
