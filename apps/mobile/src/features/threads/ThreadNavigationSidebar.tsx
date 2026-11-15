@@ -48,7 +48,10 @@ import { useThreadJumpShortcuts } from "../keyboard/threadKeyboardShortcuts";
 import { requestThreadMessageJump } from "./threadMessageJump";
 import { useThreadListSearchMatches } from "./useThreadListSearchMatches";
 import { useHomeListOptions } from "../home/home-list-options";
-import { buildHomeListFilterMenuItems } from "../home/home-list-filter-menu";
+import {
+  buildHomeListFilterMenuItems,
+  homeListFilterEnvironments,
+} from "../home/home-list-filter-menu";
 import {
   buildHomeProjectScopes,
   resolveHomeProjectFilterScope,
@@ -165,7 +168,7 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
       label: connection.environmentLabel,
     }))
     .sort((left, right) => left.label.localeCompare(right.label));
-  const environments = filterScope(allEnvironments);
+  const environments = filterScope(homeListFilterEnvironments(workspaceEnvironments));
   const availableEnvironmentIds = new Set(
     environments.map((environment) => environment.environmentId),
   );
