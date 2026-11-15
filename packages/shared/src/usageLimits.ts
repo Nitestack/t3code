@@ -227,6 +227,12 @@ interface AccountReport {
   readonly usageLimits?: ServerProviderUsageLimits | undefined;
 }
 
+function aixProfileName(limits: ServerProviderUsageLimits | undefined): string | undefined {
+  const windows = limits?.windows ?? [];
+  if (windows.length !== 1) return undefined;
+  return /^aix-budget:(.+)$/u.exec(windows[0]?.id ?? "")?.[1];
+}
+
 const nativeReport = (provider: ServerProvider): AccountReport => ({
   driver: provider.driver,
   email: provider.auth.email,
@@ -273,6 +279,7 @@ export interface LimitAccount {
   readonly key: string;
   readonly driver: ServerProvider["driver"];
   readonly displayName: string | null;
+  readonly profileName?: string | undefined;
   readonly email: string | undefined;
   readonly plan: string | undefined;
   readonly accentColor: string | undefined;
@@ -324,7 +331,16 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
       accounts.set(key, next);
       return;
     }
-    const fresher = Date.parse(next.limits.checkedAt) > Date.parse(previous.limits.checkedAt);
+    const nextCheckedAt = Date.parse(next.limits.checkedAt);
+    const previousCheckedAt = Date.parse(previous.limits.checkedAt);
+    const fresher =
+      next.profileName === undefined
+        ? nextCheckedAt > previousCheckedAt
+        : Number.isFinite(nextCheckedAt) !== Number.isFinite(previousCheckedAt)
+          ? Number.isFinite(nextCheckedAt)
+          : nextCheckedAt !== previousCheckedAt
+            ? nextCheckedAt > previousCheckedAt
+            : JSON.stringify(next.limits) < JSON.stringify(previous.limits);
     const environments = [
       ...previous.environments,
       ...next.environments.filter(
@@ -373,16 +389,21 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
     const label = presentation.entry.target.label;
     for (const provider of providersWithLimits(presentation.serverConfig?.providers ?? [])) {
       if (!provider.usageLimits || limitsNotice(provider.usageLimits) !== null) continue;
-      merge(resolveKey(nativeReport(provider)) ?? `${environmentId}:${provider.instanceId}`, {
-        key: `${environmentId}:${provider.instanceId}`,
+      const profileName = aixProfileName(provider.usageLimits);
+      const key = profileName
+        ? `aix-profile:${JSON.stringify([environmentId, profileName])}`
+        : `${environmentId}:${provider.instanceId}`;
+      merge(profileName ? key : (resolveKey(nativeReport(provider)) ?? key), {
+        key,
         driver: provider.driver,
-        displayName: provider.displayName?.trim() || null,
-        email: provider.auth.email,
-        plan: provider.auth.label,
-        accentColor: provider.accentColor,
+        displayName: profileName ?? (provider.displayName?.trim() || null),
+        ...(profileName ? { profileName } : {}),
+        email: profileName ? undefined : provider.auth.email,
+        plan: profileName ? undefined : provider.auth.label,
+        accentColor: profileName ? undefined : provider.accentColor,
         environments: [{ environmentId, label }],
         sourceLabel: null,
-        redeem: { environmentId, input: { instanceId: provider.instanceId } },
+        redeem: profileName ? null : { environmentId, input: { instanceId: provider.instanceId } },
         limits: provider.usageLimits,
       });
     }
@@ -475,6 +496,7 @@ export interface LimitPoolWindow {
 
 export interface LimitPool {
   readonly driver: ServerProvider["driver"];
+  readonly profileName?: string | undefined;
   readonly accounts: readonly LimitAccount[];
   readonly windows: readonly LimitPoolWindow[];
 }
@@ -530,13 +552,26 @@ export function collectLimitPools(
   accounts: readonly LimitAccount[],
   now: number,
 ): readonly LimitPool[] {
-  const byDriver = new Map<ServerProvider["driver"], LimitAccount[]>();
+  const byDriver = new Map<
+    string,
+    {
+      readonly driver: ServerProvider["driver"];
+      readonly profileName?: string;
+      members: LimitAccount[];
+    }
+  >();
   for (const account of accounts) {
-    const list = byDriver.get(account.driver);
-    if (list) list.push(account);
-    else byDriver.set(account.driver, [account]);
+    const key = account.profileName ? account.key : `driver:${account.driver}`;
+    const pool = byDriver.get(key);
+    if (pool) pool.members.push(account);
+    else
+      byDriver.set(key, {
+        driver: account.driver,
+        ...(account.profileName ? { profileName: account.profileName } : {}),
+        members: [account],
+      });
   }
-  return [...byDriver].map(([driver, members]) => {
+  return [...byDriver.values()].map(({ driver, profileName, members }) => {
     const orderWindow = members
       .flatMap((account) => account.limits.windows)
       .sort((left, right) => WINDOW_KIND_ORDER[left.kind] - WINDOW_KIND_ORDER[right.kind])[0];
@@ -555,7 +590,12 @@ export function collectLimitPools(
         accountSortName(left).localeCompare(accountSortName(right)) ||
         left.key.localeCompare(right.key),
     );
-    return { driver, accounts: sorted, windows: poolWindows(sorted, now) };
+    return {
+      driver,
+      ...(profileName ? { profileName } : {}),
+      accounts: sorted,
+      windows: poolWindows(sorted, now),
+    };
   });
 }
 

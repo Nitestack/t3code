@@ -149,9 +149,11 @@ function LimitRow({
   const left = remainingPercent(window);
   const pace = paceOf(window, now);
   const resetsAt = window.resetsAt ? Date.parse(window.resetsAt) : Number.NaN;
+  const profileName = /^aix-budget:(.+)$/u.exec(window.id)?.[1];
+  const label = profileName ? `${profileName} budget` : window.label;
   return (
     <UsageRow
-      label={window.label}
+      label={label}
       fill={left}
       tone={left <= 10 ? "error" : left <= 20 ? "warning" : null}
       value={`${left}%`}
@@ -159,7 +161,7 @@ function LimitRow({
       tooltip={
         <>
           <span className="text-foreground">
-            {window.label}: {left}% left
+            {label}: {left}% left
           </span>
           {window.resetsAt && resetsAt > now ? (
             <span className="text-muted-foreground">

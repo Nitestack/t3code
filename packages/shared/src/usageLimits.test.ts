@@ -293,6 +293,99 @@ describe("pools", () => {
     expect(accounts[0]?.limits.windows[0]?.usedPercent).toBe(55);
   });
 
+  it("presents each AIX profile once per environment across harnesses", () => {
+    const aixProvider = (
+      driver: "codex" | "claudeAgent" | "opencode",
+      instanceId: string,
+      profileName: string,
+      checkedAt: string,
+      usedPercent: number,
+    ) =>
+      provider({
+        driver: ProviderDriverKind.make(driver),
+        instanceId: ProviderInstanceId.make(instanceId),
+        usageLimits: {
+          checkedAt,
+          windows: [
+            {
+              id: `aix-budget:${profileName}`,
+              kind: "other",
+              label: "Gateway budget",
+              usedPercent,
+              resetsAt: "2026-09-06T12:00:00.000Z",
+            },
+          ],
+        },
+      });
+    const reports = [
+      aixProvider("codex", "codex-work", "work", checkedAt, 40),
+      aixProvider("claudeAgent", "claude-work", "work", "2026-09-03T11:30:00.000Z", 55),
+      aixProvider("opencode", "opencode-work", "work", "2026-09-03T11:30:00.000Z", 60),
+      aixProvider("codex", "codex-home", "home", checkedAt, 20),
+    ];
+    const presentation = (providers: readonly ServerProvider[]) =>
+      new Map([
+        [EnvironmentId.make("env-a"), { ...laptop, serverConfig: { providers } }],
+        [
+          EnvironmentId.make("env-b"),
+          {
+            entry: { target: { label: "Desktop" } },
+            serverConfig: {
+              providers: [aixProvider("claudeAgent", "claude-work", "work", checkedAt, 80)],
+            },
+          },
+        ],
+      ]);
+    const accounts = collectLimitAccounts(presentation(reports));
+    expect(accounts).toHaveLength(3);
+    expect(accounts.map((account) => account.profileName)).toEqual(["work", "home", "work"]);
+    expect(accounts.map((account) => account.limits.windows[0]?.usedPercent)).toEqual([55, 20, 80]);
+    expect(accounts[0]?.limits.windows).toHaveLength(1);
+    expect(accounts[0]?.redeem).toBeNull();
+    const pools = collectLimitPools(accounts, now);
+    expect(pools).toHaveLength(3);
+    expect(pools.map((pool) => pool.windows[0]?.members)).toEqual([
+      [expect.objectContaining({ account: expect.objectContaining({ profileName: "work" }) })],
+      [expect.objectContaining({ account: expect.objectContaining({ profileName: "home" }) })],
+      [expect.objectContaining({ account: expect.objectContaining({ profileName: "work" }) })],
+    ]);
+    expect(pools.map((pool) => pool.windows[0]?.resets)).toEqual([
+      [expect.objectContaining({ at: Date.parse("2026-09-06T12:00:00.000Z") })],
+      [expect.objectContaining({ at: Date.parse("2026-09-06T12:00:00.000Z") })],
+      [expect.objectContaining({ at: Date.parse("2026-09-06T12:00:00.000Z") })],
+    ]);
+    expect(
+      collectLimitAccounts(presentation(reports.toReversed()))
+        .map((account) => ({
+          profileName: account.profileName,
+          usedPercent: account.limits.windows[0]?.usedPercent,
+        }))
+        .toSorted(
+          (left, right) =>
+            (left.profileName ?? "").localeCompare(right.profileName ?? "") ||
+            (left.usedPercent ?? 0) - (right.usedPercent ?? 0),
+        ),
+    ).toEqual([
+      { profileName: "home", usedPercent: 20 },
+      { profileName: "work", usedPercent: 55 },
+      { profileName: "work", usedPercent: 80 },
+    ]);
+
+    const failedProbe = {
+      ...reports[0]!,
+      usageLimits: {
+        checkedAt,
+        windows: [],
+        unavailable: { reason: "probeFailed" as const, message: "Gateway budget unavailable." },
+      },
+    };
+    const withFailedProbe = presentation([...reports, failedProbe]);
+    expect(collectLimitAccounts(withFailedProbe)).toHaveLength(3);
+    expect(collectLimitNotices(withFailedProbe)).toEqual([
+      "Laptop · codex: Gateway budget unavailable.",
+    ]);
+  });
+
   it("uses the freshest reported plan even when the newest quota has no plan", () => {
     const snapshot = (label: string | undefined, checkedAt: string, usedPercent: number) =>
       provider({
