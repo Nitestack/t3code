@@ -49,6 +49,7 @@ import {
   CodexProviderCapabilitiesV2,
   canReuseCodexContextUsage,
 } from "../Adapters/CodexAdapterV2.ts";
+import { CodexAppServerRequestError } from "effect-codex-app-server/errors";
 import { AcpProviderCapabilitiesV2 } from "@t3tools/provider-acp/server/adapter";
 import * as EventSink from "../EventSink.ts";
 import * as EventStore from "../EventStore.ts";
@@ -76,6 +77,7 @@ const projectId = ProjectId.make("project:provider-switch");
 const CODEX_DRIVER = ProviderDriverKind.make("codex");
 const CLAUDE_DRIVER = ProviderDriverKind.make("claudeAgent");
 const GROK_DRIVER = ProviderDriverKind.make("acp");
+const OPENCODE_DRIVER = ProviderDriverKind.make("opencode");
 
 interface CapturedTurn {
   readonly driver: ProviderDriverKind;
@@ -105,6 +107,7 @@ function makeTestAdapter(input: {
   readonly failStartOnce?: Ref.Ref<boolean>;
   readonly refuseStarts?: Ref.Ref<number>;
   readonly refusalCause?: unknown;
+  readonly rejectedModel?: string;
   readonly failInjectionOnce?: Ref.Ref<boolean>;
   readonly nativeThreadGeneration?: Ref.Ref<number>;
   readonly failResume?: boolean;
@@ -265,8 +268,10 @@ function makeTestAdapter(input: {
               )
                 return yield* unimplemented(input.driver, "turn start failed after injection");
               if (
-                input.refuseStarts !== undefined &&
-                (yield* Ref.getAndUpdate(input.refuseStarts, (left) => Math.max(0, left - 1))) > 0
+                turnInput.modelSelection.model === input.rejectedModel ||
+                (input.refuseStarts !== undefined &&
+                  (yield* Ref.getAndUpdate(input.refuseStarts, (left) => Math.max(0, left - 1))) >
+                    0)
               )
                 return yield* new ProviderAdapter.ProviderAdapterTurnStartError({
                   driver: input.driver,
@@ -1094,25 +1099,30 @@ describe("orchestration v2 provider switching", () => {
   it.live.each([
     {
       name: "aix Codex profile to another profile",
-      source: {
-        instanceId: ProviderInstanceId.make("aix-codex-work"),
-        model: "gpt-6-codex",
-      },
-      target: {
-        instanceId: ProviderInstanceId.make("aix-codex-personal"),
-        model: "gpt-6-codex",
-      },
+      source: { instanceId: ProviderInstanceId.make("aix-codex-work"), model: "gpt-6-codex" },
+      sourceDriver: CODEX_DRIVER,
+      sourceCapabilities: CodexProviderCapabilitiesV2,
+      target: { instanceId: ProviderInstanceId.make("aix-codex-personal"), model: "gpt-6-codex" },
+      targetDriver: CODEX_DRIVER,
+      targetCapabilities: CodexProviderCapabilitiesV2,
+      selectCommand: "thread.model-selection.set",
+      outcome: "completed",
+      error: null,
     },
     {
       name: "aix Codex to Claude",
-      source: {
-        instanceId: ProviderInstanceId.make("aix-codex-work-cross"),
-        model: "gpt-6-codex",
-      },
+      source: { instanceId: ProviderInstanceId.make("aix-codex-work-cross"), model: "gpt-6-codex" },
+      sourceDriver: CODEX_DRIVER,
+      sourceCapabilities: CodexProviderCapabilitiesV2,
       target: {
         instanceId: ProviderInstanceId.make("aix-claude-personal-cross"),
         model: "claude-sonnet",
       },
+      targetDriver: CLAUDE_DRIVER,
+      targetCapabilities: ClaudeProviderCapabilitiesV2,
+      selectCommand: "thread.model-selection.set",
+      outcome: "completed",
+      error: null,
     },
     {
       name: "aix Claude to OpenCode",
@@ -1120,21 +1130,55 @@ describe("orchestration v2 provider switching", () => {
         instanceId: ProviderInstanceId.make("aix-claude-work-cross"),
         model: "claude-sonnet",
       },
+      sourceDriver: CLAUDE_DRIVER,
+      sourceCapabilities: ClaudeProviderCapabilitiesV2,
       target: {
         instanceId: ProviderInstanceId.make("aix-opencode-personal-cross"),
         model: "openai/gpt-5.4-mini",
       },
+      targetDriver: OPENCODE_DRIVER,
+      targetCapabilities: AcpProviderCapabilitiesV2,
+      selectCommand: "provider.switch",
+      outcome: "completed",
+      error: null,
     },
     {
-      name: "aix Codex profile rejects an unavailable model",
+      name: "aix Codex profile refuses to start an unavailable model",
       source: {
         instanceId: ProviderInstanceId.make("aix-codex-work-reject"),
         model: "gpt-6-codex",
       },
+      sourceDriver: CODEX_DRIVER,
+      sourceCapabilities: CodexProviderCapabilitiesV2,
       target: {
         instanceId: ProviderInstanceId.make("aix-codex-personal-reject"),
         model: "removed-model",
       },
+      targetDriver: CODEX_DRIVER,
+      targetCapabilities: CodexProviderCapabilitiesV2,
+      selectCommand: "thread.model-selection.set",
+      outcome: "start-rejected",
+      error:
+        "The provider could not start this turn. Retry the turn; if it keeps failing, check the provider setup and server logs.",
+    },
+    {
+      name: "aix OpenCode profile fails the turn for an unavailable model",
+      source: {
+        instanceId: ProviderInstanceId.make("aix-claude-work-terminal"),
+        model: "claude-sonnet",
+      },
+      sourceDriver: CLAUDE_DRIVER,
+      sourceCapabilities: ClaudeProviderCapabilitiesV2,
+      target: {
+        instanceId: ProviderInstanceId.make("aix-opencode-personal-terminal"),
+        model: "openai/removed-model",
+      },
+      targetDriver: OPENCODE_DRIVER,
+      targetCapabilities: AcpProviderCapabilitiesV2,
+      selectCommand: "provider.switch",
+      outcome: "turn-failed",
+      error:
+        'The selected model "openai/removed-model" is not available. Please select a different model and try again.',
     },
   ] as const)("switches profiles and handles model selection for $name", (scenario) =>
     Effect.gen(function* () {
@@ -1142,24 +1186,6 @@ describe("orchestration v2 provider switching", () => {
       const capturedTurns = yield* Ref.make<ReadonlyArray<CapturedTurn>>([]);
       const firstTurnStarted = yield* Deferred.make<void>();
       const releaseFirstTurn = yield* Deferred.make<void>();
-      const rejectTargetStart = yield* Ref.make(
-        scenario.name.includes("unavailable model") ? 1 : 0,
-      );
-      const codex = scenario.name.includes("Codex");
-      const sourceDriver = codex ? CODEX_DRIVER : CLAUDE_DRIVER;
-      const targetDriver =
-        scenario.name === "aix Codex to Claude"
-          ? CLAUDE_DRIVER
-          : scenario.name === "aix Claude to OpenCode"
-            ? ProviderDriverKind.make("opencode")
-            : CODEX_DRIVER;
-      const sourceCapabilities = codex ? CodexProviderCapabilitiesV2 : ClaudeProviderCapabilitiesV2;
-      const targetCapabilities =
-        targetDriver === CODEX_DRIVER
-          ? CodexProviderCapabilitiesV2
-          : targetDriver === CLAUDE_DRIVER
-            ? ClaudeProviderCapabilitiesV2
-            : AcpProviderCapabilitiesV2;
       const source: ModelSelection = scenario.source;
       const target: ModelSelection = scenario.target;
       const threadId = ThreadId.make(`thread:aix-switch:${scenario.name}`);
@@ -1209,21 +1235,12 @@ describe("orchestration v2 provider switching", () => {
         yield* dispatch(1, source);
         yield* Deferred.await(firstTurnStarted);
         const selectionResult = yield* orchestrator
-          .dispatch(
-            scenario.name === "aix Claude to OpenCode"
-              ? {
-                  type: "provider.switch",
-                  commandId: CommandId.make(`command:aix-switch:${scenario.name}:select`),
-                  threadId,
-                  modelSelection: target,
-                }
-              : {
-                  type: "thread.model-selection.set",
-                  commandId: CommandId.make(`command:aix-switch:${scenario.name}:select`),
-                  threadId,
-                  modelSelection: target,
-                },
-          )
+          .dispatch({
+            type: scenario.selectCommand,
+            commandId: CommandId.make(`command:aix-switch:${scenario.name}:select`),
+            threadId,
+            modelSelection: target,
+          })
           .pipe(Effect.result);
         assert.ok(Result.isFailure(selectionResult));
         assert.instanceOf(
@@ -1242,35 +1259,44 @@ describe("orchestration v2 provider switching", () => {
         const projection = yield* orchestrator.getThreadProjection(threadId);
         const turns = yield* Ref.get(capturedTurns);
         assert.deepEqual(
-          projection.runs.map((run) => [run.providerInstanceId, run.status]),
+          projection.runs.map((run) => [
+            run.providerInstanceId,
+            run.modelSelection.model,
+            run.status,
+          ]),
           [
-            [source.instanceId, "completed"],
+            [source.instanceId, source.model, "completed"],
             [
               target.instanceId,
-              scenario.name.includes("unavailable model") ? "failed" : "completed",
+              target.model,
+              scenario.outcome === "completed" ? "completed" : "failed",
             ],
           ],
         );
-        assert.equal(turns[0]?.driver, sourceDriver);
-        if (scenario.name.includes("unavailable model")) {
-          assert.lengthOf(turns, 1);
-          assert.equal(projection.runs[1]?.modelSelection.model, "removed-model");
-          assert.isTrue(projection.turnItems.some((item) => item.type === "error"));
-        } else {
-          assert.equal(turns[1]?.driver, targetDriver);
-          assert.deepEqual(turns[1]?.modelSelection, target);
+        assert.deepEqual(
+          turns.map((turn) => [turn.driver, turn.modelSelection]),
+          scenario.outcome === "start-rejected"
+            ? [[scenario.sourceDriver, source]]
+            : [
+                [scenario.sourceDriver, source],
+                [scenario.targetDriver, target],
+              ],
+        );
+        assert.deepEqual(
+          projection.turnItems.flatMap((item) =>
+            item.type === "error" ? [[item.runId, item.failure.message]] : [],
+          ),
+          scenario.error === null ? [] : [[projection.runs[1]?.id ?? null, scenario.error]],
+        );
+        if (scenario.outcome !== "start-rejected") {
           assert.lengthOf(projection.contextHandoffs, 1);
           assert.include(turns[1]?.text ?? "", "Keep this constraint: retain the existing API");
           assert.equal(projection.contextHandoffs[0]?.targetRunId, projection.runs[1]?.id);
         }
         assert.deepEqual(projection.thread.modelSelection, target);
-        assert.include(
-          projection.messages.map((message) => message.text),
-          "Keep this constraint: retain the existing API",
-        );
-        assert.include(
-          projection.messages.map((message) => message.text),
-          "Continue",
+        assert.deepEqual(
+          projection.messages.flatMap((message) => (message.role === "user" ? [message.text] : [])),
+          ["Keep this constraint: retain the existing API", "Continue"],
         );
       }).pipe(
         Effect.provide(
@@ -1290,8 +1316,8 @@ describe("orchestration v2 provider switching", () => {
             ProviderAdapterRegistry.layerFromAdapters([
               makeTestAdapter({
                 instanceId: source.instanceId,
-                driver: sourceDriver,
-                capabilities: sourceCapabilities,
+                driver: scenario.sourceDriver,
+                capabilities: scenario.sourceCapabilities,
                 modelSelection: source,
                 responseByRunOrdinal: { 1: "Preserve the existing API" },
                 capturedTurns,
@@ -1304,14 +1330,180 @@ describe("orchestration v2 provider switching", () => {
               }),
               makeTestAdapter({
                 instanceId: target.instanceId,
-                driver: targetDriver,
-                capabilities: targetCapabilities,
+                driver: scenario.targetDriver,
+                capabilities: scenario.targetCapabilities,
                 modelSelection: target,
                 responseByRunOrdinal: { 2: "Continuing with the constraint" },
                 capturedTurns,
-                refuseStarts: rejectTargetStart,
+                ...(scenario.outcome === "start-rejected"
+                  ? {
+                      rejectedModel: target.model,
+                      refusalCause: new CodexAppServerRequestError({
+                        code: -32600,
+                        errorMessage: `model "${target.model}" is not available for this account`,
+                        method: "turn/start",
+                      }),
+                    }
+                  : {}),
+                ...(scenario.outcome === "turn-failed"
+                  ? {
+                      failedRunOrdinals: new Set([2]),
+                      failure: makeProviderFailure({
+                        message: scenario.error,
+                        code: "-32000",
+                        class: "provider_error",
+                        retryable: false,
+                      }),
+                    }
+                  : {}),
               }),
             ]),
+          ),
+        ),
+      );
+    }),
+  );
+
+  it.live("fails visibly when the thread's aix profile no longer exists", () =>
+    Effect.gen(function* () {
+      const cwd = yield* checkpointWorkspace("aix-removed-profile");
+      const capturedTurns = yield* Ref.make<ReadonlyArray<CapturedTurn>>([]);
+      const removed = yield* Ref.make(false);
+      const removedSelection: ModelSelection = {
+        instanceId: ProviderInstanceId.make("aix-codex-removed"),
+        model: "gpt-6-codex",
+      };
+      const remainingSelection: ModelSelection = {
+        instanceId: ProviderInstanceId.make("aix-codex-remaining"),
+        model: "gpt-6-codex",
+      };
+      const adapters = [removedSelection, remainingSelection].map((modelSelection) =>
+        makeTestAdapter({
+          instanceId: modelSelection.instanceId,
+          driver: CODEX_DRIVER,
+          capabilities: CodexProviderCapabilitiesV2,
+          modelSelection,
+          responseByRunOrdinal: { 1: "Preserve the existing API" },
+          capturedTurns,
+        }),
+      );
+      const lookup = (instanceId: ProviderInstanceId) =>
+        Effect.gen(function* () {
+          const adapter = adapters.find((candidate) => candidate.instanceId === instanceId);
+          if (
+            adapter === undefined ||
+            (instanceId === removedSelection.instanceId && (yield* Ref.get(removed)))
+          )
+            return yield* new ProviderAdapterRegistry.ProviderAdapterRegistryLookupError({
+              instanceId,
+            });
+          return adapter;
+        });
+      const threadId = ThreadId.make("thread:aix-removed-profile");
+
+      yield* Effect.gen(function* () {
+        const orchestrator = yield* Orchestrator.OrchestratorV2;
+        const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+        const dispatch = (ordinal: number, text: string) =>
+          orchestrator.dispatch({
+            type: "message.dispatch",
+            commandId: CommandId.make(`command:aix-removed-profile:${ordinal}`),
+            threadId,
+            messageId: MessageId.make(`message:aix-removed-profile:${ordinal}`),
+            createdBy: "user",
+            creationSource: "web",
+            text,
+            attachments: [],
+            modelSelection: removedSelection,
+            dispatchMode: { type: "start_immediately" },
+          });
+
+        yield* orchestrator.dispatch({
+          type: "thread.create",
+          commandId: CommandId.make("command:aix-removed-profile:create"),
+          threadId,
+          projectId: ProjectId.make("project:aix-removed-profile"),
+          createdBy: "user",
+          creationSource: "web",
+          title: "Removed aix profile",
+          modelSelection: removedSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: cwd,
+        });
+        yield* dispatch(1, "Keep this constraint: retain the existing API");
+        yield* orchestrator.streamStoredEvents.pipe(
+          Stream.filter(
+            ({ event }) =>
+              event.type === "run.updated" &&
+              event.payload.ordinal === 1 &&
+              event.payload.status === "completed",
+          ),
+          Stream.runHead,
+          Effect.andThen(worker.drain()),
+        );
+        yield* Ref.set(removed, true);
+
+        const result = yield* dispatch(2, "Continue").pipe(Effect.result);
+        yield* worker.drain();
+
+        assert.ok(Result.isFailure(result));
+        assert.instanceOf(result.failure, Orchestrator.OrchestratorProviderAdapterError);
+        assert.equal(result.failure.providerInstanceId, removedSelection.instanceId);
+        assert.instanceOf(
+          result.failure.cause,
+          ProviderAdapterRegistry.ProviderAdapterRegistryLookupError,
+        );
+        const projection = yield* orchestrator.getThreadProjection(threadId);
+        assert.deepEqual(
+          projection.runs.map((run) => [run.providerInstanceId, run.status]),
+          [[removedSelection.instanceId, "completed"]],
+        );
+        assert.deepEqual(projection.thread.modelSelection, removedSelection);
+        assert.deepEqual(
+          (yield* Ref.get(capturedTurns)).map((turn) => turn.modelSelection),
+          [removedSelection],
+        );
+        assert.deepEqual(
+          projection.messages.map((message) => [message.role, message.text]),
+          [["user", "Keep this constraint: retain the existing API"]],
+        );
+        assert.deepEqual(
+          projection.turnItems.flatMap((item) =>
+            item.type === "assistant_message" ? [item.text] : [],
+          ),
+          ["Preserve the existing API"],
+        );
+      }).pipe(
+        Effect.provide(
+          ProviderReplayHarness.layerWithRegistry(
+            {
+              name: "aix-removed-profile",
+              runtimePolicyOverride: {
+                cwd,
+                approvalPolicy: "never",
+                sandboxPolicy: {
+                  type: "readOnly",
+                  access: { type: "fullAccess" },
+                  networkAccess: false,
+                },
+              },
+            },
+            Layer.succeed(
+              ProviderAdapterRegistry.ProviderAdapterRegistryV2,
+              ProviderAdapterRegistry.ProviderAdapterRegistryV2.of({
+                get: lookup,
+                list: () =>
+                  Ref.get(removed).pipe(
+                    Effect.map((isRemoved) =>
+                      adapters
+                        .map((adapter) => adapter.instanceId)
+                        .filter((id) => !isRemoved || id !== removedSelection.instanceId),
+                    ),
+                  ),
+              }),
+            ),
           ),
         ),
       );
