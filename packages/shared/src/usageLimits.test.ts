@@ -414,6 +414,24 @@ describe("pools", () => {
       )?.limits.windows[0]?.usedPercent,
     ).toBe(55);
     expect(collectLimitNotices(withOldFailure)).toEqual([]);
+
+    const unsupportedProfile = {
+      ...reports[0]!,
+      usageLimits: {
+        checkedAt: "2026-09-03T11:50:00.000Z",
+        profileName: "work",
+        windows: [],
+        unavailable: { reason: "unsupported" as const, message: "No profile budget limit." },
+      },
+    };
+    const withUnsupportedProfile = presentation([...reports, unsupportedProfile]);
+    expect(
+      collectLimitAccounts(withUnsupportedProfile).some(
+        (account) =>
+          account.profileName === "work" && account.environments[0]?.environmentId === "env-a",
+      ),
+    ).toBe(false);
+    expect(collectLimitNotices(withUnsupportedProfile)).toEqual([]);
   });
 
   it("uses the freshest reported plan even when the newest quota has no plan", () => {
@@ -1635,6 +1653,49 @@ describe("/usage-limits", () => {
     expect(
       report?.accounts.filter((account) => account.sourceLabel).map((account) => account.label),
     ).toEqual(["CLIProxyAPI · claude-b@example.com", "CLIProxyAPI · team-seat"]);
+  });
+
+  it("uses the newest AIX profile report for thread limits across harnesses, including failures", () => {
+    const selected = provider({
+      instanceId: ProviderInstanceId.make("codex-work"),
+      driver: ProviderDriverKind.make("codex"),
+      usageLimits: {
+        checkedAt: "2026-09-03T11:00:00.000Z",
+        profileName: "work",
+        windows: [{ ...window, id: "aix-budget:work", label: "Gateway budget", usedPercent: 40 }],
+      },
+    });
+    const latestFailure = provider({
+      instanceId: ProviderInstanceId.make("claude-work"),
+      driver: ProviderDriverKind.make("claudeAgent"),
+      usageLimits: {
+        checkedAt: "2026-09-03T11:45:00.000Z",
+        profileName: "work",
+        windows: [],
+        unavailable: { reason: "probeFailed", message: "Gateway budget unavailable." },
+      },
+    });
+    const nativeCodex = provider({
+      instanceId: ProviderInstanceId.make("codex-native"),
+      usageLimits: {
+        checkedAt: "2026-09-03T11:30:00.000Z",
+        windows: [{ ...window, id: "native-session", usedPercent: 30 }],
+      },
+    });
+
+    const report = collectProviderUsageLimits(
+      selected.instanceId,
+      [selected, latestFailure, nativeCodex],
+      [],
+      now,
+    );
+
+    expect(report?.accounts.find((account) => account.id === "codex-work")?.limits).toEqual(
+      latestFailure.usageLimits,
+    );
+    expect(
+      report?.accounts.find((account) => account.id === "codex-native")?.limits.windows[0],
+    ).toMatchObject({ id: "native-session", usedPercent: 30 });
   });
 
   it("keeps unidentified custom instances separate, filtering by driver", () => {

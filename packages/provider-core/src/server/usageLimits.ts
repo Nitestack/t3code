@@ -119,6 +119,7 @@ export function resolveUsageLimitsAfterProbe(input: {
   if (
     probed?.unavailable?.reason === "probeFailed" &&
     probed.profileName === undefined &&
+    published?.profileName === undefined &&
     published &&
     !published.unavailable
   ) {

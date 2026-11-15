@@ -247,19 +247,28 @@ interface AixProfileReport {
   readonly limits: ServerProviderUsageLimits;
 }
 
+function latestAixProfileReportsForProviders(providers: readonly ServerProvider[]) {
+  const latest = new Map<string, AixProfileReport>();
+  for (const provider of providersWithLimits(providers)) {
+    const limits = provider.usageLimits;
+    if (!limits) continue;
+    const profileName = aixProfileName(limits);
+    if (!profileName) continue;
+    const previous = latest.get(profileName);
+    if (!previous || Date.parse(limits.checkedAt) > Date.parse(previous.limits.checkedAt)) {
+      latest.set(profileName, { provider, limits });
+    }
+  }
+  return latest;
+}
+
 function latestAixProfileReports(presentations: LimitPresentations) {
   const latest = new Map<string, AixProfileReport>();
   for (const [environmentId, presentation] of presentations) {
-    for (const provider of providersWithLimits(presentation.serverConfig?.providers ?? [])) {
-      const limits = provider.usageLimits;
-      if (!limits) continue;
-      const profileName = aixProfileName(limits);
-      if (!profileName) continue;
-      const key = aixProfileKey(environmentId, profileName);
-      const previous = latest.get(key);
-      if (!previous || Date.parse(limits.checkedAt) > Date.parse(previous.limits.checkedAt)) {
-        latest.set(key, { provider, limits });
-      }
+    for (const [profileName, report] of latestAixProfileReportsForProviders(
+      presentation.serverConfig?.providers ?? [],
+    )) {
+      latest.set(aixProfileKey(environmentId, profileName), report);
     }
   }
   return latest;
@@ -490,7 +499,7 @@ export function collectLimitNotices(presentations: LimitPresentations): readonly
         latestProfiles.get(aixProfileKey(environmentId, profileName))?.provider !== provider
       )
         continue;
-      if (provider.usageLimits?.unavailable?.reason === "unsupported" && !profileName) continue;
+      if (provider.usageLimits?.unavailable?.reason === "unsupported") continue;
       const notice = provider.usageLimits ? limitsNotice(provider.usageLimits) : null;
       const name = profileName ?? (provider.displayName?.trim() || String(provider.driver));
       if (notice) notices.add(`${label(environmentLabel, name)}: ${notice}`);
@@ -991,8 +1000,29 @@ export function collectProviderUsageLimits(
     string,
     { usage: NativeSnapshot; credits: NativeSnapshot | null }
   >();
+  const selectedDriverProfiles = new Map<string, ServerProvider>();
   for (const provider of providersWithLimits(providers)) {
-    if (provider.driver !== selected.driver || !provider.usageLimits) continue;
+    if (provider.driver !== selected.driver) continue;
+    const profileName = aixProfileName(provider.usageLimits);
+    if (profileName && !selectedDriverProfiles.has(profileName)) {
+      selectedDriverProfiles.set(profileName, provider);
+    }
+  }
+  const selectedProfileName = aixProfileName(selected.usageLimits);
+  const latestProfiles = latestAixProfileReportsForProviders(providers);
+  if (selectedProfileName) selectedDriverProfiles.set(selectedProfileName, selected);
+  for (const provider of providersWithLimits(providers)) {
+    if (!provider.usageLimits) continue;
+    const profileName = aixProfileName(provider.usageLimits);
+    if (profileName) {
+      const selectedProfileProvider = selectedDriverProfiles.get(profileName);
+      const latestProfile = latestProfiles.get(profileName);
+      if (provider !== selectedProfileProvider || !latestProfile) continue;
+      const snapshot = { provider, limits: latestProfile.limits };
+      nativeByAccount.set(`aix-profile:${profileName}`, { usage: snapshot, credits: null });
+      continue;
+    }
+    if (provider.driver !== selected.driver) continue;
     const snapshot = { provider, limits: provider.usageLimits };
     const key = resolveKey(nativeReport(provider)) ?? `instance:${provider.instanceId}`;
     const previous = nativeByAccount.get(key);

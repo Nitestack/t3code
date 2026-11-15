@@ -167,4 +167,16 @@ describe("resolveUsageLimitsAfterProbe", () => {
       aixFailed,
     );
   });
+
+  it("does not retain a removed AIX profile budget after a native probe failure", () => {
+    const publishedAix = { ...published, profileName: "work" };
+    const nativeFailure = {
+      checkedAt: "2026-09-03T12:00:05.000Z",
+      windows: [],
+      unavailable: { reason: "probeFailed" as const },
+    };
+    expect(resolveUsageLimitsAfterProbe({ published: publishedAix, probed: nativeFailure })).toBe(
+      nativeFailure,
+    );
+  });
 });
