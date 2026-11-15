@@ -3,6 +3,7 @@ import {
   threadPullRequestKeyOf,
 } from "@t3tools/client-runtime/thread-pull-requests";
 import {
+  composerMenuCandidatesForScope,
   matchComposerEnvironmentItems,
   matchComposerThreadItems,
 } from "@t3tools/client-runtime/composerThreadItems";
@@ -27,6 +28,7 @@ import { formatProviderSkillDisplayName } from "@t3tools/shared/inlineSkills";
 
 import type { ComposerTrigger } from "../../composer-logic";
 import type { DraftId } from "../../composerDraftStore";
+import { useClientEnvironmentScope } from "../../environmentScope";
 import { basenameOfPath } from "../../pierre-icons";
 import {
   getProviderSkillsForSlashMenu,
@@ -122,22 +124,29 @@ export function useComposerMenuItems({
   const settledPullRequestTextQuery =
     pullRequestTextQuery === debouncedPullRequestTextQuery ? pullRequestTextQuery : null;
   const isPathTrigger = composerTriggerKind === "path";
+  const { activeScope, assignments } = useClientEnvironmentScope();
   const environmentThreadShells = useVisibleThreadShells(isPathTrigger);
-  // Mounts older settled threads matching the mention, here and on linked machines, which shells
-  // may leave out.
-  useThreadSearch(
-    isPathTrigger ? [environmentId, ...linkedEnvironments.keys()] : [],
-    pathTriggerQuery,
-    { titlesOnly: true },
-  );
   // The user's machines feed `@` machine matches; the catalog summary is cheap and stable.
   const environmentIdentities = useEnvironmentIdentities();
   const environmentMachines = useEnvironmentMachines();
-  const offersMachines = useAtomValue(offersLinkedEnvironmentsAtom(environmentId));
   const mentionableEnvironments = environmentIdentities.map((identity) => ({
     ...identity,
     machine: environmentMachines.get(identity.environmentId) ?? ("server" as const),
   }));
+  const composerCandidates = composerMenuCandidatesForScope({
+    environmentId,
+    linkedEnvironments,
+    shells: environmentThreadShells,
+    environments: mentionableEnvironments,
+    scope: activeScope,
+    assignments,
+  });
+  // Mounts older settled threads matching the mention, here and on linked machines, which shells
+  // may leave out.
+  useThreadSearch(isPathTrigger ? composerCandidates.searchEnvironmentIds : [], pathTriggerQuery, {
+    titlesOnly: true,
+  });
+  const offersMachines = useAtomValue(offersLinkedEnvironmentsAtom(environmentId));
   const workspaceEntries = useComposerPathSearch({
     environmentId,
     cwd: isPathTrigger ? gitCwd : null,
@@ -207,9 +216,9 @@ export function useComposerMenuItems({
     if (composerTrigger.kind === "path") {
       return [
         ...matchComposerThreadItems({
-          shells: environmentThreadShells,
+          shells: composerCandidates.shells,
           environmentId,
-          linkedEnvironments,
+          linkedEnvironments: composerCandidates.linkedEnvironments,
           excludeThreadId: activeThreadId,
           query: composerTrigger.query,
           now,
@@ -217,7 +226,7 @@ export function useComposerMenuItems({
         // An answer to an agent's question carries thread links, not machines.
         ...(questionAttachmentTarget === null && offersMachines
           ? matchComposerEnvironmentItems({
-              environments: mentionableEnvironments,
+              environments: composerCandidates.environments,
               environmentId,
               query: composerTrigger.query,
             })

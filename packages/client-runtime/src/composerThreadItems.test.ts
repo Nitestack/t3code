@@ -2,6 +2,7 @@ import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  composerMenuCandidatesForScope,
   matchComposerEnvironmentItems,
   matchComposerThreadItems,
   type ComposerThreadCandidate,
@@ -76,6 +77,67 @@ it("also offers threads on linked machines, naming the machine, but no other mac
       description: "Thread on Hetzner VPS",
     },
   ]);
+});
+
+it("keeps composer mentions in the active environment scope as it changes", () => {
+  const work = EnvironmentId.make("env-work");
+  const personal = EnvironmentId.make("env-personal");
+  // The shared list can still contain cached results from the other scope after a switch.
+  const shells = [
+    shell("work-thread", "Deploy the work app", { environmentId: work }),
+    shell("personal-thread", "Deploy the personal app", { environmentId: personal }),
+  ];
+  const linkedEnvironments = new Map([[personal, "Personal server"]]);
+  const environments = [
+    { environmentId: work, label: "Work server", machine: "cloud" as const },
+    { environmentId: personal, label: "Personal server", machine: "laptop" as const },
+  ];
+  const assignments = { [work]: "work", [personal]: "personal" } as const;
+  const candidates = (scope: "work" | "personal" | null) =>
+    composerMenuCandidatesForScope({
+      environmentId: work,
+      linkedEnvironments,
+      shells,
+      environments,
+      scope,
+      assignments,
+    });
+  const mentionsFor = (scope: "work" | "personal" | null) => {
+    const scoped = candidates(scope);
+    return {
+      searchEnvironmentIds: scoped.searchEnvironmentIds,
+      threadIds: matchComposerThreadItems({
+        shells: scoped.shells,
+        environmentId: work,
+        linkedEnvironments: scoped.linkedEnvironments,
+        excludeThreadId: null,
+        query: "deploy",
+        now: Date.parse("2026-10-23T00:00:00.000Z"),
+      }).map(({ thread }) => thread.threadId),
+      environmentIds: matchComposerEnvironmentItems({
+        environments: scoped.environments,
+        environmentId: work,
+        query: "server",
+      }).map(({ environmentId }) => environmentId),
+    };
+  };
+
+  expect(mentionsFor("work")).toEqual({
+    searchEnvironmentIds: [work],
+    threadIds: ["work-thread"],
+    environmentIds: [],
+  });
+  expect(mentionsFor("personal")).toEqual({
+    searchEnvironmentIds: [personal],
+    threadIds: ["personal-thread"],
+    environmentIds: [personal],
+  });
+  // Mobile's feature-disabled path keeps its existing unscoped behavior.
+  expect(mentionsFor(null)).toEqual({
+    searchEnvironmentIds: [work, personal],
+    threadIds: ["work-thread", "personal-thread"],
+    environmentIds: [personal],
+  });
 });
 
 describe("matchComposerEnvironmentItems", () => {

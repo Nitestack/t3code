@@ -8,6 +8,7 @@ import type {
   ThreadPullRequestLink,
 } from "@t3tools/contracts";
 import {
+  composerMenuCandidatesForScope,
   type ComposerEnvironmentCandidate,
   matchComposerEnvironmentItems,
   matchComposerThreadItems,
@@ -55,7 +56,7 @@ import {
 } from "@t3tools/client-runtime/composer-model-mentions";
 import { useAtomRefresh } from "@effect/atom-react";
 import { Atom } from "effect/reactivity";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type { ComposerEditorSelection } from "../../components/ComposerEditor";
 import { providerWorkspaceSnapshotRefresh } from "../../state/provider-workspace-snapshot-refresh";
@@ -67,6 +68,7 @@ import {
 import type { ModelOption } from "../../lib/modelOptions";
 import type { ComposerCommandItem } from "./ComposerCommandPopover";
 import { matchesSlashSkillQuery } from "./composerSlashSkillSearch";
+import { useMobileEnvironmentScope } from "../environment-scope/useMobileEnvironmentScope";
 
 const idleWorkspaceSnapshotRefreshAtom: Atom.Atom<unknown> = Atom.make<void>(undefined).pipe(
   Atom.withLabel("mobile:provider-workspace-snapshot-refresh:idle"),
@@ -338,6 +340,29 @@ export function useComposerCommandMenu({
     }
     return detectComposerTrigger(draftMessage, selection.end);
   })();
+  const environmentScope = useMobileEnvironmentScope();
+  const composerCandidates = useMemo(
+    () =>
+      environmentId
+        ? composerMenuCandidatesForScope({
+            environmentId,
+            linkedEnvironments,
+            shells: threadShells,
+            environments,
+            scope: environmentScope.enabled ? environmentScope.activeScope : null,
+            assignments: environmentScope.assignments,
+          })
+        : null,
+    [
+      environmentId,
+      environmentScope.activeScope,
+      environmentScope.assignments,
+      environmentScope.enabled,
+      environments,
+      linkedEnvironments,
+      threadShells,
+    ],
+  );
   const pathSearch = useComposerPathSearch({
     environmentId,
     cwd: trigger?.kind === "path" ? projectCwd : null,
@@ -346,7 +371,7 @@ export function useComposerCommandMenu({
   // Mounts older settled threads matching the mention, here and on linked machines, which shells
   // may leave out.
   useThreadSearch(
-    trigger?.kind === "path" && environmentId ? [environmentId, ...linkedEnvironments.keys()] : [],
+    trigger?.kind === "path" ? (composerCandidates?.searchEnvironmentIds ?? []) : [],
     trigger?.kind === "path" ? trigger.query : "",
     { titlesOnly: true },
   );
@@ -504,16 +529,20 @@ export function useComposerCommandMenu({
     if (trigger.kind === "path") {
       const threadItems = environmentId
         ? matchComposerThreadItems({
-            shells: threadShells,
+            shells: composerCandidates?.shells ?? EMPTY_THREAD_SHELLS,
             environmentId,
-            linkedEnvironments,
+            linkedEnvironments: composerCandidates?.linkedEnvironments ?? NO_LINKED_ENVIRONMENTS,
             excludeThreadId: currentThreadId,
             query: trigger.query,
             now,
           })
         : [];
       const environmentItems = environmentId
-        ? matchComposerEnvironmentItems({ environments, environmentId, query: trigger.query })
+        ? matchComposerEnvironmentItems({
+            environments: composerCandidates?.environments ?? EMPTY_ENVIRONMENTS,
+            environmentId,
+            query: trigger.query,
+          })
         : [];
       const modelItems =
         modelOptions && modelProviders

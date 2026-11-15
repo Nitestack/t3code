@@ -5,6 +5,11 @@ import {
   type ScopedThreadRef,
   type ThreadId,
 } from "@t3tools/contracts";
+import {
+  filterByEnvironmentScope,
+  type EnvironmentScope,
+  type EnvironmentScopeAssignments,
+} from "./environment/index.ts";
 import { foldSearchQuery, rankSearchItems, scoreThreadSearch } from "@t3tools/shared/paletteSearch";
 
 import type { EnvironmentThreadShell } from "./state/models.ts";
@@ -84,6 +89,54 @@ export interface ComposerEnvironmentItem {
   readonly machine: EnvironmentMachineKind;
   readonly label: string;
   readonly description: string;
+}
+
+/**
+ * Scope the composer inputs together so cached thread shells, machine mentions, and search
+ * requests all follow the same active environment scope.
+ */
+export function composerMenuCandidatesForScope(input: {
+  readonly environmentId: EnvironmentId;
+  readonly linkedEnvironments: ReadonlyMap<EnvironmentId, string>;
+  readonly shells: ReadonlyArray<ComposerThreadCandidate>;
+  readonly environments: ReadonlyArray<ComposerEnvironmentCandidate>;
+  /** Null keeps surfaces without the scope feature unfiltered. */
+  readonly scope: EnvironmentScope | null;
+  readonly assignments: EnvironmentScopeAssignments;
+}): {
+  readonly searchEnvironmentIds: ReadonlyArray<EnvironmentId>;
+  readonly linkedEnvironments: ReadonlyMap<EnvironmentId, string>;
+  readonly shells: ReadonlyArray<ComposerThreadCandidate>;
+  readonly environments: ReadonlyArray<ComposerEnvironmentCandidate>;
+} {
+  const searchTargets = [
+    { environmentId: input.environmentId },
+    ...Array.from(input.linkedEnvironments.keys(), (environmentId) => ({ environmentId })),
+  ];
+  if (input.scope === null) {
+    return {
+      searchEnvironmentIds: searchTargets.map(({ environmentId }) => environmentId),
+      linkedEnvironments: input.linkedEnvironments,
+      shells: input.shells,
+      environments: input.environments,
+    };
+  }
+
+  const searchEnvironmentIds = new Set(
+    filterByEnvironmentScope(searchTargets, input.scope, input.assignments).map(
+      ({ environmentId }) => environmentId,
+    ),
+  );
+  return {
+    searchEnvironmentIds: [...searchEnvironmentIds],
+    linkedEnvironments: new Map(
+      [...input.linkedEnvironments].filter(([environmentId]) =>
+        searchEnvironmentIds.has(environmentId),
+      ),
+    ),
+    shells: filterByEnvironmentScope(input.shells, input.scope, input.assignments),
+    environments: filterByEnvironmentScope(input.environments, input.scope, input.assignments),
+  };
 }
 
 /**
