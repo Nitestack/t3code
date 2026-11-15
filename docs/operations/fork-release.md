@@ -85,13 +85,17 @@ The automation fails closed until these GitHub settings are configured by a repo
 this implementation does not change repository settings:
 
 - Configure classic branch protection for `main` with strict/up-to-date required status checks for
-  the four fork CI jobs above, sourced from the GitHub Actions app (app id `15368`). Enforce the
-  rule for administrators, require no additional PR approval, allow merge commits, and do not add
-  any ruleset bypass actor. A ruleset alone does not satisfy the workflow's required-check
-  preflight.
+  the four fork CI jobs above, sourced from the GitHub Actions app (app id `15368`). Leave
+  administrator enforcement disabled so maintainers can push directly to `main`. Require no
+  additional PR approval and allow merge commits. If a repository ruleset applies, its bypass
+  actors may only be repository admins
+  (`actor_type: "RepositoryRole"`, `actor_id: 5`) or organization admins
+  (`actor_type: "OrganizationAdmin"`). Do not add an integration, team, user, or other bypass
+  actor. A ruleset alone does not satisfy the workflow's required-check preflight.
 - Add Actions secrets `FORK_SYNC_APP_ID` and `FORK_SYNC_APP_PRIVATE_KEY` for a GitHub App installed
   only on `Nitestack/t3code`, with `contents:write` and `pull_requests:write`. This App pushes the
-  sync branch and opens the PR so its push CI run starts normally.
+  sync branch and opens the PR so its push CI run starts normally. The App must not have repository
+  administrator access and must not be a ruleset bypass actor.
 - Keep organization policy from blocking job-level `GITHUB_TOKEN` write permissions. The merge job
   requests only `actions:write`, `contents:write`, `pull-requests:write`, and
   `administration:read`; the release publisher requests `contents:write`. The repository's

@@ -283,7 +283,7 @@ NodeTest.test("an empty stable release list is a successful no-op", () => {
   );
 });
 
-NodeTest.test("automatic merge requires strict fork checks and enforced administrators", () => {
+NodeTest.test("automatic merge requires strict fork checks while exempting admins", () => {
   const protection = {
     required_status_checks: {
       strict: true,
@@ -300,6 +300,12 @@ NodeTest.test("automatic merge requires strict fork checks and enforced administ
   NodeAssert.doesNotThrow(() =>
     validateForkMergeProtection({ protection, repository: { allow_merge_commit: true } }),
   );
+  NodeAssert.doesNotThrow(() =>
+    validateForkMergeProtection({
+      protection: { ...protection, enforce_admins: { enabled: false } },
+      repository: { allow_merge_commit: true },
+    }),
+  );
   NodeAssert.throws(
     () =>
       validateForkMergeProtection({
@@ -314,10 +320,18 @@ NodeTest.test("automatic merge requires strict fork checks and enforced administ
   NodeAssert.throws(
     () =>
       validateForkMergeProtection({
-        protection: { ...protection, enforce_admins: { enabled: false } },
+        protection: {
+          ...protection,
+          required_status_checks: {
+            ...protection.required_status_checks,
+            checks: protection.required_status_checks.checks.map((check) =>
+              check.context === "Fork Web" ? { ...check, app_id: null } : check,
+            ),
+          },
+        },
         repository: { allow_merge_commit: true },
       }),
-    /enforce branch protection for administrators/,
+    /GitHub Actions app \(15368\)/,
   );
   NodeAssert.throws(
     () =>
@@ -326,9 +340,7 @@ NodeTest.test("automatic merge requires strict fork checks and enforced administ
           ...protection,
           required_status_checks: {
             ...protection.required_status_checks,
-            checks: protection.required_status_checks.checks.map((check) =>
-              check.context === "Fork Web" ? { ...check, app_id: null } : check,
-            ),
+            checks: protection.required_status_checks.checks.slice(1),
           },
         },
         repository: { allow_merge_commit: true },
@@ -350,14 +362,56 @@ NodeTest.test("automatic merge requires strict fork checks and enforced administ
       }),
     /cannot require additional pull request approvals/,
   );
+  for (const actor of [
+    { actor_id: 45123, actor_type: "Integration", bypass_mode: "always" },
+    { actor_id: 2, actor_type: "Team", bypass_mode: "always" },
+    { actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "unknown" },
+    { actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always", unknown: true },
+  ]) {
+    NodeAssert.throws(
+      () =>
+        validateForkMergeProtection({
+          protection,
+          repository: { allow_merge_commit: true },
+          rulesets: [{ name: "main", bypass_actors: [actor] }],
+        }),
+      /sync GitHub App must not be an admin or bypass actor/,
+    );
+  }
+  NodeAssert.doesNotThrow(() =>
+    validateForkMergeProtection({
+      protection,
+      repository: { allow_merge_commit: true },
+      rulesets: [
+        {
+          name: "main",
+          bypass_actors: [{ actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always" }],
+        },
+      ],
+    }),
+  );
+  NodeAssert.doesNotThrow(() =>
+    validateForkMergeProtection({
+      protection,
+      repository: { allow_merge_commit: true },
+      rulesets: [
+        {
+          name: "main",
+          bypass_actors: [{ actor_id: 1, actor_type: "OrganizationAdmin", bypass_mode: "exempt" }],
+        },
+      ],
+    }),
+  );
   NodeAssert.throws(
     () =>
       validateForkMergeProtection({
         protection,
         repository: { allow_merge_commit: true },
-        rulesets: [{ name: "main", bypass_actors: [{ actor_id: 1, actor_type: "Team" }] }],
+        rulesets: [
+          { name: "main", bypass_actors: [{ actor_id: 5, actor_type: "RepositoryRole" }] },
+        ],
       }),
-    /must not give any actor a branch-protection bypass/,
+    /sync GitHub App must not be an admin or bypass actor/,
   );
 });
 

@@ -8,6 +8,8 @@ const UPSTREAM_REPOSITORY = "pingdotgg/t3code";
 const UPSTREAM_URL = "https://github.com/pingdotgg/t3code.git";
 const MARKER_PATH = ".github/upstream-stable.json";
 const BRANCH_PREFIX = "automation/upstream-stable-";
+const REPOSITORY_ADMIN_ROLE_ID = 5;
+const RULESET_BYPASS_MODES = new Set(["always", "pull_request", "exempt"]);
 const { REQUIRED_FORK_CHECKS, selectLatestForkCiRun, validateForkCiCompletion, validateForkCiRun } =
   ForkCiChecks;
 const GITHUB_OPERATION_LABELS = new Map([
@@ -90,27 +92,27 @@ export function validateForkMergeProtection({ protection, repository, rulesets =
   if (!Array.isArray(rulesets)) {
     throw new Error("Repository rulesets could not be verified; refusing to merge.");
   }
-  if (
-    !rulesets.every(
-      (ruleset) =>
-        ruleset && typeof ruleset.name === "string" && Array.isArray(ruleset.bypass_actors),
-    )
-  ) {
+  if (!rulesets.every(isVerifiedRuleset)) {
     throw new Error("Repository ruleset bypass configuration is incomplete; refusing to merge.");
   }
-  if (
-    rulesets.some(
-      (ruleset) => Array.isArray(ruleset.bypass_actors) && ruleset.bypass_actors.length > 0,
-    )
-  ) {
-    throw new Error("Repository rulesets must not give any actor a branch-protection bypass.");
+  if (rulesets.some((ruleset) => !ruleset.bypass_actors.every(isAdminRulesetBypassActor))) {
+    throw new Error(
+      "Repository ruleset bypass actors must be repository admins or organization admins; the sync GitHub App must not be an admin or bypass actor.",
+    );
   }
   const checks = protection.required_status_checks;
   if (checks?.strict !== true) {
     throw new Error("Main must require up-to-date status checks before the sync PR can merge.");
   }
+  if (!Array.isArray(checks.checks)) {
+    throw new Error("Main required status checks are incomplete; refusing to merge.");
+  }
   const contexts = new Map();
-  for (const { context, app_id } of checks.checks ?? []) {
+  for (const check of checks.checks) {
+    if (!check || typeof check !== "object" || Array.isArray(check)) {
+      throw new Error("Main required status checks are incomplete; refusing to merge.");
+    }
+    const { context, app_id } = check;
     if (!REQUIRED_FORK_CHECKS.includes(context)) continue;
     if (contexts.has(context))
       throw new Error("Main has duplicate required status context " + context + ".");
@@ -122,11 +124,6 @@ export function validateForkMergeProtection({ protection, repository, rulesets =
       "Main must require these four checks from the GitHub Actions app (15368): " +
         missing.join(", ") +
         ".",
-    );
-  }
-  if (protection.enforce_admins?.enabled !== true) {
-    throw new Error(
-      "Main must enforce branch protection for administrators; refusing an unprotected merge.",
     );
   }
   if (
@@ -145,6 +142,31 @@ export function validateForkMergeProtection({ protection, repository, rulesets =
       "Main must allow merge commits so the upstream release remains in fork history.",
     );
   }
+}
+
+function isVerifiedRuleset(ruleset) {
+  return (
+    ruleset !== null &&
+    typeof ruleset === "object" &&
+    !Array.isArray(ruleset) &&
+    typeof ruleset.name === "string" &&
+    Array.isArray(ruleset.bypass_actors)
+  );
+}
+
+function isAdminRulesetBypassActor(actor) {
+  if (actor === null || typeof actor !== "object" || Array.isArray(actor)) return false;
+  const keys = Object.keys(actor);
+  if (keys.some((key) => !["actor_id", "actor_type", "bypass_mode"].includes(key))) return false;
+  if (!RULESET_BYPASS_MODES.has(actor.bypass_mode)) return false;
+
+  if (actor.actor_type === "RepositoryRole") {
+    return actor.actor_id === REPOSITORY_ADMIN_ROLE_ID;
+  }
+  if (actor.actor_type === "OrganizationAdmin") {
+    return actor.actor_id === undefined || actor.actor_id === null || actor.actor_id === 1;
+  }
+  return false;
 }
 
 export function classifyGitHubFailure(stderr, operation) {
@@ -587,7 +609,7 @@ function getMainProtection() {
     validateForkMergeProtection({ protection, repository, rulesets });
   } catch (error) {
     throw new Error(
-      "Automatic sync is blocked until main has strict required checks from GitHub Actions app 15368, administrator enforcement, merge commits enabled, and no ruleset bypass actors.",
+      "Automatic sync is blocked until main has strict required checks from GitHub Actions app 15368, allows merge commits, and limits ruleset bypasses to admins. The sync GitHub App must not be a repository admin or a ruleset bypass actor.",
       { cause: error },
     );
   }
