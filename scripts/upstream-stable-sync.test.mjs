@@ -118,6 +118,13 @@ const requireProtectionAppToken = (path) => {
   state.protectionApiCalls.push(path);
   fs.writeFileSync(statePath, JSON.stringify(state));
 };
+const requireSyncAppToken = () => {
+  if (process.env.GH_TOKEN !== "fixture-sync-app-token") {
+    fail("sync merges and release dispatches require the sync App token");
+  }
+  state.syncAppWrites = (state.syncAppWrites ?? 0) + 1;
+  fs.writeFileSync(statePath, JSON.stringify(state));
+};
 if (args[0] === "api" && args.some((arg) => arg.includes("/releases?"))) {
   if (state.releaseApiError) fail(state.releaseApiError);
   const projectionIndex = args.indexOf("--jq");
@@ -160,6 +167,7 @@ if (args[0] === "api" && args.some((arg) => arg.includes("/releases?"))) {
   const pages = state.workflowJobPages ?? [state.workflowJobs ?? []];
   process.stdout.write(pages.map((page) => JSON.stringify(page)).join("\\n") + "\\n");
 } else if (args[0] === "api" && args.includes("--method") && args.includes("PUT")) {
+  requireSyncAppToken();
   state.mergeCalls = (state.mergeCalls ?? 0) + 1;
   const pullRequest = state.pullRequests.find((candidate) => candidate.number === 17);
   if (pullRequest) {
@@ -169,6 +177,7 @@ if (args[0] === "api" && args.some((arg) => arg.includes("/releases?"))) {
   fs.writeFileSync(statePath, JSON.stringify(state));
   output({ merged: true });
 } else if (args[0] === "api" && args.includes("--method") && args.includes("POST")) {
+  requireSyncAppToken();
   if (state.dispatchError) fail(state.dispatchError);
   const ref = args.find((arg) => arg.startsWith("ref="))?.slice(4);
   const version = args.find((arg) => arg.startsWith("inputs[version]="))?.split("=")[1];
@@ -231,6 +240,7 @@ if (args[0] === "api" && args.some((arg) => arg.includes("/releases?"))) {
       runs: [],
       ciRuns: [],
       protectionApiCalls: [],
+      syncAppWrites: 0,
       mergeCalls: 0,
       branchProtection: {
         required_status_checks: {
@@ -267,6 +277,7 @@ if (args[0] === "api" && args.some((arg) => arg.includes("/releases?"))) {
             DRY_RUN: runDryRun ? "true" : "false",
             GH_TOKEN: "fixture-github-token",
             PROTECTION_GH_TOKEN: "fixture-sync-app-token",
+            SYNC_APP_TOKEN: "fixture-sync-app-token",
             T17_GH_STATE: statePath,
             T17_GH_CALLS: callsPath,
             ...env,
@@ -1056,6 +1067,7 @@ NodeTest.test(
       NodeAssert.match(result.output, /queued the fork release for exact source/);
       const state = await fixture.readState();
       NodeAssert.equal(state.mergeCalls, 1);
+      NodeAssert.equal(state.syncAppWrites, 2);
       NodeAssert.equal(state.runs.length, 1);
       NodeAssert.equal(
         state.runs[0].displayTitle,
@@ -1070,6 +1082,93 @@ NodeTest.test(
     }
   },
 );
+
+NodeTest.test("merge handler never falls back to the workflow token for sync writes", async () => {
+  const fixture = await createSyncFixture();
+  try {
+    const event = await prepareSuccessfulCiEvent(fixture);
+    const result = fixture.runSync({ env: { ...event.env, SYNC_APP_TOKEN: "" } });
+    NodeAssert.equal(result.status, 1, result.output);
+    NodeAssert.match(result.output, /sync GitHub App token is required/);
+    const state = await fixture.readState();
+    NodeAssert.equal(state.mergeCalls, 0);
+    NodeAssert.equal(state.syncAppWrites, 0);
+    NodeAssert.equal(state.runs.length, 0);
+  } finally {
+    await NodeFSP.rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+NodeTest.test("merge handler leaves a PR open when main moved after its checks", async () => {
+  const fixture = await createSyncFixture();
+  try {
+    const event = await prepareSuccessfulCiEvent(fixture);
+    const movedMain = NodePath.join(fixture.root, "moved-main");
+    fixture.git(fixture.root, ["clone", "--branch", "main", fixture.fork, movedMain]);
+    fixture.git(movedMain, ["config", "user.name", "T17 fixture"]);
+    fixture.git(movedMain, ["config", "user.email", "t17-fixture@example.invalid"]);
+    await NodeFSP.writeFile(NodePath.join(movedMain, "main-moved.txt"), "advance main\n");
+    fixture.git(movedMain, ["add", "main-moved.txt"]);
+    fixture.git(movedMain, ["commit", "-m", "advance main after sync CI"]);
+    fixture.git(movedMain, ["push", "origin", "HEAD:refs/heads/main"]);
+
+    const result = fixture.runSync({ env: event.env });
+    NodeAssert.equal(result.status, 1, result.output);
+    NodeAssert.match(result.output, /pull request is behind main/);
+    const state = await fixture.readState();
+    NodeAssert.equal(state.mergeCalls, 0);
+    NodeAssert.equal(state.syncAppWrites, 0);
+    NodeAssert.equal(state.runs.length, 0);
+    NodeAssert.equal(state.pullRequests[0].state, "OPEN");
+  } finally {
+    await NodeFSP.rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+NodeTest.test("merge handler refuses pending workflow runs", async () => {
+  const fixture = await createSyncFixture();
+  try {
+    const event = await prepareSuccessfulCiEvent(fixture);
+    const state = await fixture.readState();
+    state.workflowRun.status = "in_progress";
+    state.workflowRun.conclusion = null;
+    state.ciRuns[0].status = "in_progress";
+    state.ciRuns[0].conclusion = null;
+    await fixture.writeState(state);
+
+    const result = fixture.runSync({
+      env: { ...event.env, WORKFLOW_RUN_CONCLUSION: "in_progress" },
+    });
+    NodeAssert.equal(result.status, 1, result.output);
+    NodeAssert.match(result.output, /Only the successful completion/);
+    const finalState = await fixture.readState();
+    NodeAssert.equal(finalState.mergeCalls, 0);
+    NodeAssert.equal(finalState.syncAppWrites, 0);
+    NodeAssert.equal(finalState.runs.length, 0);
+  } finally {
+    await NodeFSP.rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+NodeTest.test("merge handler refuses a skipped required check", async () => {
+  const fixture = await createSyncFixture();
+  try {
+    const event = await prepareSuccessfulCiEvent(fixture);
+    const state = await fixture.readState();
+    state.workflowJobs[0].conclusion = "skipped";
+    await fixture.writeState(state);
+
+    const result = fixture.runSync({ env: event.env });
+    NodeAssert.equal(result.status, 1, result.output);
+    NodeAssert.match(result.output, /Required fork CI job Fork Server concluded skipped/);
+    const finalState = await fixture.readState();
+    NodeAssert.equal(finalState.mergeCalls, 0);
+    NodeAssert.equal(finalState.syncAppWrites, 0);
+    NodeAssert.equal(finalState.runs.length, 0);
+  } finally {
+    await NodeFSP.rm(fixture.root, { recursive: true, force: true });
+  }
+});
 
 NodeTest.test("merge handler rejects a PR head race after the successful CI event", async () => {
   const fixture = await createSyncFixture();

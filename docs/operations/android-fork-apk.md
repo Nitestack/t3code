@@ -5,7 +5,8 @@ The `Nitestack Android APK` workflow builds a signed, sideloadable Android APK o
 upstream `Release` workflow reuses this Android build and also builds the Windows installer and
 matching Nix package. Its default is build-only: download
 `t3-code-nitestack-installers-<version>-<12-character-commit>-attempt-<run-attempt>` from the Actions run to test the APK
-and Windows installer without creating a tag, draft, or GitHub release. An authorized stable
+and Windows installer without creating a tag, draft, or GitHub release. If the source has no
+upstream sync marker, supply the full 40-character SHA in `upstream_base`. An authorized stable
 release uses the same upstream `vX.Y.Z` tag and `T3 Code vX.Y.Z` title. The legacy
 `t3-android-v*` tag route remains available for compatibility; it does not set the canonical
 release version.

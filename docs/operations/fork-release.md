@@ -20,7 +20,9 @@ Android APK, a Windows installer, source, or the pinned Nix flake, as the
    unchecked. Enter the matching application version if you want it shown in the Actions run title. The
    workflow builds the signed Android APK, Windows x64 installer, and Nix package from the exact
    source commit, verifies their version and source metadata, and uploads one build-only artifact.
-   This run creates no tag or release, including a draft release.
+   This run creates no tag or release, including a draft release. If the selected source has no
+   `.github/upstream-stable.json` marker, provide `upstream_base` as the full 40-character upstream
+   commit SHA. An invalid marker always blocks the run.
 7. Download `t3-code-nitestack-installers-<version>-<12-char-source-sha>-attempt-<run-attempt>` from that Actions run.
    It contains `t3-code-nitestack-<version>-windows-x64.exe`,
    `t3-code-nitestack-<version>.apk`, their `.sha256` files, platform metadata, `nix-build.json`,
@@ -71,6 +73,9 @@ is up to date with `main`, and uses GitHub's ordinary protected merge endpoint. 
 cancelled, missing, stale, or other-head checks never permit the merge. Conflicts stop before merge
 for a maintainer to repair. The automated job does not request an administrative bypass.
 
+If `main` advances while the sync checks are running, the handler leaves the PR open and unmerged.
+Update its branch and let the resulting push run all four checks again before the next merge attempt.
+
 After a verified merge, the handler queues the existing `Release` workflow for that exact fork
 commit and upstream version. Its default is build-only: Windows, signed Android, and Nix must all
 build before the combined Actions artifact is available. Automatic publication is off by default.
@@ -93,15 +98,16 @@ this implementation does not change repository settings:
   (`actor_type: "OrganizationAdmin"`). Do not add an integration, team, user, or other bypass
   actor. A ruleset alone does not satisfy the workflow's required-check preflight.
 - Add Actions secrets `FORK_SYNC_APP_ID` and `FORK_SYNC_APP_PRIVATE_KEY` for a GitHub App installed
-  only on `Nitestack/t3code`, with exactly `administration:read`, `contents:write`, and
-  `pull_requests:write`. It uses the administration read permission to inspect branch protection
-  and rulesets, and it pushes the sync branch and opens the PR so its push CI run starts normally.
-  The App must not have repository administrator access and must not be a ruleset bypass actor.
-- Keep organization policy from blocking job-level `GITHUB_TOKEN` write permissions. The merge job
-  requests only `actions:write`, `contents:write`, and `pull-requests:write`; the release publisher
-  requests `contents:write`. The repository's read-only default can remain in place because each
-  job declares its own scoped permissions. The workflow does not approve pull requests or use
-  GitHub's auto-merge setting.
+  only on `Nitestack/t3code`, with exactly `actions:write`, `administration:read`, `contents:write`,
+  and `pull_requests:write`. Administration read inspects branch protection and rulesets. Contents
+  and pull-request write push the sync branch and open and merge its PR. Actions write lets the
+  merge job dispatch the existing `Release` workflow. The branch-creation token is scoped to the
+  other three permissions. The App must not have repository administrator access and must not be a
+  ruleset bypass actor.
+- The merge job uses the App token for the protected merge and release dispatch. Its `GITHUB_TOKEN`
+  is limited to contents read for checkout; the release publisher requests `contents:write`. The
+  repository's read-only default can remain in place because each job declares its own scoped
+  permissions. The workflow does not approve pull requests or use GitHub's auto-merge setting.
 - Keep `FORK_AUTO_PUBLISH_STABLE_RELEASES` unset until ongoing automatic publication is explicitly
   authorized. Setting it to `true` is that standing authorization. The default workflow and
   build-only path do not create tags or draft releases.

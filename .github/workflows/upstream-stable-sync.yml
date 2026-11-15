@@ -133,7 +133,7 @@ jobs:
           FORK_SYNC_APP_PRIVATE_KEY: ${{ secrets.FORK_SYNC_APP_PRIVATE_KEY }}
         run: |
           if [[ -z "$FORK_SYNC_APP_ID" || -z "$FORK_SYNC_APP_PRIVATE_KEY" ]]; then
-            echo "::error::A fork sync GitHub App is required. Configure FORK_SYNC_APP_ID and FORK_SYNC_APP_PRIVATE_KEY; the App installation needs administration:read, contents:write, and pull_requests:write."
+            echo "::error::A fork sync GitHub App is required. Configure FORK_SYNC_APP_ID and FORK_SYNC_APP_PRIVATE_KEY; the App installation needs actions:write, administration:read, contents:write, and pull_requests:write."
             exit 1
           fi
 
@@ -180,9 +180,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
-      actions: write
-      contents: write
-      pull-requests: write
+      contents: read
     steps:
       - name: Check out current fork main without persisting credentials
         env:
@@ -209,13 +207,14 @@ jobs:
           node-version: 26.12.1
 
       - id: sync_app_token
-        name: Mint fork sync App token for protection reads
+        name: Mint fork sync App token for merge and release dispatch
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
         with:
           app-id: ${{ secrets.FORK_SYNC_APP_ID }}
           private-key: ${{ secrets.FORK_SYNC_APP_PRIVATE_KEY }}
           owner: Nitestack
           repositories: t3code
+          permission-actions: write
           permission-administration: read
           permission-contents: write
           permission-pull-requests: write
@@ -223,11 +222,12 @@ jobs:
       - name: Verify exact fork CI, merge the protected PR, and queue its release
         env:
           FORK_AUTO_PUBLISH_STABLE_RELEASES: ${{ vars.FORK_AUTO_PUBLISH_STABLE_RELEASES == 'true' }}
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.sync_app_token.outputs.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           PROTECTION_GH_TOKEN: ${{ steps.sync_app_token.outputs.token }}
+          SYNC_APP_TOKEN: ${{ steps.sync_app_token.outputs.token }}
           RUNNER_TEMP: ${{ runner.temp }}
-          SYNC_TOKEN: ${{ github.token }}
+          SYNC_TOKEN: ${{ steps.sync_app_token.outputs.token }}
           UPSTREAM_SYNC_MODE: merge-on-ci
           WORKFLOW_RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
           WORKFLOW_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}

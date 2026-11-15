@@ -594,6 +594,19 @@ function runProtectionGitHub(args, githubOperation) {
   return run("gh", args, { githubOperation, env: { GH_TOKEN: token } });
 }
 
+function runWithSyncApp(command, args, options = {}) {
+  const token = process.env.SYNC_APP_TOKEN;
+  if (!token) {
+    throw new Error(
+      "The sync GitHub App token is required for protected merges and release dispatches.",
+    );
+  }
+  return run(command, args, {
+    ...options,
+    env: { ...options.env, GH_TOKEN: token },
+  });
+}
+
 function getMainProtection() {
   let protection;
   let repository;
@@ -829,7 +842,7 @@ async function mergeSyncPullRequestFromCi() {
     let merged = false;
     try {
       const result = JSON.parse(
-        run(
+        runWithSyncApp(
           "gh",
           [
             "api",
@@ -846,9 +859,11 @@ async function mergeSyncPullRequestFromCi() {
       );
       merged = result.merged === true;
     } catch (error) {
-      const updated = run("gh", ["api", `repos/${FORK_REPOSITORY}/pulls/${pullRequest.number}`], {
-        githubOperation: "syncPullRequestMerge",
-      });
+      const updated = runWithSyncApp(
+        "gh",
+        ["api", `repos/${FORK_REPOSITORY}/pulls/${pullRequest.number}`],
+        { githubOperation: "syncPullRequestMerge" },
+      );
       const current = JSON.parse(updated);
       if (!current.merged || current.head?.sha !== branchCommit) throw error;
       merged = true;
@@ -863,6 +878,7 @@ async function mergeSyncPullRequestFromCi() {
     version,
     sourceSha: branchCommit,
     sourceBranch: eventBranch,
+    runCommand: runWithSyncApp,
   });
   const message = dispatched
     ? `Merged upstream stable ${release.tag_name}; queued the fork release for exact source ${branchCommit}.`

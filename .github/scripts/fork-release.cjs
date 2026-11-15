@@ -26,6 +26,78 @@ function requiredReleaseAssets(version) {
   ];
 }
 
+function resolveForkUpstreamBase({ markerContents, explicitBase = "", sourceBranch = "main" }) {
+  if (markerContents !== undefined) {
+    let marker;
+    try {
+      marker = JSON.parse(markerContents);
+    } catch {
+      throw new Error("Upstream stable marker is invalid; refusing to resolve a release base.");
+    }
+    if (
+      !marker ||
+      typeof marker !== "object" ||
+      typeof marker.tag !== "string" ||
+      !STABLE_VERSION.test(marker.tag.replace(/^v/, "")) ||
+      !COMMIT_SHA.test(marker.commit)
+    ) {
+      throw new Error("Upstream stable marker is invalid; refusing to resolve a release base.");
+    }
+    return marker.commit.toLowerCase();
+  }
+
+  if (/^automation\/upstream-stable-/.test(sourceBranch)) {
+    throw new Error("Upstream stable marker is missing for an automated sync release.");
+  }
+  if (!COMMIT_SHA.test(explicitBase)) {
+    throw new Error(
+      "A missing upstream stable marker requires the upstream_base input to be a full 40-character commit SHA.",
+    );
+  }
+  return explicitBase.toLowerCase();
+}
+
+function markdownCode(value) {
+  const text = String(value);
+  const longestFence = [...text.matchAll(/`+/g)].reduce(
+    (longest, match) => Math.max(longest, match[0].length),
+    0,
+  );
+  const fence = "`".repeat(longestFence + 1);
+  return `${fence}${text}${fence}`;
+}
+
+function buildForkNixBuildSummary({ packageName, sourceSha }) {
+  return `Built ${markdownCode(packageName)} from ${markdownCode(sourceSha)}.\n`;
+}
+
+function buildForkReleaseNotes({
+  upstreamBase,
+  sha,
+  sourceBranch,
+  buildArtifactRunId,
+  releaseTag,
+}) {
+  return [
+    `Upstream base: ${markdownCode(upstreamBase)}`,
+    "",
+    `Fork commit: ${markdownCode(sha)}`,
+    "",
+    `Source branch: ${markdownCode(sourceBranch)}`,
+    "",
+    `Tested build artifact run: ${markdownCode(buildArtifactRunId)}`,
+    "",
+    "The Windows installer, signed Android APK, and versioned Nix package were built from this exact fork commit. Checksums and build metadata are attached.",
+    "",
+    "Install the matching Nix build from this release tag:",
+    "",
+    "```sh",
+    `nix profile add 'github:Nitestack/t3code/${releaseTag}#t3code-fork'`,
+    "```",
+    "",
+  ].join("\n");
+}
+
 function validateForkPublicationMode({ publish, artifactRunId = "", autoPublishAllowed = false }) {
   if (typeof publish !== "boolean" || typeof autoPublishAllowed !== "boolean") {
     throw new Error("Fork publication mode must use explicit boolean inputs.");
@@ -123,10 +195,12 @@ function assertExistingForkReleaseMetadata({
     release.name !== expectedName ||
     release.draft ||
     release.prerelease ||
+    !COMMIT_SHA.test(upstreamBase) ||
     typeof release.body !== "string" ||
-    !release.body.includes(`Upstream base: \`${upstreamBase}\``) ||
-    !release.body.includes(`Fork commit: \`${sha}\``) ||
-    (sourceBranch !== "" && !release.body.includes(`Source branch: \`${sourceBranch}\``)) ||
+    !release.body.includes(`Upstream base: ${markdownCode(upstreamBase)}`) ||
+    !release.body.includes(`Fork commit: ${markdownCode(sha)}`) ||
+    (sourceBranch !== "" &&
+      !release.body.includes(`Source branch: ${markdownCode(sourceBranch)}`)) ||
     buildRunId === undefined ||
     !Array.isArray(actualAssets) ||
     actualAssets.length !== expectedAssets.length ||
@@ -296,6 +370,9 @@ function resolveForkRelease({
   const releaseName = `T3 Code ${tag}`;
   const expectedAssets = requiredReleaseAssets(version).toSorted();
   const existingAssetNames = existingRelease?.assets?.map((asset) => asset.name).toSorted();
+  if (!COMMIT_SHA.test(upstreamBase)) {
+    throw new Error("Release upstream base must be a full 40-character commit SHA.");
+  }
   if (sourceBranch && sourceBranch !== "main") {
     const match =
       /^automation\/upstream-stable-(v?(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))-([0-9a-f]{8})$/.exec(
@@ -304,8 +381,7 @@ function resolveForkRelease({
     if (
       !match ||
       match[1].replace(/^v/, "") !== version ||
-      typeof upstreamBase !== "string" ||
-      !/^[0-9a-f]{8,64}$/i.test(upstreamBase) ||
+      !COMMIT_SHA.test(upstreamBase) ||
       !upstreamBase.toLowerCase().startsWith(match[2])
     ) {
       throw new Error(
@@ -324,8 +400,8 @@ function resolveForkRelease({
     !existingRelease.prerelease &&
     typeof existingRelease.body === "string" &&
     upstreamBase !== "" &&
-    existingRelease.body.includes(`Upstream base: \`${upstreamBase}\``) &&
-    existingRelease.body.includes(`Fork commit: \`${sha}\``) &&
+    existingRelease.body.includes(`Upstream base: ${markdownCode(upstreamBase)}`) &&
+    existingRelease.body.includes(`Fork commit: ${markdownCode(sha)}`) &&
     Array.isArray(existingAssetNames) &&
     existingAssetNames.length === expectedAssets.length &&
     existingAssetNames.every((asset, index) => asset === expectedAssets[index]) &&
@@ -348,7 +424,10 @@ function resolveForkRelease({
 module.exports = {
   RELEASE_REPOSITORY,
   assertExistingForkReleaseMetadata,
+  buildForkNixBuildSummary,
+  buildForkReleaseNotes,
   requiredReleaseAssets,
+  resolveForkUpstreamBase,
   resolveForkRelease,
   validateForkBuildOnlyRun,
   validateForkPublicationMode,
