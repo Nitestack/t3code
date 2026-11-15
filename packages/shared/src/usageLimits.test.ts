@@ -293,6 +293,147 @@ describe("pools", () => {
     expect(accounts[0]?.limits.windows[0]?.usedPercent).toBe(55);
   });
 
+  it("presents each AIX profile once per environment across harnesses", () => {
+    const aixProvider = (
+      driver: "codex" | "claudeAgent" | "opencode",
+      instanceId: string,
+      profileName: string,
+      checkedAt: string,
+      usedPercent: number,
+    ) =>
+      provider({
+        driver: ProviderDriverKind.make(driver),
+        instanceId: ProviderInstanceId.make(instanceId),
+        usageLimits: {
+          checkedAt,
+          profileName,
+          windows: [
+            {
+              id: `aix-budget:${profileName}`,
+              kind: "other",
+              label: "Gateway budget",
+              usedPercent,
+              resetsAt: "2026-09-06T12:00:00.000Z",
+            },
+          ],
+        },
+      });
+    const reports = [
+      aixProvider("codex", "codex-work", "work", checkedAt, 40),
+      aixProvider("claudeAgent", "claude-work", "work", "2026-09-03T11:30:00.000Z", 55),
+      aixProvider("opencode", "opencode-work", "work", "2026-09-03T11:20:00.000Z", 60),
+      aixProvider("codex", "codex-home", "home", checkedAt, 20),
+    ];
+    const presentation = (providers: readonly ServerProvider[]) =>
+      new Map([
+        [EnvironmentId.make("env-a"), { ...laptop, serverConfig: { providers } }],
+        [
+          EnvironmentId.make("env-b"),
+          {
+            entry: { target: { label: "Desktop" } },
+            serverConfig: {
+              providers: [aixProvider("claudeAgent", "claude-work", "work", checkedAt, 80)],
+            },
+          },
+        ],
+      ]);
+    const accounts = collectLimitAccounts(presentation(reports));
+    expect(accounts).toHaveLength(3);
+    expect(accounts.map((account) => account.profileName)).toEqual(["work", "home", "work"]);
+    expect(accounts.map((account) => account.limits.windows[0]?.usedPercent)).toEqual([55, 20, 80]);
+    expect(accounts[0]?.limits.windows).toHaveLength(1);
+    expect(accounts[0]?.redeem).toBeNull();
+    const pools = collectLimitPools(accounts, now);
+    expect(pools).toHaveLength(3);
+    expect(pools.map((pool) => pool.windows[0]?.members)).toEqual([
+      [expect.objectContaining({ account: expect.objectContaining({ profileName: "work" }) })],
+      [expect.objectContaining({ account: expect.objectContaining({ profileName: "home" }) })],
+      [expect.objectContaining({ account: expect.objectContaining({ profileName: "work" }) })],
+    ]);
+    expect(pools.map((pool) => pool.windows[0]?.resets)).toEqual([
+      [expect.objectContaining({ at: Date.parse("2026-09-06T12:00:00.000Z") })],
+      [expect.objectContaining({ at: Date.parse("2026-09-06T12:00:00.000Z") })],
+      [expect.objectContaining({ at: Date.parse("2026-09-06T12:00:00.000Z") })],
+    ]);
+    expect(
+      collectLimitAccounts(presentation(reports.toReversed()))
+        .map((account) => ({
+          profileName: account.profileName,
+          usedPercent: account.limits.windows[0]?.usedPercent,
+        }))
+        .toSorted(
+          (left, right) =>
+            (left.profileName ?? "").localeCompare(right.profileName ?? "") ||
+            (left.usedPercent ?? 0) - (right.usedPercent ?? 0),
+        ),
+    ).toEqual([
+      { profileName: "home", usedPercent: 20 },
+      { profileName: "work", usedPercent: 55 },
+      { profileName: "work", usedPercent: 80 },
+    ]);
+
+    const failedProbe = {
+      ...reports[0]!,
+      usageLimits: {
+        checkedAt: "2026-09-03T11:45:00.000Z",
+        profileName: "work",
+        windows: [],
+        unavailable: { reason: "probeFailed" as const, message: "Gateway budget unavailable." },
+      },
+    };
+    const nativeCodex = provider({
+      instanceId: ProviderInstanceId.make("codex-native"),
+      usageLimits: { checkedAt, windows: [{ ...window, id: "native-session", usedPercent: 10 }] },
+    });
+    const withFailedProbe = presentation([...reports, failedProbe, nativeCodex]);
+    const survivingAccounts = collectLimitAccounts(withFailedProbe);
+    expect(survivingAccounts).toHaveLength(3);
+    expect(
+      survivingAccounts.find((account) => account.profileName === "work")?.limits.windows[0]
+        ?.usedPercent,
+    ).toBe(80);
+    expect(
+      survivingAccounts.find((account) => account.profileName === undefined)?.limits.windows[0],
+    ).toMatchObject({ id: "native-session", usedPercent: 10 });
+    expect(collectLimitNotices(withFailedProbe)).toEqual([
+      "Laptop · work: Gateway budget unavailable.",
+    ]);
+
+    const oldFailure = {
+      ...failedProbe,
+      usageLimits: {
+        ...failedProbe.usageLimits,
+        checkedAt: "2026-09-03T10:30:00.000Z",
+      },
+    };
+    const withOldFailure = presentation([...reports, oldFailure]);
+    expect(
+      collectLimitAccounts(withOldFailure).find(
+        (account) =>
+          account.profileName === "work" && account.environments[0]?.environmentId === "env-a",
+      )?.limits.windows[0]?.usedPercent,
+    ).toBe(55);
+    expect(collectLimitNotices(withOldFailure)).toEqual([]);
+
+    const unsupportedProfile = {
+      ...reports[0]!,
+      usageLimits: {
+        checkedAt: "2026-09-03T11:50:00.000Z",
+        profileName: "work",
+        windows: [],
+        unavailable: { reason: "unsupported" as const, message: "No profile budget limit." },
+      },
+    };
+    const withUnsupportedProfile = presentation([...reports, unsupportedProfile]);
+    expect(
+      collectLimitAccounts(withUnsupportedProfile).some(
+        (account) =>
+          account.profileName === "work" && account.environments[0]?.environmentId === "env-a",
+      ),
+    ).toBe(false);
+    expect(collectLimitNotices(withUnsupportedProfile)).toEqual([]);
+  });
+
   it("uses the freshest reported plan even when the newest quota has no plan", () => {
     const snapshot = (label: string | undefined, checkedAt: string, usedPercent: number) =>
       provider({
@@ -1512,6 +1653,49 @@ describe("/usage-limits", () => {
     expect(
       report?.accounts.filter((account) => account.sourceLabel).map((account) => account.label),
     ).toEqual(["CLIProxyAPI · claude-b@example.com", "CLIProxyAPI · team-seat"]);
+  });
+
+  it("uses the newest AIX profile report for thread limits across harnesses, including failures", () => {
+    const selected = provider({
+      instanceId: ProviderInstanceId.make("codex-work"),
+      driver: ProviderDriverKind.make("codex"),
+      usageLimits: {
+        checkedAt: "2026-09-03T11:00:00.000Z",
+        profileName: "work",
+        windows: [{ ...window, id: "aix-budget:work", label: "Gateway budget", usedPercent: 40 }],
+      },
+    });
+    const latestFailure = provider({
+      instanceId: ProviderInstanceId.make("claude-work"),
+      driver: ProviderDriverKind.make("claudeAgent"),
+      usageLimits: {
+        checkedAt: "2026-09-03T11:45:00.000Z",
+        profileName: "work",
+        windows: [],
+        unavailable: { reason: "probeFailed", message: "Gateway budget unavailable." },
+      },
+    });
+    const nativeCodex = provider({
+      instanceId: ProviderInstanceId.make("codex-native"),
+      usageLimits: {
+        checkedAt: "2026-09-03T11:30:00.000Z",
+        windows: [{ ...window, id: "native-session", usedPercent: 30 }],
+      },
+    });
+
+    const report = collectProviderUsageLimits(
+      selected.instanceId,
+      [selected, latestFailure, nativeCodex],
+      [],
+      now,
+    );
+
+    expect(report?.accounts.find((account) => account.id === "codex-work")?.limits).toEqual(
+      latestFailure.usageLimits,
+    );
+    expect(
+      report?.accounts.find((account) => account.id === "codex-native")?.limits.windows[0],
+    ).toMatchObject({ id: "native-session", usedPercent: 30 });
   });
 
   it("keeps unidentified custom instances separate, filtering by driver", () => {

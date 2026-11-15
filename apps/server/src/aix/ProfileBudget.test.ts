@@ -386,7 +386,19 @@ it.effect("replaces only an enabled aix-managed instance's usage limits", () =>
     expect(http.requests).toEqual([]);
 
     const managed = yield* run("nim4", provider());
+    expect(managed.usageLimits?.profileName).toBe("nim4");
     expect(managed.usageLimits?.windows.map(({ id }) => id)).toEqual(["aix-budget:nim4"]);
     expect(managed.usageLimits?.windows[0]?.usedPercent).toBeCloseTo(99.55, 6);
+
+    const failedHttp = fakeHttp(() => new Response(null, { status: 500 }));
+    const failedBudget = yield* budgetFor(failedHttp);
+    const failed = yield* ProfileBudget.withAixProfileBudget("home")(provider()).pipe(
+      Effect.provideService(ProfileBudget.AixProfileBudget, failedBudget.service),
+    );
+    expect(failed.usageLimits).toMatchObject({
+      profileName: "home",
+      windows: [],
+      unavailable: { reason: "probeFailed" },
+    });
   }),
 );

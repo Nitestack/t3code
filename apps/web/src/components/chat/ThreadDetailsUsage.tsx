@@ -5,6 +5,7 @@ import type {
   UsageLimitSourceSnapshots,
 } from "@t3tools/contracts";
 import {
+  aixProfileNameFromWindowId,
   collectProviderUsageLimits,
   formatDuration,
   type LimitPace,
@@ -149,9 +150,11 @@ function LimitRow({
   const left = remainingPercent(window);
   const pace = paceOf(window, now);
   const resetsAt = window.resetsAt ? Date.parse(window.resetsAt) : Number.NaN;
+  const profileName = aixProfileNameFromWindowId(window.id);
+  const label = profileName ? `${profileName} budget` : window.label;
   return (
     <UsageRow
-      label={window.label}
+      label={label}
       fill={left}
       tone={left <= 10 ? "error" : left <= 20 ? "warning" : null}
       value={`${left}%`}
@@ -159,7 +162,7 @@ function LimitRow({
       tooltip={
         <>
           <span className="text-foreground">
-            {window.label}: {left}% left
+            {label}: {left}% left
           </span>
           {window.resetsAt && resetsAt > now ? (
             <span className="text-muted-foreground">

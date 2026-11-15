@@ -227,6 +227,53 @@ interface AccountReport {
   readonly usageLimits?: ServerProviderUsageLimits | undefined;
 }
 
+export function aixProfileNameFromWindowId(id: string): string | undefined {
+  return /^aix-budget:(.+)$/u.exec(id)?.[1];
+}
+
+function aixProfileName(limits: ServerProviderUsageLimits | undefined): string | undefined {
+  if (limits?.profileName) return limits.profileName;
+  const windows = limits?.windows ?? [];
+  if (windows.length !== 1) return undefined;
+  return aixProfileNameFromWindowId(windows[0]?.id ?? "");
+}
+
+function aixProfileKey(environmentId: EnvironmentId, profileName: string): string {
+  return `aix-profile:${JSON.stringify([environmentId, profileName])}`;
+}
+
+interface AixProfileReport {
+  readonly provider: ServerProvider;
+  readonly limits: ServerProviderUsageLimits;
+}
+
+function latestAixProfileReportsForProviders(providers: readonly ServerProvider[]) {
+  const latest = new Map<string, AixProfileReport>();
+  for (const provider of providersWithLimits(providers)) {
+    const limits = provider.usageLimits;
+    if (!limits) continue;
+    const profileName = aixProfileName(limits);
+    if (!profileName) continue;
+    const previous = latest.get(profileName);
+    if (!previous || Date.parse(limits.checkedAt) > Date.parse(previous.limits.checkedAt)) {
+      latest.set(profileName, { provider, limits });
+    }
+  }
+  return latest;
+}
+
+function latestAixProfileReports(presentations: LimitPresentations) {
+  const latest = new Map<string, AixProfileReport>();
+  for (const [environmentId, presentation] of presentations) {
+    for (const [profileName, report] of latestAixProfileReportsForProviders(
+      presentation.serverConfig?.providers ?? [],
+    )) {
+      latest.set(aixProfileKey(environmentId, profileName), report);
+    }
+  }
+  return latest;
+}
+
 const nativeReport = (provider: ServerProvider): AccountReport => ({
   driver: provider.driver,
   email: provider.auth.email,
@@ -273,6 +320,7 @@ export interface LimitAccount {
   readonly key: string;
   readonly driver: ServerProvider["driver"];
   readonly displayName: string | null;
+  readonly profileName?: string | undefined;
   readonly email: string | undefined;
   readonly plan: string | undefined;
   readonly accentColor: string | undefined;
@@ -293,6 +341,7 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
   const creditSources = new Map<string, LimitAccount>();
   const hubRedeems = new Map<string, LimitAccount>();
   const planSources = new Map<string, LimitAccount>();
+  const latestProfiles = latestAixProfileReports(presentations);
   const merge = (key: string, next: LimitAccount) => {
     // Prefer hub redemption to clear its routing cooldown too; displayed balance still follows the freshest read.
     const previousHub = hubRedeems.get(key);
@@ -373,16 +422,26 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
     const label = presentation.entry.target.label;
     for (const provider of providersWithLimits(presentation.serverConfig?.providers ?? [])) {
       if (!provider.usageLimits || limitsNotice(provider.usageLimits) !== null) continue;
-      merge(resolveKey(nativeReport(provider)) ?? `${environmentId}:${provider.instanceId}`, {
-        key: `${environmentId}:${provider.instanceId}`,
+      const profileName = aixProfileName(provider.usageLimits);
+      if (
+        profileName &&
+        latestProfiles.get(aixProfileKey(environmentId, profileName))?.provider !== provider
+      )
+        continue;
+      const key = profileName
+        ? aixProfileKey(environmentId, profileName)
+        : `${environmentId}:${provider.instanceId}`;
+      merge(profileName ? key : (resolveKey(nativeReport(provider)) ?? key), {
+        key,
         driver: provider.driver,
-        displayName: provider.displayName?.trim() || null,
-        email: provider.auth.email,
-        plan: provider.auth.label,
-        accentColor: provider.accentColor,
+        displayName: profileName ?? (provider.displayName?.trim() || null),
+        ...(profileName ? { profileName } : {}),
+        email: profileName ? undefined : provider.auth.email,
+        plan: profileName ? undefined : provider.auth.label,
+        accentColor: profileName ? undefined : provider.accentColor,
         environments: [{ environmentId, label }],
         sourceLabel: null,
-        redeem: { environmentId, input: { instanceId: provider.instanceId } },
+        redeem: profileName ? null : { environmentId, input: { instanceId: provider.instanceId } },
         limits: provider.usageLimits,
       });
     }
@@ -430,12 +489,19 @@ export function collectLimitNotices(presentations: LimitPresentations): readonly
   const label = (environmentLabel: string, subject: string) =>
     presentations.size > 1 ? `${environmentLabel} · ${subject}` : subject;
   const notices = new Set<string>();
-  for (const presentation of presentations.values()) {
+  const latestProfiles = latestAixProfileReports(presentations);
+  for (const [environmentId, presentation] of presentations) {
     const environmentLabel = presentation.entry.target.label;
     for (const provider of providersWithLimits(presentation.serverConfig?.providers ?? [])) {
+      const profileName = aixProfileName(provider.usageLimits);
+      if (
+        profileName &&
+        latestProfiles.get(aixProfileKey(environmentId, profileName))?.provider !== provider
+      )
+        continue;
       if (provider.usageLimits?.unavailable?.reason === "unsupported") continue;
       const notice = provider.usageLimits ? limitsNotice(provider.usageLimits) : null;
-      const name = provider.displayName?.trim() || String(provider.driver);
+      const name = profileName ?? (provider.displayName?.trim() || String(provider.driver));
       if (notice) notices.add(`${label(environmentLabel, name)}: ${notice}`);
     }
     for (const source of presentation.serverConfig?.usageLimitSources ?? []) {
@@ -475,6 +541,7 @@ export interface LimitPoolWindow {
 
 export interface LimitPool {
   readonly driver: ServerProvider["driver"];
+  readonly profileName?: string | undefined;
   readonly accounts: readonly LimitAccount[];
   readonly windows: readonly LimitPoolWindow[];
 }
@@ -530,13 +597,26 @@ export function collectLimitPools(
   accounts: readonly LimitAccount[],
   now: number,
 ): readonly LimitPool[] {
-  const byDriver = new Map<ServerProvider["driver"], LimitAccount[]>();
+  const byDriver = new Map<
+    string,
+    {
+      readonly driver: ServerProvider["driver"];
+      readonly profileName?: string;
+      members: LimitAccount[];
+    }
+  >();
   for (const account of accounts) {
-    const list = byDriver.get(account.driver);
-    if (list) list.push(account);
-    else byDriver.set(account.driver, [account]);
+    const key = account.profileName ? account.key : `driver:${account.driver}`;
+    const pool = byDriver.get(key);
+    if (pool) pool.members.push(account);
+    else
+      byDriver.set(key, {
+        driver: account.driver,
+        ...(account.profileName ? { profileName: account.profileName } : {}),
+        members: [account],
+      });
   }
-  return [...byDriver].map(([driver, members]) => {
+  return [...byDriver.values()].map(({ driver, profileName, members }) => {
     const orderWindow = members
       .flatMap((account) => account.limits.windows)
       .sort((left, right) => WINDOW_KIND_ORDER[left.kind] - WINDOW_KIND_ORDER[right.kind])[0];
@@ -555,7 +635,12 @@ export function collectLimitPools(
         accountSortName(left).localeCompare(accountSortName(right)) ||
         left.key.localeCompare(right.key),
     );
-    return { driver, accounts: sorted, windows: poolWindows(sorted, now) };
+    return {
+      driver,
+      ...(profileName ? { profileName } : {}),
+      accounts: sorted,
+      windows: poolWindows(sorted, now),
+    };
   });
 }
 
@@ -915,8 +1000,29 @@ export function collectProviderUsageLimits(
     string,
     { usage: NativeSnapshot; credits: NativeSnapshot | null }
   >();
+  const selectedDriverProfiles = new Map<string, ServerProvider>();
   for (const provider of providersWithLimits(providers)) {
-    if (provider.driver !== selected.driver || !provider.usageLimits) continue;
+    if (provider.driver !== selected.driver) continue;
+    const profileName = aixProfileName(provider.usageLimits);
+    if (profileName && !selectedDriverProfiles.has(profileName)) {
+      selectedDriverProfiles.set(profileName, provider);
+    }
+  }
+  const selectedProfileName = aixProfileName(selected.usageLimits);
+  const latestProfiles = latestAixProfileReportsForProviders(providers);
+  if (selectedProfileName) selectedDriverProfiles.set(selectedProfileName, selected);
+  for (const provider of providersWithLimits(providers)) {
+    if (!provider.usageLimits) continue;
+    const profileName = aixProfileName(provider.usageLimits);
+    if (profileName) {
+      const selectedProfileProvider = selectedDriverProfiles.get(profileName);
+      const latestProfile = latestProfiles.get(profileName);
+      if (provider !== selectedProfileProvider || !latestProfile) continue;
+      const snapshot = { provider, limits: latestProfile.limits };
+      nativeByAccount.set(`aix-profile:${profileName}`, { usage: snapshot, credits: null });
+      continue;
+    }
+    if (provider.driver !== selected.driver) continue;
     const snapshot = { provider, limits: provider.usageLimits };
     const key = resolveKey(nativeReport(provider)) ?? `instance:${provider.instanceId}`;
     const previous = nativeByAccount.get(key);

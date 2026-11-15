@@ -57,7 +57,11 @@ function subscriptionUsageProps(
 ): SubscriptionUsageSnapshot {
   const pools = collectLimitPools(accounts, now);
   const checked = accounts
-    .filter((account) => account.driver === "codex" || account.driver === "claudeAgent")
+    .filter(
+      (account) =>
+        account.profileName === undefined &&
+        (account.driver === "codex" || account.driver === "claudeAgent"),
+    )
     .map((account) => Date.parse(account.limits.checkedAt));
   return {
     checkedAt: checked.length > 0 && checked.every(Number.isFinite) ? Math.min(...checked) : 0,
@@ -67,7 +71,9 @@ function subscriptionUsageProps(
           configuredDrivers.has(driver) || accounts.some((account) => account.driver === driver),
       )
       .map((driver) => {
-        const pool = pools.find((candidate) => candidate.driver === driver);
+        const pool = pools.find(
+          (candidate) => candidate.driver === driver && candidate.profileName === undefined,
+        );
         const name = driver === "codex" ? "Codex" : "Claude";
         if (!pool)
           return {
