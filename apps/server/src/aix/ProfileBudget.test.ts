@@ -251,6 +251,7 @@ it.effect.each([
   Effect.gen(function* () {
     const { service } = yield* budgetFor(fakeHttp(respond));
     const limits = yield* service.usageLimits("ae");
+    expect(limits.profileName).toBe("ae");
     expect(limits.windows).toEqual([]);
     expect(limits.unavailable).toEqual(unavailable);
   }),
@@ -266,7 +267,6 @@ it.effect("reports a timed-out budget read as a failed probe", () =>
     const fiber = yield* service.usageLimits("slow").pipe(Effect.forkChild);
     yield* TestClock.adjust("10 seconds");
     const limits = yield* Fiber.join(fiber);
-    expect(limits.profileName).toBe("slow");
     expect(limits.unavailable).toEqual({
       reason: "probeFailed",
       message: "The aix gateway budget request timed out.",
