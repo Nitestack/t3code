@@ -5,6 +5,7 @@ import type {
   UsageLimitSourceSnapshots,
 } from "@t3tools/contracts";
 import {
+  aixProfileNameFromWindowId,
   collectProviderUsageLimits,
   formatDuration,
   type LimitPace,
@@ -149,7 +150,7 @@ function LimitRow({
   const left = remainingPercent(window);
   const pace = paceOf(window, now);
   const resetsAt = window.resetsAt ? Date.parse(window.resetsAt) : Number.NaN;
-  const profileName = /^aix-budget:(.+)$/u.exec(window.id)?.[1];
+  const profileName = aixProfileNameFromWindowId(window.id);
   const label = profileName ? `${profileName} budget` : window.label;
   return (
     <UsageRow

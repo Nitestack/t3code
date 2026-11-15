@@ -31,6 +31,7 @@ import { ResetCredits } from "./UsageLimitsSection";
 import { usageProviderKind, useProviderColors } from "./usageProviders";
 
 const PACE_LABEL = { ahead: "Ahead of pace", on: "On pace", under: "Under pace" } as const;
+const PROFILE_LIMIT_COLOR = "#8e8e93";
 
 function accountName(account: LimitAccount) {
   if (account.displayName) return account.displayName;
@@ -436,7 +437,9 @@ export function UsageLimitsSection({
       {pools.map((pool) => {
         const windows = displayLimitWindows(pool);
         return (
-          <Fragment key={pool.accounts[0]?.key ?? pool.driver}>
+          <Fragment
+            key={pool.profileName ? (pool.accounts[0]?.key ?? pool.profileName) : pool.driver}
+          >
             <View className="gap-3">
               <View className="flex-row items-center gap-2 px-1">
                 {pool.profileName ? null : <ProviderIcon provider={pool.driver} size={18} />}
@@ -459,7 +462,11 @@ export function UsageLimitsSection({
                   <PoolWindowCard
                     key={`${window.kind}:${window.id}`}
                     pool={window}
-                    color={colors[usageProviderKind(pool.driver) ?? "codex"]}
+                    color={
+                      pool.profileName
+                        ? PROFILE_LIMIT_COLOR
+                        : colors[usageProviderKind(pool.driver) ?? "codex"]
+                    }
                     now={now}
                     environmentIds={
                       selectedEnvironmentIds === null ? null : [...selectedEnvironmentIds]

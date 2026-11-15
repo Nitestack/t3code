@@ -241,8 +241,11 @@ export const withAixProfileBudget =
           Effect.flatMap((service) =>
             Option.isNone(service)
               ? Effect.succeed(provider)
-              : service.value
-                  .usageLimits(profileName)
-                  .pipe(Effect.map((usageLimits) => ({ ...provider, usageLimits }))),
+              : service.value.usageLimits(profileName).pipe(
+                  Effect.map((usageLimits) => ({
+                    ...provider,
+                    usageLimits: { ...usageLimits, profileName },
+                  })),
+                ),
           ),
         );

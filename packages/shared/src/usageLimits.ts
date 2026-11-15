@@ -227,10 +227,42 @@ interface AccountReport {
   readonly usageLimits?: ServerProviderUsageLimits | undefined;
 }
 
+export function aixProfileNameFromWindowId(id: string): string | undefined {
+  return /^aix-budget:(.+)$/u.exec(id)?.[1];
+}
+
 function aixProfileName(limits: ServerProviderUsageLimits | undefined): string | undefined {
+  if (limits?.profileName) return limits.profileName;
   const windows = limits?.windows ?? [];
   if (windows.length !== 1) return undefined;
-  return /^aix-budget:(.+)$/u.exec(windows[0]?.id ?? "")?.[1];
+  return aixProfileNameFromWindowId(windows[0]?.id ?? "");
+}
+
+function aixProfileKey(environmentId: EnvironmentId, profileName: string): string {
+  return `aix-profile:${JSON.stringify([environmentId, profileName])}`;
+}
+
+interface AixProfileReport {
+  readonly provider: ServerProvider;
+  readonly limits: ServerProviderUsageLimits;
+}
+
+function latestAixProfileReports(presentations: LimitPresentations) {
+  const latest = new Map<string, AixProfileReport>();
+  for (const [environmentId, presentation] of presentations) {
+    for (const provider of providersWithLimits(presentation.serverConfig?.providers ?? [])) {
+      const limits = provider.usageLimits;
+      if (!limits) continue;
+      const profileName = aixProfileName(limits);
+      if (!profileName) continue;
+      const key = aixProfileKey(environmentId, profileName);
+      const previous = latest.get(key);
+      if (!previous || Date.parse(limits.checkedAt) > Date.parse(previous.limits.checkedAt)) {
+        latest.set(key, { provider, limits });
+      }
+    }
+  }
+  return latest;
 }
 
 const nativeReport = (provider: ServerProvider): AccountReport => ({
@@ -300,6 +332,7 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
   const creditSources = new Map<string, LimitAccount>();
   const hubRedeems = new Map<string, LimitAccount>();
   const planSources = new Map<string, LimitAccount>();
+  const latestProfiles = latestAixProfileReports(presentations);
   const merge = (key: string, next: LimitAccount) => {
     // Prefer hub redemption to clear its routing cooldown too; displayed balance still follows the freshest read.
     const previousHub = hubRedeems.get(key);
@@ -331,16 +364,7 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
       accounts.set(key, next);
       return;
     }
-    const nextCheckedAt = Date.parse(next.limits.checkedAt);
-    const previousCheckedAt = Date.parse(previous.limits.checkedAt);
-    const fresher =
-      next.profileName === undefined
-        ? nextCheckedAt > previousCheckedAt
-        : Number.isFinite(nextCheckedAt) !== Number.isFinite(previousCheckedAt)
-          ? Number.isFinite(nextCheckedAt)
-          : nextCheckedAt !== previousCheckedAt
-            ? nextCheckedAt > previousCheckedAt
-            : JSON.stringify(next.limits) < JSON.stringify(previous.limits);
+    const fresher = Date.parse(next.limits.checkedAt) > Date.parse(previous.limits.checkedAt);
     const environments = [
       ...previous.environments,
       ...next.environments.filter(
@@ -390,8 +414,13 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
     for (const provider of providersWithLimits(presentation.serverConfig?.providers ?? [])) {
       if (!provider.usageLimits || limitsNotice(provider.usageLimits) !== null) continue;
       const profileName = aixProfileName(provider.usageLimits);
+      if (
+        profileName &&
+        latestProfiles.get(aixProfileKey(environmentId, profileName))?.provider !== provider
+      )
+        continue;
       const key = profileName
-        ? `aix-profile:${JSON.stringify([environmentId, profileName])}`
+        ? aixProfileKey(environmentId, profileName)
         : `${environmentId}:${provider.instanceId}`;
       merge(profileName ? key : (resolveKey(nativeReport(provider)) ?? key), {
         key,
@@ -451,12 +480,19 @@ export function collectLimitNotices(presentations: LimitPresentations): readonly
   const label = (environmentLabel: string, subject: string) =>
     presentations.size > 1 ? `${environmentLabel} · ${subject}` : subject;
   const notices = new Set<string>();
-  for (const presentation of presentations.values()) {
+  const latestProfiles = latestAixProfileReports(presentations);
+  for (const [environmentId, presentation] of presentations) {
     const environmentLabel = presentation.entry.target.label;
     for (const provider of providersWithLimits(presentation.serverConfig?.providers ?? [])) {
-      if (provider.usageLimits?.unavailable?.reason === "unsupported") continue;
+      const profileName = aixProfileName(provider.usageLimits);
+      if (
+        profileName &&
+        latestProfiles.get(aixProfileKey(environmentId, profileName))?.provider !== provider
+      )
+        continue;
+      if (provider.usageLimits?.unavailable?.reason === "unsupported" && !profileName) continue;
       const notice = provider.usageLimits ? limitsNotice(provider.usageLimits) : null;
-      const name = provider.displayName?.trim() || String(provider.driver);
+      const name = profileName ?? (provider.displayName?.trim() || String(provider.driver));
       if (notice) notices.add(`${label(environmentLabel, name)}: ${notice}`);
     }
     for (const source of presentation.serverConfig?.usageLimitSources ?? []) {

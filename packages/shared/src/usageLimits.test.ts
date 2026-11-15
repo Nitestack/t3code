@@ -306,6 +306,7 @@ describe("pools", () => {
         instanceId: ProviderInstanceId.make(instanceId),
         usageLimits: {
           checkedAt,
+          profileName,
           windows: [
             {
               id: `aix-budget:${profileName}`,
@@ -320,7 +321,7 @@ describe("pools", () => {
     const reports = [
       aixProvider("codex", "codex-work", "work", checkedAt, 40),
       aixProvider("claudeAgent", "claude-work", "work", "2026-09-03T11:30:00.000Z", 55),
-      aixProvider("opencode", "opencode-work", "work", "2026-09-03T11:30:00.000Z", 60),
+      aixProvider("opencode", "opencode-work", "work", "2026-09-03T11:20:00.000Z", 60),
       aixProvider("codex", "codex-home", "home", checkedAt, 20),
     ];
     const presentation = (providers: readonly ServerProvider[]) =>
@@ -374,16 +375,45 @@ describe("pools", () => {
     const failedProbe = {
       ...reports[0]!,
       usageLimits: {
-        checkedAt,
+        checkedAt: "2026-09-03T11:45:00.000Z",
+        profileName: "work",
         windows: [],
         unavailable: { reason: "probeFailed" as const, message: "Gateway budget unavailable." },
       },
     };
-    const withFailedProbe = presentation([...reports, failedProbe]);
-    expect(collectLimitAccounts(withFailedProbe)).toHaveLength(3);
+    const nativeCodex = provider({
+      instanceId: ProviderInstanceId.make("codex-native"),
+      usageLimits: { checkedAt, windows: [{ ...window, id: "native-session", usedPercent: 10 }] },
+    });
+    const withFailedProbe = presentation([...reports, failedProbe, nativeCodex]);
+    const survivingAccounts = collectLimitAccounts(withFailedProbe);
+    expect(survivingAccounts).toHaveLength(3);
+    expect(
+      survivingAccounts.find((account) => account.profileName === "work")?.limits.windows[0]
+        ?.usedPercent,
+    ).toBe(80);
+    expect(
+      survivingAccounts.find((account) => account.profileName === undefined)?.limits.windows[0],
+    ).toMatchObject({ id: "native-session", usedPercent: 10 });
     expect(collectLimitNotices(withFailedProbe)).toEqual([
-      "Laptop · codex: Gateway budget unavailable.",
+      "Laptop · work: Gateway budget unavailable.",
     ]);
+
+    const oldFailure = {
+      ...failedProbe,
+      usageLimits: {
+        ...failedProbe.usageLimits,
+        checkedAt: "2026-09-03T10:30:00.000Z",
+      },
+    };
+    const withOldFailure = presentation([...reports, oldFailure]);
+    expect(
+      collectLimitAccounts(withOldFailure).find(
+        (account) =>
+          account.profileName === "work" && account.environments[0]?.environmentId === "env-a",
+      )?.limits.windows[0]?.usedPercent,
+    ).toBe(55);
+    expect(collectLimitNotices(withOldFailure)).toEqual([]);
   });
 
   it("uses the freshest reported plan even when the newest quota has no plan", () => {

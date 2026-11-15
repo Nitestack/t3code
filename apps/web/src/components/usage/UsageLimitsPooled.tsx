@@ -587,7 +587,7 @@ function PoolWindowCard({
 }
 
 function PoolSection({ pool, now }: { readonly pool: LimitPool; readonly now: number }) {
-  const color = barColor(pool.driver);
+  const color = pool.profileName ? "var(--foreground)" : barColor(pool.driver);
   const label = providerClients.get(pool.driver)?.label ?? String(pool.driver);
   const profileEnvironment = pool.accounts[0]?.environments[0]?.label;
   const windows = displayLimitWindows(pool);
@@ -653,7 +653,9 @@ export function UsageLimitsPooled({
       ) : null}
       <SegmentPopoverContext value={segmentPopover}>
         {pools.map((pool) => (
-          <Fragment key={pool.accounts[0]?.key ?? pool.driver}>
+          <Fragment
+            key={pool.profileName ? (pool.accounts[0]?.key ?? pool.profileName) : pool.driver}
+          >
             <PoolSection pool={pool} now={now} />
           </Fragment>
         ))}
