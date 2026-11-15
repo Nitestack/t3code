@@ -541,6 +541,27 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
         ),
       );
 
+      // A batch with a conflicting create fails whole, leaving its earlier mutations unwritten.
+      const batchedId = ProviderInstanceId.make("acpRegistry_batched");
+      const batch = yield* serverSettings
+        .updateProviderInstances(() => [
+          {
+            operation: "create",
+            instanceId: batchedId,
+            instance: { driver: ProviderDriverKind.make("acpRegistry") },
+          },
+          {
+            operation: "create",
+            instanceId,
+            instance: { driver: ProviderDriverKind.make("acpRegistry") },
+          },
+        ])
+        .pipe(Effect.result);
+      assert.equal(batch._tag, "Failure");
+      assert.isFalse(
+        Object.hasOwn((yield* serverSettings.getSettings).providerInstances, batchedId),
+      );
+
       // An inherited Object.prototype member is not an instance that already exists.
       for (const name of ["constructor", "toString", "valueOf"]) {
         const prototypeNamedId = ProviderInstanceId.make(name);
@@ -809,6 +830,27 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
 
       assert.equal(next.textGenerationModelSelection.instanceId, "claudeAgent");
       assert.equal(next.textGenerationModelSelection.model, "claude-haiku-5-5");
+    }).pipe(Effect.provide(layerServerSettings())),
+  );
+
+  it.effect("clears the aix sync marker when a client changes an instance's enabled state", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+      const id = ProviderInstanceId.make("aix-codex-work");
+      const config = { aixDisabledBySync: true, retained: "value" };
+      yield* serverSettings.updateSettings({
+        providerInstances: {
+          [id]: { driver: ProviderDriverKind.make("codex"), enabled: false, config },
+        },
+      });
+
+      const updated = yield* serverSettings.updateSettings({
+        providerInstances: {
+          [id]: { driver: ProviderDriverKind.make("codex"), enabled: true, config },
+        },
+      });
+
+      assert.deepEqual(updated.providerInstances[id]?.config, { retained: "value" });
     }).pipe(Effect.provide(layerServerSettings())),
   );
 

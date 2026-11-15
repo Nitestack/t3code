@@ -196,6 +196,27 @@ export function applyProviderInstanceMutation(
   return { ...settings, providerInstances };
 }
 
+function clearAixSyncDisableMarkerOnEnabledChanges(
+  current: ServerSettings,
+  next: ServerSettings,
+): ServerSettings {
+  let changed = false;
+  const providerInstances = { ...next.providerInstances };
+  for (const [instanceId, instance] of Object.entries(next.providerInstances) as Array<
+    [ProviderInstanceId, ProviderInstanceConfig]
+  >) {
+    const previous = current.providerInstances[instanceId];
+    if (previous === undefined || previous.enabled === instance.enabled) continue;
+    const config = instance.config;
+    if (config === null || typeof config !== "object" || Array.isArray(config)) continue;
+    if (!("aixDisabledBySync" in config)) continue;
+    const { aixDisabledBySync: _marker, ...rest } = config as Record<string, unknown>;
+    providerInstances[instanceId] = { ...instance, config: rest };
+    changed = true;
+  }
+  return changed ? { ...next, providerInstances } : next;
+}
+
 const secretProviderConfigGuards = new Map(
   secretProviderDefinitions.definitions.map((definition) => [
     definition.kind as string,
@@ -250,6 +271,20 @@ function ensureProviderInstanceMutationAllowed(
   return Effect.void;
 }
 
+// Untraced: a step inside the traced settings write, not its own operation.
+const applyProviderInstanceMutations = Effect.fnUntraced(function* (
+  settings: ServerSettings,
+  mutations: ReadonlyArray<ProviderInstanceMutation>,
+  settingsPath: string,
+) {
+  let next = settings;
+  for (const mutation of mutations) {
+    yield* ensureProviderInstanceMutationAllowed(next, mutation, settingsPath);
+    next = applyProviderInstanceMutation(next, mutation);
+  }
+  return next;
+});
+
 export class ServerSettingsService extends Context.Service<
   ServerSettingsService,
   {
@@ -269,6 +304,12 @@ export class ServerSettingsService extends Context.Service<
     readonly updateProviderInstance: (
       mutation: ProviderInstanceMutation,
       patch?: ServerSettingsPatch,
+    ) => Effect.Effect<ServerSettings, ServerSettingsError>;
+
+    readonly updateProviderInstances: (
+      plan: (
+        current: ServerSettings["providerInstances"],
+      ) => ReadonlyArray<ProviderInstanceMutation>,
     ) => Effect.Effect<ServerSettings, ServerSettingsError>;
 
     readonly withSettingsSnapshot: <A, E, R>(
@@ -335,6 +376,10 @@ const makeTest = Effect.fn("serverSettings.makeTest")(function* (
           const patched = applyServerSettingsPatch(currentSettings, patch);
           return applyProviderInstanceMutation(patched, mutation);
         }),
+      ),
+    updateProviderInstances: (plan) =>
+      updateTestSettings((current) =>
+        applyProviderInstanceMutations(current, plan(current.providerInstances), "test settings"),
       ),
     withSettingsSnapshot: (use) =>
       writeSemaphore.withPermits(1)(getSettings.pipe(Effect.flatMap(use))),
@@ -1370,7 +1415,12 @@ const make = Effect.gen(function* () {
     updateSettings: (patch) =>
       updateAndPersistSettings(patch, (current) =>
         ensureSecretProviderWritesAllowed(patch, settingsPath).pipe(
-          Effect.as(applyServerSettingsPatch(current, patch)),
+          Effect.as(
+            clearAixSyncDisableMarkerOnEnabledChanges(
+              current,
+              applyServerSettingsPatch(current, patch),
+            ),
+          ),
         ),
       ),
     updateProviderInstance: (mutation, patch = {}) =>
@@ -1381,6 +1431,10 @@ const make = Effect.gen(function* () {
           const patched = applyServerSettingsPatch(current, patch);
           return applyProviderInstanceMutation(patched, mutation);
         }),
+      ),
+    updateProviderInstances: (plan) =>
+      updateAndPersistSettings({}, (current) =>
+        applyProviderInstanceMutations(current, plan(current.providerInstances), settingsPath),
       ),
     withSettingsSnapshot,
     get streamChanges() {

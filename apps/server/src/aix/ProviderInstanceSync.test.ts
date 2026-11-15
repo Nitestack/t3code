@@ -5,6 +5,7 @@ import {
   ProviderInstanceId,
   type ProviderInstanceConfig,
   ProviderInstanceConfigMap,
+  type ProviderInstanceMutation,
 } from "@t3tools/contracts";
 import { it as effectIt } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
@@ -294,7 +295,14 @@ describe("planAixInstanceSync", () => {
       {
         operation: "upsert",
         instanceId: ProviderInstanceId.make("aix-codex-old"),
-        instance: { ...codexInstance("old"), enabled: false },
+        instance: {
+          ...codexInstance("old"),
+          enabled: false,
+          config: {
+            ...(codexInstance("old").config as Record<string, unknown>),
+            aixDisabledBySync: true,
+          },
+        },
       },
     ]);
   });
@@ -329,14 +337,28 @@ describe("planAixInstanceSync", () => {
       {
         operation: "upsert",
         instanceId: ProviderInstanceId.make("aix-codex-work"),
-        instance: { ...codexInstance("work"), enabled: false },
+        instance: {
+          ...codexInstance("work"),
+          enabled: false,
+          config: {
+            ...(codexInstance("work").config as Record<string, unknown>),
+            aixDisabledBySync: true,
+          },
+        },
       },
     ]);
   });
 
   it("re-enables a disabled managed instance when its profile returns", () => {
     const current = {
-      [ProviderInstanceId.make("aix-codex-work")]: { ...codexInstance("work"), enabled: false },
+      [ProviderInstanceId.make("aix-codex-work")]: {
+        ...codexInstance("work"),
+        enabled: false,
+        config: {
+          ...(codexInstance("work").config as Record<string, unknown>),
+          aixDisabledBySync: true,
+        },
+      },
     } as ProviderInstanceConfigMap;
 
     expect(planAixInstanceSync({ current, desired: work, unavailableProfiles: new Set() })).toEqual(
@@ -353,6 +375,78 @@ describe("planAixInstanceSync", () => {
         },
       ],
     );
+  });
+
+  it("keeps a user-disabled managed instance disabled when its profile returns", () => {
+    const codexId = ProviderInstanceId.make("aix-codex-work");
+    const current = {
+      [codexId]: { ...codexInstance("work"), enabled: false },
+    } as ProviderInstanceConfigMap;
+
+    expect(planAixInstanceSync({ current, desired: work, unavailableProfiles: new Set() })).toEqual(
+      [
+        {
+          operation: "create",
+          instanceId: OPENCODE_INSTANCE,
+          instance: must(work.get(OPENCODE_INSTANCE)),
+        },
+      ],
+    );
+  });
+
+  it("preserves a user-disabled instance when an available profile changes its models", () => {
+    const current = {
+      [ProviderInstanceId.make("aix-codex-work")]: {
+        ...codexInstance("work"),
+        enabled: false,
+      },
+    } as ProviderInstanceConfigMap;
+    const codexId = ProviderInstanceId.make("aix-codex-work");
+    const codexWant = codexInstance("work");
+    const codexConfig = codexWant.config as {
+      readonly customModels: ReadonlyArray<unknown>;
+    };
+    const changedCodex = {
+      ...codexWant,
+      config: {
+        ...codexConfig,
+        customModels: [...codexConfig.customModels, { slug: "gpt-6.2-sol", name: "GPT-6.2 Sol" }],
+      },
+    };
+    const changed = new Map(work).set(codexId, changedCodex);
+
+    expect(
+      planAixInstanceSync({ current, desired: changed, unavailableProfiles: new Set() }),
+    ).toEqual([
+      { operation: "upsert", instanceId: codexId, instance: { ...changedCodex, enabled: false } },
+      {
+        operation: "create",
+        instanceId: OPENCODE_INSTANCE,
+        instance: must(work.get(OPENCODE_INSTANCE)),
+      },
+    ]);
+  });
+
+  it("creates a new managed instance enabled", () => {
+    const codexOnly = new Map([
+      [
+        ProviderInstanceId.make("aix-codex-work"),
+        must(work.get(ProviderInstanceId.make("aix-codex-work"))),
+      ],
+    ]);
+    expect(
+      planAixInstanceSync({
+        current: {} as ProviderInstanceConfigMap,
+        desired: codexOnly,
+        unavailableProfiles: new Set(),
+      }),
+    ).toEqual([
+      {
+        operation: "create",
+        instanceId: ProviderInstanceId.make("aix-codex-work"),
+        instance: { ...must(work.get(ProviderInstanceId.make("aix-codex-work"))), enabled: true },
+      },
+    ]);
   });
 });
 
@@ -390,13 +484,23 @@ describe("syncAixProviderInstances", () => {
     const payloads = yield* Ref.make<ReadonlyArray<string>>([]);
     const counted = {
       ...base,
-      updateProviderInstance: (...args: Parameters<typeof base.updateProviderInstance>) =>
-        Ref.update(writes, (previous) => [...previous, args[0].instanceId]).pipe(
-          Effect.andThen(
-            Ref.update(payloads, (previous) => [...previous, JSON.stringify(args[0])]),
-          ),
-          Effect.andThen(base.updateProviderInstance(...args)),
-        ),
+      updateProviderInstances: (plan: Parameters<typeof base.updateProviderInstances>[0]) =>
+        Effect.gen(function* () {
+          let planned: ReadonlyArray<ProviderInstanceMutation> = [];
+          const result = yield* base.updateProviderInstances((current) => {
+            planned = plan(current);
+            return planned;
+          });
+          yield* Ref.update(writes, (previous) => [
+            ...previous,
+            ...planned.map((mutation) => mutation.instanceId),
+          ]);
+          yield* Ref.update(payloads, (previous) => [
+            ...previous,
+            ...planned.map((mutation) => JSON.stringify(mutation)),
+          ]);
+          return result;
+        }),
     } satisfies ServerSettingsService["Service"];
     return { counted, writes, payloads };
   });
@@ -753,6 +857,40 @@ describe("syncAixProviderInstances", () => {
       }).pipe(Effect.provide(aixTestLayer)),
     );
 
+    effectIt.effect("a user disable racing the sync write survives the profile returning", () =>
+      Effect.gen(function* () {
+        const base = yield* ServerSettingsService;
+        const codexId = ProviderInstanceId.make("aix-codex-work");
+        const cache = yield* makeAixSyncCache;
+        yield* refreshWith(base, sourceFor(), cache);
+
+        // The user's disable lands after the sync read settings but before its write.
+        const userDisable = yield* Effect.cached(
+          base.updateProviderInstance({
+            operation: "upsert",
+            instanceId: codexId,
+            instance: { ...codexInstance("work"), enabled: false },
+          }),
+        );
+        const racing = {
+          ...base,
+          updateProviderInstance: (...args: Parameters<typeof base.updateProviderInstance>) =>
+            userDisable.pipe(Effect.andThen(base.updateProviderInstance(...args))),
+          updateProviderInstances: (...args: Parameters<typeof base.updateProviderInstances>) =>
+            userDisable.pipe(Effect.andThen(base.updateProviderInstances(...args))),
+        } satisfies ServerSettingsService["Service"];
+        yield* refreshWith(
+          racing,
+          sourceFor({ listProfiles: Effect.succeed([{ name: "claude", label: "Claude" }]) }),
+          cache,
+          true,
+        );
+        yield* refreshWith(base, sourceFor(), cache, true);
+
+        expect((yield* base.getSettings).providerInstances[codexId]?.enabled).toBe(false);
+      }).pipe(Effect.provide(aixTestLayer)),
+    );
+
     effectIt.effect(
       "a forced refresh after key rotation uses the new key and persists neither",
       () =>
@@ -871,7 +1009,14 @@ describe("syncAixProviderInstances", () => {
         {
           operation: "upsert",
           instanceId: ProviderInstanceId.make("aix-codex-work"),
-          instance: { ...codexInstance("work"), enabled: false },
+          instance: {
+            ...codexInstance("work"),
+            enabled: false,
+            config: {
+              ...(codexInstance("work").config as Record<string, unknown>),
+              aixDisabledBySync: true,
+            },
+          },
         },
       ]);
     });
