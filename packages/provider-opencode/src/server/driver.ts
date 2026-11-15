@@ -32,6 +32,7 @@ import * as OpenCode2AdapterV2 from "./v2/adapter.ts";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import type { ProviderTextGeneration } from "@t3tools/provider-core/server/textGeneration";
 import { ProviderDriverError } from "@t3tools/provider-core/server/errors";
+import { makeUnavailableUsageLimits } from "@t3tools/provider-core/server/usageLimits";
 import { openCodeUsageReader, type OpenCodeUsageReaderEnv } from "./usage.ts";
 import { readOpenCodeGoUsageLimits } from "./usageLimits.ts";
 import { loadOpenCode2Catalog, loadOpenCode2DirectoryCatalog } from "./openCode2Catalog.ts";
@@ -473,8 +474,22 @@ export const OpenCodeDriver: ProviderDriver<
       Effect.provideService(HttpClient.HttpClient, httpClient),
       Effect.provideService(Digest.Digest, digest),
     );
+    const unsupportedUsageLimits = Effect.map(DateTime.now, (now) =>
+      makeUnavailableUsageLimits({ checkedAt: DateTime.formatIso(now), reason: "unsupported" }),
+    );
     let unsupportedUsageVersion: string | undefined;
     const checkUsageLimits = Effect.gen(function* () {
+      if (effectiveConfig.aixProfile !== undefined) {
+        if (!effectiveConfig.enabled) return yield* unsupportedUsageLimits;
+        const runtime = yield* runtimeProbe.get;
+        if (runtime.generation !== "v2" || runtime.version === unsupportedUsageVersion)
+          return yield* unsupportedUsageLimits;
+        const limits = yield* openCode2Server.withConnection((connection) =>
+          connection.usageLimits(host.paths.cwd),
+        );
+        if (limits === undefined) unsupportedUsageVersion = runtime.version;
+        return limits ?? (yield* unsupportedUsageLimits);
+      }
       if (!effectiveConfig.enabled) return yield* legacyUsageLimits;
       const runtime = yield* runtimeProbe.get;
       if (runtime.generation === "v1" || runtime.version === unsupportedUsageVersion)

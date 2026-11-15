@@ -12,6 +12,7 @@ import * as Path from "effect/Path";
 import * as SqlClient from "effect/sql/SqlClient";
 import { vi } from "vite-plus/test";
 
+import type { OpenCodeSettings } from "../settings.ts";
 import {
   openCodeForkContinuationSessionId,
   openCodeForkMessages,
@@ -705,6 +706,41 @@ describe("openCodeUsageReader", () => {
         sources.map((source) => source.dir).sort(),
         [defaultRoot, instanceRoot, xdgRoot].sort(),
       );
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("does not scan host OpenCode roots for aix-managed instances", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const temp = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "usage-aix-instance-test-",
+      });
+      if (openCodeUsageReader.kind !== "scan") throw new Error("Expected an OpenCode scan reader");
+      const sources = yield* openCodeUsageReader
+        .scan({
+          instances: [
+            {
+              instanceId: ProviderInstanceId.make("aix-opencode-work"),
+              config: { aixProfile: "work" } as OpenCodeSettings,
+              environment: {
+                OPENCODE_DATA_DIR: temp,
+                XDG_DATA_HOME: temp,
+                HOME: temp,
+              },
+              configured: true,
+            },
+          ],
+          settings: DEFAULT_SERVER_SETTINGS,
+          windowStartMs: 0,
+          retentionCutoffMs: 0,
+          awaitRefresh: true,
+        })
+        .pipe(
+          Effect.provideService(HostProcess.Environment, {}),
+          Effect.provideService(HostProcess.HomeDirectory, temp),
+        );
+
+      assert.deepStrictEqual(sources, []);
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 });

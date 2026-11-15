@@ -14,16 +14,19 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
+import * as Stream from "effect/Stream";
 import * as Digest from "effect/crypto/Digest";
 import * as Hex from "effect/encoding/Hex";
 import { HttpClient } from "effect/http";
 import { ChildProcessSpawner } from "effect/process";
 
 import * as AixDiscovery from "../provider/AixDiscovery.ts";
+import { OPENCODE_AIX_PROVIDER_ID } from "../provider/OpenCodeAixLaunch.ts";
 import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import * as AixCatalogCache from "./AixCatalogCache.ts";
@@ -38,12 +41,13 @@ import { type AixModelRoute, routeCatalogModel } from "./ModelRouting.ts";
 
 /** Set to `1` on the server host to let aix profiles create provider instances. */
 const AIX_ENABLED_ENVIRONMENT_VARIABLE = "T3CODE_AIX";
-/** Read by the Codex and Claude drivers at launch. OpenCode does not read it, so it is excluded. */
+/** Read by the Codex, Claude, and OpenCode drivers at launch. */
 const AIX_PROFILE_VARIABLE = "T3_AIX_PROFILE";
 
 const CODEX = ProviderDriverKind.make("codex");
 const CLAUDE_CODE = ProviderDriverKind.make("claudeAgent");
-const SUPPORTED_DRIVERS: ReadonlyArray<ProviderDriverKind> = [CODEX, CLAUDE_CODE];
+const OPENCODE = ProviderDriverKind.make("opencode");
+const SUPPORTED_DRIVERS: ReadonlyArray<ProviderDriverKind> = [CODEX, CLAUDE_CODE, OPENCODE];
 
 export interface AixRoutedModel {
   readonly id: string;
@@ -55,7 +59,10 @@ export type AixRouteSource = "anthropic" | "litellm";
 const routeFor = (source: AixRouteSource, modelId: string): AixModelRoute => {
   if (source === "anthropic") return "anthropic-direct-messages";
   if (modelId.startsWith("claude-")) return "litellm-anthropic-messages";
-  if (modelId.startsWith("gpt-")) return "litellm-openai-responses";
+  // gpt-oss is an open-weight chat model served from the chat route, not the Responses API.
+  if (modelId.startsWith("gpt-") && !modelId.startsWith("gpt-oss")) {
+    return "litellm-openai-responses";
+  }
   return "litellm-openai-chat";
 };
 
@@ -102,7 +109,16 @@ const decodeOwnerMarker = Schema.decodeUnknownOption(OwnerMarker);
 const ownerProfile = (instance: ProviderInstanceConfig): string | undefined =>
   Option.getOrUndefined(decodeOwnerMarker(instance.config))?.aixProfile;
 
-const driverLabel = (driver: ProviderDriverKind) => (driver === CODEX ? "Codex" : "Claude Code");
+const driverLabel = (driver: ProviderDriverKind) => {
+  if (driver === CODEX) return "Codex";
+  if (driver === OPENCODE) return "OpenCode";
+  return "Claude Code";
+};
+
+// OpenCode parses a model slug at its first "/", so the provider prefix keeps upstream ids like
+// `google/gemma-4-31b-it` intact.
+const customModelSlug = (driver: ProviderDriverKind, modelId: string) =>
+  driver === OPENCODE ? `${OPENCODE_AIX_PROVIDER_ID}/${modelId}` : modelId;
 
 export function aixDesiredInstances(
   profiles: ReadonlyArray<AixObservedProfile>,
@@ -119,7 +135,10 @@ export function aixDesiredInstances(
         environment: [{ name: AIX_PROFILE_VARIABLE, value: profile.name, sensitive: false }],
         config: {
           aixProfile: profile.name,
-          customModels: models.map((model) => ({ slug: model.id, name: model.displayName })),
+          customModels: models.map((model) => ({
+            slug: customModelSlug(driver, model.id),
+            name: model.displayName,
+          })),
         },
       });
     }
@@ -285,6 +304,7 @@ export const syncAixProviderInstances = Effect.fn("AixProviderInstanceSync.sync"
     readonly source: AixSyncSource;
     readonly cache?: AixSyncCache;
     readonly force?: boolean;
+    readonly onStatusChange?: (profile: string) => Effect.Effect<void>;
   }) {
     const settings = yield* ServerSettingsService;
     const cache = input.cache ?? (yield* makeAixSyncCache);
@@ -377,7 +397,20 @@ export const syncAixProviderInstances = Effect.fn("AixProviderInstanceSync.sync"
               routes: routes.success.value,
             });
           }
-          yield* Ref.set(cache.staleByProfile, staleByProfile);
+          // Commit and publish together: an interrupt between them would hide the change from later diffs.
+          yield* Effect.uninterruptible(
+            Effect.gen(function* () {
+              const previous = yield* Ref.getAndSet(cache.staleByProfile, staleByProfile);
+              if (input.onStatusChange === undefined) return;
+              for (const profile of new Set([...previous.keys(), ...staleByProfile.keys()])) {
+                const before = previous.get(profile);
+                const after = staleByProfile.get(profile);
+                if (before?.since !== after?.since || before?.code !== after?.code) {
+                  yield* input.onStatusChange(profile);
+                }
+              }
+            }),
+          );
         }
 
         // Read after the slow aix and catalog calls, so a manual instance that appeared meanwhile is seen.
@@ -426,7 +459,11 @@ export const syncAixFromEnvironment = Effect.fn("AixProviderInstanceSync.syncFro
   function* (
     environment: Readonly<Record<string, string | undefined>>,
     source: AixSyncSource,
-    options: { readonly cache?: AixSyncCache; readonly force?: boolean } = {},
+    options: {
+      readonly cache?: AixSyncCache;
+      readonly force?: boolean;
+      readonly onStatusChange?: (profile: string) => Effect.Effect<void>;
+    } = {},
   ) {
     yield* syncAixProviderInstances({
       enabled: environment[AIX_ENABLED_ENVIRONMENT_VARIABLE] === "1",
@@ -472,6 +509,7 @@ export class AixProviderInstanceSync extends Context.Service<
     readonly getProfileStatus: (
       profileName: string,
     ) => Effect.Effect<AixCatalogCache.StaleMarker | undefined>;
+    readonly streamProfileStatusChanges: Stream.Stream<string>;
   }
 >()("t3/aix/ProviderInstanceSync/AixProviderInstanceSync") {}
 
@@ -483,6 +521,16 @@ export const getAixProfileStatus = (profileName: string) =>
     ),
   );
 
+export const streamAixProfileStatusChanges = (profileName: string) =>
+  Effect.serviceOption(AixProviderInstanceSync).pipe(
+    Effect.map(Option.getOrUndefined),
+    Effect.map((service) =>
+      service === undefined
+        ? Stream.empty
+        : service.streamProfileStatusChanges.pipe(Stream.filter((name) => name === profileName)),
+    ),
+  );
+
 const make = Effect.gen(function* () {
   const environment = yield* HostProcess.Environment;
   const settings = yield* ServerSettingsService;
@@ -490,11 +538,17 @@ const make = Effect.gen(function* () {
   const backgroundPolicy = yield* BackgroundPolicy.BackgroundPolicy;
   const source = yield* liveSource;
   const cache = yield* makeAixSyncCache;
+  const profileStatusChanges = yield* PubSub.unbounded<string>();
 
   const refresh = Effect.fn("AixProviderInstanceSync.refresh")(function* (input: {
     readonly force: boolean;
   }) {
-    yield* syncAixFromEnvironment(environment, source, { cache, force: input.force }).pipe(
+    yield* syncAixFromEnvironment(environment, source, {
+      cache,
+      force: input.force,
+      onStatusChange: (profile) =>
+        PubSub.publish(profileStatusChanges, profile).pipe(Effect.asVoid),
+    }).pipe(
       Effect.provideService(Digest.Digest, digest),
       Effect.catchCause((cause) => Effect.logError("aix provider instance sync failed", cause)),
       Effect.provideService(ServerSettingsService, settings),
@@ -515,6 +569,7 @@ const make = Effect.gen(function* () {
         return (yield* Ref.get(cache.staleByProfile)).get(profileName);
       },
     ),
+    streamProfileStatusChanges: Stream.fromPubSub(profileStatusChanges),
   });
 });
 

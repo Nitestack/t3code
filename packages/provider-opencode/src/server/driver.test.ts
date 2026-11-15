@@ -2,6 +2,7 @@
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
+import * as NodeSqlite from "node:sqlite";
 
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -30,6 +31,7 @@ import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as UrlParams from "effect/http/UrlParams";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
+import { vi } from "vite-plus/test";
 
 import * as ProviderLatestVersions from "@t3tools/provider-core/server/ProviderLatestVersions";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
@@ -877,6 +879,144 @@ it.layer(layer)("OpenCodeDriver runtime selection", (it) => {
           assert.deepStrictEqual(snapshot?.usageLimits?.windows, []);
         }
       }),
+  );
+
+  it.effect("does not read host auth or call the Go usage endpoint for aix profiles", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const dataHome = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "opencode-aix-usage-",
+      });
+      const openCodeData = NodePath.join(dataHome, "opencode");
+      const databasePath = NodePath.join(openCodeData, "opencode.db");
+      yield* fileSystem.makeDirectory(openCodeData, { recursive: true });
+      yield* fileSystem.writeFileString(
+        NodePath.join(openCodeData, "auth.json"),
+        JSON.stringify({ "opencode-go": { type: "api", key: "host-auth-file-key" } }),
+      );
+      const database = new NodeSqlite.DatabaseSync(databasePath);
+      database.exec(
+        "CREATE TABLE credential (integration_id TEXT, active INTEGER, time_created INTEGER, id TEXT, value TEXT)",
+      );
+      database
+        .prepare("INSERT INTO credential VALUES (?, ?, ?, ?, ?)")
+        .run(
+          "opencode-go",
+          1,
+          1,
+          "host-go-key",
+          JSON.stringify({ type: "key", key: "host-auth-database-key" }),
+        );
+      database.close();
+
+      let authFileReads = 0;
+      let databaseCredentialReads = 0;
+      const originalGet = NodeSqlite.StatementSync.prototype.get;
+      yield* Effect.acquireRelease(
+        Effect.sync(() =>
+          vi.spyOn(NodeSqlite.StatementSync.prototype, "get").mockImplementation(function (
+            this: NodeSqlite.StatementSync,
+            ...params
+          ) {
+            if (this.sourceSQL.includes("FROM credential")) databaseCredentialReads += 1;
+            return originalGet.apply(this, params);
+          }),
+        ),
+        (spy) => Effect.sync(() => spy.mockRestore()),
+      );
+      const trackedFileSystem = new Proxy(fileSystem, {
+        get(target, property) {
+          if (property === "readFileString") {
+            return (...args: Parameters<typeof target.readFileString>) => {
+              if (String(args[0]).endsWith("/opencode/auth.json")) authFileReads += 1;
+              return Reflect.apply(target.readFileString, target, args);
+            };
+          }
+          const value = Reflect.get(target, property, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      }) as typeof fileSystem;
+      let goUsageRequests = 0;
+      const server = HttpClient.make((request) => {
+        if (request.url === "https://opencode.ai/zen/go/v1/usage") {
+          goUsageRequests += 1;
+          return Effect.succeed(
+            HttpClientResponse.fromWeb(
+              request,
+              Response.json({
+                usage: {
+                  rolling: { percent: 10, resetsAt: "2026-11-01T00:00:00.000Z" },
+                  weekly: { percent: 10, resetsAt: "2026-11-01T00:00:00.000Z" },
+                  monthly: { percent: 10, resetsAt: "2026-11-01T00:00:00.000Z" },
+                },
+              }),
+            ),
+          );
+        }
+        const path = new URL(request.url).pathname;
+        if (path === "/api/info") {
+          return Effect.succeed(
+            HttpClientResponse.fromWeb(request, Response.json({ version: "2.0.18" })),
+          );
+        }
+        if (path === "/api/experimental/usage/limits") {
+          return Effect.succeed(
+            HttpClientResponse.fromWeb(request, new Response(null, { status: 404 })),
+          );
+        }
+        return Effect.succeed(
+          HttpClientResponse.fromWeb(
+            request,
+            Response.json({ location: { directory: "/work" }, data: [] }),
+          ),
+        );
+      });
+      const runtime = {
+        ...openCode2Runtime,
+        runOpenCodeCommand: () =>
+          Effect.succeed({ stdout: "opencode v1.14.19\n", stderr: "", code: 0 }),
+        startOpenCodeServerProcess: ({
+          verify,
+        }: Parameters<
+          OpenCodeRuntime.OpenCodeRuntime["Service"]["startOpenCodeServerProcess"]
+        >[0]) =>
+          Effect.gen(function* () {
+            const url = "http://127.0.0.1:4096";
+            const version = verify ? yield* verify(url) : "2.0.18";
+            return { url, version, isRunning: Effect.succeed(true), exitCode: Effect.never };
+          }),
+      };
+      const instance = yield* OpenCodeDriver.create({
+        instanceId: ProviderInstanceId.make("aix-opencode-work"),
+        displayName: undefined,
+        environment: [
+          { name: "T3_AIX_PROFILE", value: "work", sensitive: false },
+          { name: "OPENCODE_API_KEY", value: "host-env-api-key", sensitive: true },
+          { name: "OPENCODE_DB", value: databasePath, sensitive: false },
+          { name: "XDG_DATA_HOME", value: dataHome, sensitive: false },
+        ],
+        enabled: true,
+        config: { ...OpenCodeDriver.defaultConfig(), aixProfile: "work" },
+      }).pipe(
+        Effect.provide(TestProviderHost.layer({ runBackgroundWork: true })),
+        Effect.provideService(HttpClient.HttpClient, server),
+        Effect.provideService(OpenCodeRuntime.OpenCodeRuntime, runtime),
+        Effect.provideService(FileSystem.FileSystem, trackedFileSystem),
+      );
+      const limitsFiber = yield* instance.snapshot.streamChanges.pipe(
+        Stream.filter((snapshot) => snapshot.usageLimits !== undefined),
+        Stream.take(1),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+      yield* TestClock.adjust("5 seconds");
+      const [snapshot] = Array.from(yield* Fiber.join(limitsFiber));
+
+      assert.strictEqual(authFileReads, 0);
+      assert.strictEqual(databaseCredentialReads, 0);
+      assert.strictEqual(goUsageRequests, 0);
+      assert.strictEqual(snapshot?.usageLimits?.unavailable?.reason, "unsupported");
+    }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
   );
 
   it.effect.each(

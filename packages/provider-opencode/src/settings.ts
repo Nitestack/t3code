@@ -54,6 +54,10 @@ export const OpenCodeSettings = makeProviderSettingsSchema(
       Schema.withDecodingDefault(Effect.succeed([])),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
+    // Set only on aix-managed instances; the sync uses it to recognise its own instances.
+    aixProfile: Schema.optionalKey(Schema.String).pipe(
+      Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+    ),
   },
   {
     order: ["binaryPath", "serverUrl", "serverPassword"],

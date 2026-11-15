@@ -362,10 +362,10 @@ function flattenOpenCodeModels(
 
 /** Undefined when OpenCode lists no models, so callers can keep the catalog they have. */
 export function openCodeProviderModels(
-  settings: Pick<OpenCodeSettings, "customModels">,
+  settings: Pick<OpenCodeSettings, "customModels" | "aixProfile">,
   catalog: Pick<OpenCodeRuntime.OpenCodeInventory, "providerList" | "agents">,
 ): ReadonlyArray<ServerProviderModel> | undefined {
-  const models = flattenOpenCodeModels(catalog);
+  const models = filterAixManagedModels(settings, flattenOpenCodeModels(catalog));
   return models.length === 0
     ? undefined
     : providerModelsFromSettings(
@@ -689,28 +689,40 @@ function openCode2ModelCapabilities(model: OpenCode2Model): ModelCapabilities {
 }
 
 export function openCode2ProviderModels(
-  settings: Pick<OpenCodeSettings, "customModels">,
+  settings: Pick<OpenCodeSettings, "customModels" | "aixProfile">,
   catalog: ReadonlyArray<OpenCode2Model>,
 ): ReadonlyArray<ServerProviderModel> {
+  const models = markOpenCodeLegacy(
+    catalog.map((model) => {
+      const subProvider = subProviderLabelFor(model);
+      return {
+        model: {
+          slug: `${model.providerID}/${model.id}`,
+          name: model.name,
+          ...(subProvider ? { subProvider } : {}),
+          isCustom: false,
+          capabilities: openCode2ModelCapabilities(model),
+        },
+        release: model,
+      };
+    }),
+  ).toSorted((left, right) => left.name.localeCompare(right.name));
   return providerModelsFromSettings(
-    markOpenCodeLegacy(
-      catalog.map((model) => {
-        const subProvider = subProviderLabelFor(model);
-        return {
-          model: {
-            slug: `${model.providerID}/${model.id}`,
-            name: model.name,
-            ...(subProvider ? { subProvider } : {}),
-            isCustom: false,
-            capabilities: openCode2ModelCapabilities(model),
-          },
-          release: model,
-        };
-      }),
-    ).toSorted((left, right) => left.name.localeCompare(right.name)),
+    filterAixManagedModels(settings, models),
     settings.customModels,
     DEFAULT_OPENCODE_MODEL_CAPABILITIES,
   );
+}
+
+function filterAixManagedModels<T extends { readonly slug: string }>(
+  settings: Pick<OpenCodeSettings, "customModels" | "aixProfile">,
+  catalog: ReadonlyArray<T>,
+): ReadonlyArray<T> {
+  if (settings.aixProfile === undefined) return catalog;
+  const routedModels = new Set(
+    settings.customModels.map((model) => (typeof model === "string" ? model : model.slug)),
+  );
+  return catalog.filter((model) => routedModels.has(model.slug));
 }
 
 const checkOpenCode2 = Effect.fn("checkOpenCode2")(function* (

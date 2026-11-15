@@ -15,7 +15,7 @@ Partial aix development work exists, but there is no end-user setup flow. The so
 launching an explicitly selected Claude aix profile through Claude Code's Messages interface:
 direct Anthropic endpoints use API-key authentication, and other configured endpoints use Bearer
 authentication by default. This launch support does not establish compatibility for every gateway,
-model, or tool route. LiteLLM profiles and OpenCode are not available as aix product features. A
+model, or tool route. T3-managed OpenCode instances now route supported LiteLLM chat profiles. A
 corrected minimal-config native Codex probe completed a tool round trip and final response for
 `gpt-6.1-sol`; it does not establish T3 integration or profile switching. The
 [native compatibility report](../fork/t01-native-agent-spike.md) records the tested combinations
