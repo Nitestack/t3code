@@ -118,9 +118,6 @@ needs its own decision.
   profile-to-profile turn has run. Approved by the user, 2026-11-15.
 - **aix profile changes without a rebuild.** This needs a credential integration path that does not
   exist yet. Approved by the user, 2026-11-15.
-- **`options: null` in a model selection.** Fork servers reject it until the upstream fix
-  `f4e65cd843` arrives with the next upstream sync. Delete this item when that sync lands.
-  Approved by the user, 2026-11-15.
 
 ## Known issues
 
