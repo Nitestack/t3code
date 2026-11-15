@@ -686,28 +686,28 @@ export const readClaudeSettingsEnv = Effect.fn("readClaudeSettingsEnv")(function
     environment,
     repositoryRoot,
   );
-  const managedPath = options.forAixProfile
-    ? claudeManagedSettingsPath(path, platform, environment)
-    : undefined;
-  const dropInDirectory =
-    managedPath === undefined
-      ? undefined
-      : path.join(path.dirname(managedPath), "managed-settings.d");
-  const dropIns =
-    dropInDirectory === undefined
-      ? []
-      : yield* fileSystem
-          .readDirectory(dropInDirectory)
-          .pipe(Effect.orElseSucceed(() => [] as string[]));
+  const dropInDirectories = options.forAixProfile
+    ? claudeManagedSettingsPaths(path, platform, environment).map((managedPath) =>
+        path.join(path.dirname(managedPath), "managed-settings.d"),
+      )
+    : [];
+  const dropInPaths = yield* Effect.forEach(dropInDirectories, (directory) =>
+    fileSystem.readDirectory(directory).pipe(
+      Effect.map((names) =>
+        names
+          .filter((name) => name.endsWith(".json"))
+          .sort()
+          .map((name) => path.join(directory, name)),
+      ),
+      Effect.orElseSucceed(() => [] as string[]),
+    ),
+  );
   for (const settingsPath of [
     ...(repositoryRoot !== undefined && repositoryRoot !== cwd
       ? [path.join(repositoryRoot, ".claude", "settings.json")]
       : []),
     ...settingsPaths,
-    ...dropIns
-      .filter((name) => name.endsWith(".json"))
-      .sort()
-      .map((name) => path.join(dropInDirectory!, name)),
+    ...dropInPaths.flat(),
   ]) {
     const contents = yield* fileSystem
       .readFileString(settingsPath)
