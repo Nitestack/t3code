@@ -144,7 +144,7 @@ jobs:
           "$build_tools/apksigner" verify --verbose "$apk"
           expected_cert_sha256="$(keytool -exportcert -keystore "$T3_ANDROID_KEYSTORE_PATH" -alias "$T3_ANDROID_KEY_ALIAS" -storepass "$T3_ANDROID_KEYSTORE_PASSWORD" | sha256sum | cut -d' ' -f1)"
           apk_certs="$("$build_tools/apksigner" verify --print-certs "$apk" 2>&1)"
-          apk_cert_sha256="$(printf '%s\n' "$apk_certs" | sed -nE 's/^Signer[^:]*certificate SHA-256 digest: *//p' | head -n 1 | tr -d ': \r' | tr '[:upper:]' '[:lower:]')"
+          apk_cert_sha256="$(printf '%s\n' "$apk_certs" | sed -nE 's/^.*[Ss]igner.*certificate SHA-256 digest: *([0-9A-Fa-f:]+).*$/\1/p' | head -n 1 | tr -d ':' | tr '[:upper:]' '[:lower:]')"
           if [ -z "$apk_cert_sha256" ] || [ "$apk_cert_sha256" != "$expected_cert_sha256" ]; then
             echo "Expected upload certificate SHA-256: $expected_cert_sha256"
             echo "APK signer #1 certificate SHA-256: ${apk_cert_sha256:-not found}"
