@@ -63,6 +63,7 @@ import * as CodexManagedTokenBroker from "../CodexManagedTokenBroker.ts";
 import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
 import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import { withAixProfileBudget } from "../../aix/ProfileBudget.ts";
 import { getAixProfileStatus, withAixCatalogStatus } from "../../aix/ProviderInstanceSync.ts";
 const decodeCodexSettings = Schema.decodeSync(CodexSettings);
 
@@ -275,7 +276,8 @@ export const CodexDriver: ProviderDriver<
         config: homeConfig,
       },
       {
-        onUsageLimits: (update) => snapshot.applyUsageLimits(update),
+        // The profile's gateway budget is the only usage source for an aix-managed instance.
+        onUsageLimits: (update) => (aixManaged ? Effect.void : snapshot.applyUsageLimits(update)),
         models: Effect.suspend(() => snapshot.getSnapshot).pipe(
           Effect.map((value) => value.models),
         ),
@@ -304,6 +306,7 @@ export const CodexDriver: ProviderDriver<
           { concurrent: true },
         ),
       ),
+      Effect.flatMap(withAixProfileBudget(config.aixProfile)),
       Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
       Effect.provideService(FileSystem.FileSystem, fileSystem),
       Effect.provideService(Path.Path, pathService),

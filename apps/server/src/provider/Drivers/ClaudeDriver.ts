@@ -65,6 +65,7 @@ import {
   validateClaudeAixSettingsAuth,
 } from "./ClaudeHome.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import { withAixProfileBudget } from "../../aix/ProfileBudget.ts";
 import { getAixProfileStatus, withAixCatalogStatus } from "../../aix/ProviderInstanceSync.ts";
 import { makeClaudeMaintenanceResolution } from "./ClaudeMaintenance.ts";
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
@@ -248,7 +249,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
       },
       {
         scopedLimitNames,
-        onUsageLimits: (update) => snapshot.applyUsageLimits(update),
+        // The profile's gateway budget is the only usage source for an aix-managed instance.
+        onUsageLimits: (update) => (aixManaged ? Effect.void : snapshot.applyUsageLimits(update)),
         onSessionInit: (cwd) => Queue.offer(workspaceRescans, cwd).pipe(Effect.asVoid),
         modelCatalog,
         routeModelCatalog: modelRoutes.route,
@@ -372,6 +374,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
               : Effect.void,
           ),
           Effect.map(stampIdentity),
+          Effect.flatMap(withAixProfileBudget(config.aixProfile)),
         ),
       ),
       // Disabled, failed version checks and interruption never reach the probe.

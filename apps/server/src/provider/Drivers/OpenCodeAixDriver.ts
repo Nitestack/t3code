@@ -1,15 +1,17 @@
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import { ChildProcessSpawner } from "effect/process";
 import * as Stream from "effect/Stream";
 import type { ProviderDriver, ProviderUsageReaderEnv } from "@t3tools/provider-core/server/driver";
-import { OpenCodeDriver } from "@t3tools/provider-opencode/server";
+import { OpenCodeAixUsageLimits, OpenCodeDriver } from "@t3tools/provider-opencode/server";
 import * as OpenCodeRuntime from "@t3tools/provider-opencode/server/OpenCodeRuntime";
 import type { OpenCodeSettings } from "@t3tools/provider-opencode/settings";
 
 import * as ServerConfig from "../../config.ts";
+import { AixProfileBudget } from "../../aix/ProfileBudget.ts";
 import {
   getAixProfileStatus,
   streamAixProfileStatusChanges,
@@ -84,8 +86,14 @@ export const makeOpenCodeAixDriver = <R>(
       models: aixModels(input.config.customModels),
       stateDir,
     });
+    const budget = yield* Effect.serviceOption(AixProfileBudget);
     return yield* createOpenCodeInstance(input).pipe(
       Effect.provideService(OpenCodeRuntime.OpenCodeRuntime, { ...base, ...aixRuntime }),
+      Option.isSome(budget)
+        ? Effect.provideService(OpenCodeAixUsageLimits, {
+            read: budget.value.usageLimits(profileReference.profile),
+          })
+        : (effect) => effect,
       Effect.flatMap((instance) =>
         Effect.gen(function* () {
           const profileStatusChanges = yield* streamAixProfileStatusChanges(

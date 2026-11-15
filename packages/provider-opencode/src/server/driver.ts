@@ -3,7 +3,9 @@ import {
   ProviderDriverKind,
   settingsSecretLiteral,
   type ServerProviderModel,
+  type ServerProviderUsageLimits,
 } from "@t3tools/contracts";
+import * as Context from "effect/Context";
 import { OpenCodeSettings } from "../settings.ts";
 import * as Digest from "effect/crypto/Digest";
 import * as SecureRandom from "effect/crypto/SecureRandom";
@@ -247,6 +249,12 @@ export type OpenCodeDriverEnv =
   | OpenCodeRuntime.OpenCodeRuntime
   | Path.Path;
 
+/** The host provides this for aix-managed instances; it reads the profile's gateway budget. */
+export class OpenCodeAixUsageLimits extends Context.Service<
+  OpenCodeAixUsageLimits,
+  { readonly read: Effect.Effect<ServerProviderUsageLimits> }
+>()("@t3tools/provider-opencode/server/driver/OpenCodeAixUsageLimits") {}
+
 export const OpenCodeDriver: ProviderDriver<
   OpenCodeSettings,
   OpenCodeDriverEnv,
@@ -277,6 +285,7 @@ export const OpenCodeDriver: ProviderDriver<
     const latestVersions = yield* ProviderLatestVersions.ProviderLatestVersions;
     const digest = yield* Digest.Digest;
     const host = yield* ProviderHost.ProviderHost;
+    const aixUsageLimits = yield* Effect.serviceOption(OpenCodeAixUsageLimits);
     const processEnv = yield* mergeProviderInstanceEnvironment(environment);
     const continuationIdentity = defaultProviderContinuationIdentity({
       driverKind: DRIVER_KIND,
@@ -478,18 +487,12 @@ export const OpenCodeDriver: ProviderDriver<
       makeUnavailableUsageLimits({ checkedAt: DateTime.formatIso(now), reason: "unsupported" }),
     );
     let unsupportedUsageVersion: string | undefined;
-    const checkUsageLimits = Effect.gen(function* () {
-      if (effectiveConfig.aixProfile !== undefined) {
-        if (!effectiveConfig.enabled) return yield* unsupportedUsageLimits;
-        const runtime = yield* runtimeProbe.get;
-        if (runtime.generation !== "v2" || runtime.version === unsupportedUsageVersion)
-          return yield* unsupportedUsageLimits;
-        const limits = yield* openCode2Server.withConnection((connection) =>
-          connection.usageLimits(host.paths.cwd),
-        );
-        if (limits === undefined) unsupportedUsageVersion = runtime.version;
-        return limits ?? (yield* unsupportedUsageLimits);
-      }
+    // An aix profile's usage is its gateway budget, never an OpenCode Console workspace.
+    const checkAixUsageLimits =
+      effectiveConfig.enabled && Option.isSome(aixUsageLimits)
+        ? aixUsageLimits.value.read
+        : unsupportedUsageLimits;
+    const checkOpenCodeUsageLimits = Effect.gen(function* () {
       if (!effectiveConfig.enabled) return yield* legacyUsageLimits;
       const runtime = yield* runtimeProbe.get;
       if (runtime.generation === "v1" || runtime.version === unsupportedUsageVersion)
@@ -515,6 +518,8 @@ export const OpenCodeDriver: ProviderDriver<
         })),
       ),
     );
+    const checkUsageLimits =
+      effectiveConfig.aixProfile !== undefined ? checkAixUsageLimits : checkOpenCodeUsageLimits;
     const checkProvider = Effect.all(
       {
         // A configured loopback server reports its running version. Probe the local

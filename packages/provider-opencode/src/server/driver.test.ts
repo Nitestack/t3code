@@ -39,7 +39,12 @@ import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderS
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
 import * as ProviderMaintenance from "@t3tools/provider-core/server/maintenanceResolver";
 import * as OpenCodeRuntime from "./OpenCodeRuntime.ts";
-import { OpenCodeDriver, isLocalOpenCodeServerUrl, openCodeUpdateFor } from "./driver.ts";
+import {
+  OpenCodeAixUsageLimits,
+  OpenCodeDriver,
+  isLocalOpenCodeServerUrl,
+  openCodeUpdateFor,
+} from "./driver.ts";
 import * as OpenCodeServerLedger from "./OpenCodeServerLedger.ts";
 import {
   OPENCODE_2_RESPONSES,
@@ -881,7 +886,7 @@ it.layer(layer)("OpenCodeDriver runtime selection", (it) => {
       }),
   );
 
-  it.effect("does not read host auth or call the Go usage endpoint for aix profiles", () =>
+  it.effect("reports the aix budget, never host auth, Go or Console usage, for aix profiles", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const dataHome = yield* fileSystem.makeTempDirectoryScoped({
@@ -937,6 +942,7 @@ it.layer(layer)("OpenCodeDriver runtime selection", (it) => {
         },
       }) as typeof fileSystem;
       let goUsageRequests = 0;
+      let consoleUsageRequests = 0;
       const server = HttpClient.make((request) => {
         if (request.url === "https://opencode.ai/zen/go/v1/usage") {
           goUsageRequests += 1;
@@ -960,6 +966,7 @@ it.layer(layer)("OpenCodeDriver runtime selection", (it) => {
           );
         }
         if (path === "/api/experimental/usage/limits") {
+          consoleUsageRequests += 1;
           return Effect.succeed(
             HttpClientResponse.fromWeb(request, new Response(null, { status: 404 })),
           );
@@ -986,6 +993,17 @@ it.layer(layer)("OpenCodeDriver runtime selection", (it) => {
             return { url, version, isRunning: Effect.succeed(true), exitCode: Effect.never };
           }),
       };
+      const budget = {
+        checkedAt: "2026-11-15T12:00:00.000Z",
+        windows: [
+          {
+            id: "aix-budget:work",
+            kind: "other" as const,
+            label: "Gateway budget",
+            usedPercent: 40,
+          },
+        ],
+      };
       const instance = yield* OpenCodeDriver.create({
         instanceId: ProviderInstanceId.make("aix-opencode-work"),
         displayName: undefined,
@@ -1002,6 +1020,7 @@ it.layer(layer)("OpenCodeDriver runtime selection", (it) => {
         Effect.provideService(HttpClient.HttpClient, server),
         Effect.provideService(OpenCodeRuntime.OpenCodeRuntime, runtime),
         Effect.provideService(FileSystem.FileSystem, trackedFileSystem),
+        Effect.provideService(OpenCodeAixUsageLimits, { read: Effect.succeed(budget) }),
       );
       const limitsFiber = yield* instance.snapshot.streamChanges.pipe(
         Stream.filter((snapshot) => snapshot.usageLimits !== undefined),
@@ -1015,7 +1034,8 @@ it.layer(layer)("OpenCodeDriver runtime selection", (it) => {
       assert.strictEqual(authFileReads, 0);
       assert.strictEqual(databaseCredentialReads, 0);
       assert.strictEqual(goUsageRequests, 0);
-      assert.strictEqual(snapshot?.usageLimits?.unavailable?.reason, "unsupported");
+      assert.strictEqual(consoleUsageRequests, 0);
+      assert.deepStrictEqual(snapshot?.usageLimits, budget);
     }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
   );
 
