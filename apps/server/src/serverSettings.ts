@@ -196,6 +196,25 @@ export function applyProviderInstanceMutation(
   return { ...settings, providerInstances };
 }
 
+function clearAixSyncDisableMarkerOnEnabledChanges(
+  current: ServerSettings,
+  next: ServerSettings,
+): ServerSettings {
+  let changed = false;
+  const providerInstances = { ...next.providerInstances };
+  for (const [instanceId, instance] of Object.entries(next.providerInstances)) {
+    const previous = current.providerInstances[instanceId];
+    if (previous === undefined || previous.enabled === instance.enabled) continue;
+    const config = instance.config;
+    if (config === null || typeof config !== "object" || Array.isArray(config)) continue;
+    if (!("aixDisabledBySync" in config)) continue;
+    const { aixDisabledBySync: _marker, ...rest } = config as Record<string, unknown>;
+    providerInstances[instanceId] = { ...instance, config: rest };
+    changed = true;
+  }
+  return changed ? { ...next, providerInstances } : next;
+}
+
 const secretProviderConfigGuards = new Map(
   secretProviderDefinitions.definitions.map((definition) => [
     definition.kind as string,
@@ -1370,7 +1389,12 @@ const make = Effect.gen(function* () {
     updateSettings: (patch) =>
       updateAndPersistSettings(patch, (current) =>
         ensureSecretProviderWritesAllowed(patch, settingsPath).pipe(
-          Effect.as(applyServerSettingsPatch(current, patch)),
+          Effect.as(
+            clearAixSyncDisableMarkerOnEnabledChanges(
+              current,
+              applyServerSettingsPatch(current, patch),
+            ),
+          ),
         ),
       ),
     updateProviderInstance: (mutation, patch = {}) =>

@@ -812,6 +812,27 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
     }).pipe(Effect.provide(layerServerSettings())),
   );
 
+  it.effect("clears the aix sync marker when a client changes an instance's enabled state", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+      const id = ProviderInstanceId.make("aix-codex-work");
+      const config = { aixDisabledBySync: true, retained: "value" };
+      yield* serverSettings.updateSettings({
+        providerInstances: {
+          [id]: { driver: ProviderDriverKind.make("codex"), enabled: false, config },
+        },
+      });
+
+      const updated = yield* serverSettings.updateSettings({
+        providerInstances: {
+          [id]: { driver: ProviderDriverKind.make("codex"), enabled: true, config },
+        },
+      });
+
+      assert.deepEqual(updated.providerInstances[id]?.config, { retained: "value" });
+    }).pipe(Effect.provide(layerServerSettings())),
+  );
+
   // A backend behind a custom model may refuse the built-in default.
   it.effect("falls back to the thread default when it is a custom model on that instance", () =>
     Effect.gen(function* () {
