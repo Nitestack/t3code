@@ -49,7 +49,6 @@ import {
   CodexProviderCapabilitiesV2,
   canReuseCodexContextUsage,
 } from "../Adapters/CodexAdapterV2.ts";
-import { CodexAppServerRequestError } from "effect-codex-app-server/errors";
 import { AcpProviderCapabilitiesV2 } from "@t3tools/provider-acp/server/adapter";
 import * as EventSink from "../EventSink.ts";
 import * as EventStore from "../EventStore.ts";
@@ -107,7 +106,6 @@ function makeTestAdapter(input: {
   readonly failStartOnce?: Ref.Ref<boolean>;
   readonly refuseStarts?: Ref.Ref<number>;
   readonly refusalCause?: unknown;
-  readonly rejectedModel?: string;
   readonly failInjectionOnce?: Ref.Ref<boolean>;
   readonly nativeThreadGeneration?: Ref.Ref<number>;
   readonly failResume?: boolean;
@@ -268,10 +266,8 @@ function makeTestAdapter(input: {
               )
                 return yield* unimplemented(input.driver, "turn start failed after injection");
               if (
-                turnInput.modelSelection.model === input.rejectedModel ||
-                (input.refuseStarts !== undefined &&
-                  (yield* Ref.getAndUpdate(input.refuseStarts, (left) => Math.max(0, left - 1))) >
-                    0)
+                input.refuseStarts !== undefined &&
+                (yield* Ref.getAndUpdate(input.refuseStarts, (left) => Math.max(0, left - 1))) > 0
               )
                 return yield* new ProviderAdapter.ProviderAdapterTurnStartError({
                   driver: input.driver,
@@ -1108,6 +1104,7 @@ describe("orchestration v2 provider switching", () => {
       selectCommand: "thread.model-selection.set",
       outcome: "completed",
       error: null,
+      failureCode: null,
     },
     {
       name: "aix Codex to Claude",
@@ -1123,6 +1120,7 @@ describe("orchestration v2 provider switching", () => {
       selectCommand: "thread.model-selection.set",
       outcome: "completed",
       error: null,
+      failureCode: null,
     },
     {
       name: "aix Claude to OpenCode",
@@ -1141,25 +1139,27 @@ describe("orchestration v2 provider switching", () => {
       selectCommand: "provider.switch",
       outcome: "completed",
       error: null,
+      failureCode: null,
     },
     {
-      name: "aix Codex profile refuses to start an unavailable model",
+      // Codex accepts turn/start for an unknown model, then fails the turn with its own error.
+      name: "aix Codex profile fails the turn for an unavailable model",
       source: {
-        instanceId: ProviderInstanceId.make("aix-codex-work-reject"),
+        instanceId: ProviderInstanceId.make("aix-codex-work-terminal"),
         model: "gpt-6-codex",
       },
       sourceDriver: CODEX_DRIVER,
       sourceCapabilities: CodexProviderCapabilitiesV2,
       target: {
-        instanceId: ProviderInstanceId.make("aix-codex-personal-reject"),
+        instanceId: ProviderInstanceId.make("aix-codex-personal-terminal"),
         model: "removed-model",
       },
       targetDriver: CODEX_DRIVER,
       targetCapabilities: CodexProviderCapabilitiesV2,
       selectCommand: "thread.model-selection.set",
-      outcome: "start-rejected",
-      error:
-        "The provider could not start this turn. Retry the turn; if it keeps failing, check the provider setup and server logs.",
+      outcome: "turn-failed",
+      error: "The 'removed-model' model is not supported when using Codex with a ChatGPT account.",
+      failureCode: null,
     },
     {
       name: "aix OpenCode profile fails the turn for an unavailable model",
@@ -1179,6 +1179,7 @@ describe("orchestration v2 provider switching", () => {
       outcome: "turn-failed",
       error:
         'The selected model "openai/removed-model" is not available. Please select a different model and try again.',
+      failureCode: "-32000",
     },
   ] as const)("switches profiles and handles model selection for $name", (scenario) =>
     Effect.gen(function* () {
@@ -1275,12 +1276,10 @@ describe("orchestration v2 provider switching", () => {
         );
         assert.deepEqual(
           turns.map((turn) => [turn.driver, turn.modelSelection]),
-          scenario.outcome === "start-rejected"
-            ? [[scenario.sourceDriver, source]]
-            : [
-                [scenario.sourceDriver, source],
-                [scenario.targetDriver, target],
-              ],
+          [
+            [scenario.sourceDriver, source],
+            [scenario.targetDriver, target],
+          ],
         );
         assert.deepEqual(
           projection.turnItems.flatMap((item) =>
@@ -1288,11 +1287,9 @@ describe("orchestration v2 provider switching", () => {
           ),
           scenario.error === null ? [] : [[projection.runs[1]?.id ?? null, scenario.error]],
         );
-        if (scenario.outcome !== "start-rejected") {
-          assert.lengthOf(projection.contextHandoffs, 1);
-          assert.include(turns[1]?.text ?? "", "Keep this constraint: retain the existing API");
-          assert.equal(projection.contextHandoffs[0]?.targetRunId, projection.runs[1]?.id);
-        }
+        assert.lengthOf(projection.contextHandoffs, 1);
+        assert.include(turns[1]?.text ?? "", "Keep this constraint: retain the existing API");
+        assert.equal(projection.contextHandoffs[0]?.targetRunId, projection.runs[1]?.id);
         assert.deepEqual(projection.thread.modelSelection, target);
         assert.deepEqual(
           projection.messages.flatMap((message) => (message.role === "user" ? [message.text] : [])),
@@ -1335,22 +1332,12 @@ describe("orchestration v2 provider switching", () => {
                 modelSelection: target,
                 responseByRunOrdinal: { 2: "Continuing with the constraint" },
                 capturedTurns,
-                ...(scenario.outcome === "start-rejected"
-                  ? {
-                      rejectedModel: target.model,
-                      refusalCause: new CodexAppServerRequestError({
-                        code: -32600,
-                        errorMessage: `model "${target.model}" is not available for this account`,
-                        method: "turn/start",
-                      }),
-                    }
-                  : {}),
                 ...(scenario.outcome === "turn-failed"
                   ? {
                       failedRunOrdinals: new Set([2]),
                       failure: makeProviderFailure({
                         message: scenario.error,
-                        code: "-32000",
+                        code: scenario.failureCode,
                         class: "provider_error",
                         retryable: false,
                       }),
