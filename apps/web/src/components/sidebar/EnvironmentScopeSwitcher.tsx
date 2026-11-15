@@ -36,8 +36,12 @@ export function EnvironmentScopeSwitcher() {
           }
         }}
       >
-        <Toggle value="work">Work</Toggle>
-        <Toggle value="personal">Personal</Toggle>
+        <Toggle className="flex-1" value="personal">
+          Personal
+        </Toggle>
+        <Toggle className="flex-1" value="work">
+          Work
+        </Toggle>
       </ToggleGroup>
       <DropdownMenu>
         <DropdownMenuTrigger

@@ -40,6 +40,8 @@ describe("EnvironmentScopeSwitcher", () => {
     await using screen = await render(<EnvironmentScopeSwitcher />, { container, router: false });
 
     await userEvent.tab();
+    await expect.element(screen.getByRole("button", { name: "Personal" })).toHaveFocus();
+    await userEvent.keyboard("{ArrowRight}");
     const workButton = screen.getByRole("button", { name: "Work" });
     await expect.element(workButton).toHaveFocus();
     await userEvent.keyboard("{Enter}");
