@@ -208,7 +208,7 @@ describe("aixDesiredInstances", () => {
     });
   });
 
-  it("offers every routed model as a standard provider model chosen by instanceId and model", () => {
+  it("decodes routed models into standard instanceId and slug selections without catalogMetadata", () => {
     const desired = aixDesiredInstances([
       {
         name: "work",
