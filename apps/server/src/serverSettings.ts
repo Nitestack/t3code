@@ -202,7 +202,9 @@ function clearAixSyncDisableMarkerOnEnabledChanges(
 ): ServerSettings {
   let changed = false;
   const providerInstances = { ...next.providerInstances };
-  for (const [instanceId, instance] of Object.entries(next.providerInstances)) {
+  for (const [instanceId, instance] of Object.entries(next.providerInstances) as Array<
+    [ProviderInstanceId, ProviderInstanceConfig]
+  >) {
     const previous = current.providerInstances[instanceId];
     if (previous === undefined || previous.enabled === instance.enabled) continue;
     const config = instance.config;
