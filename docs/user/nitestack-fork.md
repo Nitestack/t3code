@@ -76,8 +76,10 @@ to both an original T3 server and a fork server.
 
 The fork's Android app uses its own package name and link scheme, so it is meant to install next to
 the official app. When a stable fork release is published, its signed APK appears with its SHA-256
-checksum and build metadata; there is no store listing. The stable release workflow also builds a
-Windows x64 installer and the matching Nix package. Windows signing status is recorded in
+checksum and build metadata; there is no store listing. Its `vX.Y.Z` tag points to the fork
+integration merge commit on `main`, whose tree contains fork changes and upstream through the
+matching stable tag. The upstream tag commit is recorded only as the stable base. The release
+workflow also builds a Windows x64 installer and the matching Nix package. Windows signing status is recorded in
 the artifact metadata; current fork builds are expected to be unsigned. Before public publication,
 the Windows installer and APK can be downloaded from the build-only Actions artifact described in
 the [install guide](./install.md#t3-code-fork-windows-and-android). See the
@@ -92,7 +94,7 @@ There is no fork iOS app.
 ## What this fork changes
 
 Compared with upstream T3 Code at
-[`f82162f033`](https://github.com/pingdotgg/t3code/commit/f82162f0336c226ae1f2927f781a0fb660869a51), the upstream commit last merged into the fork:
+[`f82162f033`](https://github.com/pingdotgg/t3code/commit/f82162f0336c226ae1f2927f781a0fb660869a51):
 
 - aix API-key profiles as provider instances for Codex, Claude Code, and a T3-managed OpenCode,
   enabled with `T3CODE_AIX=1`.
@@ -136,11 +138,17 @@ did not configure or test an aix profile.
 The fork follows stable upstream releases only. A daily workflow ignores drafts and prereleases and
 opens a sync pull request when a newer stable T3 release appears. It merges only after all four
 fork CI jobs pass for the exact pull request head under protected `main`; conflicts and stale or
-incomplete checks leave it unmerged. After merge, the existing release workflow builds the Windows
-installer, signed APK, and same-version Nix package. It defaults to an Actions artifact without a
-tag or GitHub release. Public publication requires explicit authorization and keeps the upstream
+incomplete checks leave it unmerged. After merge, all four Fork CI jobs must pass on the exact main
+integration commit before the existing release workflow builds the Windows installer, signed APK,
+and same-version Nix package. The tag and build source are that fork commit; the upstream tag's
+peeled commit is recorded as the stable base. The workflow defaults to an Actions artifact without
+a tag or GitHub release. Public publication requires explicit authorization and keeps the upstream
 version, tag, and release title. See the [fork release runbook](../operations/fork-release.md) for
 details.
+
+Fork `main` takes only published upstream stable tags; never merge upstream `main`. A tag is synced
+only when it contains every upstream commit already present in fork `main`, so the first release is
+possible at the first stable tag that contains all commits already merged there.
 
 To update a clean source checkout to the fork's current `main`:
 

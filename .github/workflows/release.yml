@@ -50,13 +50,10 @@ on:
 # Serialize nightlies (scheduled and manual) so overlapping runs cannot build
 # the same commit twice or publish out of order. Stable tag releases get their
 # own group so a nightly never blocks them. Running publishers are never
-# canceled, and queue: max keeps every pending run instead of the default
-# newest-wins single slot, so a queued stable tag can never be silently
-# dropped. Automatic nightlies recheck the release gap after leaving the queue.
+# canceled. Automatic nightlies recheck the release gap after leaving the queue.
 concurrency:
   group: release-${{ (github.event_name == 'schedule' || inputs.channel == 'nightly' || inputs.channel == 'preview') && 'nightly' || 'stable' }}
   cancel-in-progress: false
-  queue: max
 
 permissions:
   # The Windows desktop jobs read this run's artifact list to wait for the
@@ -85,6 +82,7 @@ jobs:
       already_published: ${{ steps.resolve.outputs.already_published }}
       artifact_name: ${{ steps.resolve.outputs.artifact_name }}
       upstream_base: ${{ steps.resolve.outputs.upstream_base }}
+      upstream_tag: ${{ steps.resolve.outputs.upstream_tag }}
       source_branch: ${{ steps.resolve.outputs.source_branch }}
       publication_mode: ${{ steps.resolve.outputs.publication_mode }}
     steps:
@@ -168,7 +166,13 @@ jobs:
           fi
 
           manifest_version="$(SOURCE_SHA="$source_sha" node -e 'const cp = require("node:child_process"); process.stdout.write(JSON.parse(cp.execFileSync("git", ["show", process.env.SOURCE_SHA + ":apps/server/package.json"], { encoding: "utf8" })).version)')"
-          upstream_base="$(SOURCE_SHA="$source_sha" SOURCE_BRANCH="$source_branch" UPSTREAM_BASE_INPUT="$UPSTREAM_BASE_INPUT" node - <<'NODE'
+          upstream_tag="v${manifest_version}"
+          upstream_url="https://github.com/pingdotgg/t3code.git"
+          git fetch --no-tags "$upstream_url" \
+            "+refs/tags/$upstream_tag:refs/tags/fork-upstream/$upstream_tag" \
+            "+refs/heads/main:refs/remotes/fork-upstream/main"
+          peeled_tag_commit="$(git rev-parse --verify "refs/tags/fork-upstream/$upstream_tag^{commit}")"
+          upstream_base="$(SOURCE_SHA="$source_sha" SOURCE_BRANCH="$source_branch" UPSTREAM_BASE_INPUT="$UPSTREAM_BASE_INPUT" MANIFEST_VERSION="$manifest_version" PEELED_TAG_COMMIT="$peeled_tag_commit" node - <<'NODE'
           const cp = require("node:child_process");
           const { resolveForkUpstreamBase } = require("./.github/scripts/fork-release.cjs");
           const markerPath = ".github/upstream-stable.json";
@@ -180,9 +184,50 @@ jobs:
             markerContents,
             explicitBase: process.env.UPSTREAM_BASE_INPUT,
             sourceBranch: process.env.SOURCE_BRANCH,
+            expectedVersion: process.env.MANIFEST_VERSION,
+            peeledTagCommit: process.env.PEELED_TAG_COMMIT,
           }));
           NODE
           )"
+          if git merge-base --is-ancestor "$upstream_base" "$source_sha"; then
+            upstream_base_is_ancestor=true
+          else
+            upstream_base_is_ancestor=false
+          fi
+          if [[ "$upstream_base_is_ancestor" != true ]]; then
+            echo "::error::Upstream stable base $upstream_base is not an ancestor of fork source $source_sha."
+            exit 1
+          fi
+
+          git rev-list "$upstream_base..$source_sha" > "$RUNNER_TEMP/fork-source-history.txt"
+          git rev-list refs/remotes/fork-upstream/main > "$RUNNER_TEMP/upstream-main-history.txt"
+          history_json="$(SOURCE_SHA="$source_sha" UPSTREAM_TAG="$upstream_tag" node - "$RUNNER_TEMP/fork-source-history.txt" "$RUNNER_TEMP/upstream-main-history.txt" <<'NODE'
+          const fs = require("node:fs");
+          const { analyzeForkUpstreamHistory } = require("./.github/scripts/fork-release.cjs");
+          const commits = (file) => fs.readFileSync(file, "utf8").split(/\r?\n/).filter(Boolean);
+          const result = analyzeForkUpstreamHistory({
+            sourceRangeCommits: commits(process.argv[2]),
+            upstreamMainCommits: commits(process.argv[3]),
+          });
+          const lines = ["### Upstream stable source history", ""];
+          if (result.commits.length === 0) {
+            lines.push(`No upstream-main commits beyond ${process.env.UPSTREAM_TAG} are present in this fork source.`);
+          } else {
+            const shortShas = result.commits.slice(0, 5).map((commit) => commit.slice(0, 12));
+            lines.push(`Blocked: ${result.commits.length} upstream-main commit(s) beyond ${process.env.UPSTREAM_TAG} are present in fork source ${process.env.SOURCE_SHA}. Main accepts stable upstream tags only.`);
+            lines.push(`First offending commits: ${shortShas.join(", ")}${result.commits.length > shortShas.length ? ", …" : ""}`);
+            lines.push("");
+          }
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${lines.join("\n")}\n\n`);
+          process.stdout.write(JSON.stringify(result));
+          NODE
+          )"
+          if [[ "$(HISTORY_JSON="$history_json" node -e 'process.stdout.write(JSON.parse(process.env.HISTORY_JSON).blocked ? "true" : "false")')" == true ]]; then
+            short_shas="$(HISTORY_JSON="$history_json" node -e 'const commits = JSON.parse(process.env.HISTORY_JSON).commits; process.stdout.write(commits.slice(0, 5).map((commit) => commit.slice(0, 12)).join(", "))')"
+            count="$(HISTORY_JSON="$history_json" node -e 'process.stdout.write(String(JSON.parse(process.env.HISTORY_JSON).commits.length))')"
+            echo "::error::Fork source contains $count upstream-main commit(s) beyond $upstream_tag: $short_shas. Main accepts stable upstream tags only."
+            exit 1
+          fi
           tag="v${tag_version:-$manifest_version}"
           remote_refs="$(git ls-remote origin "refs/tags/$tag" "refs/tags/$tag^{}")"
           existing_tag_sha="$(printf '%s\n' "$remote_refs" | awk '$2 ~ /\^\{\}$/ { print $1; exit }')"
@@ -206,7 +251,7 @@ jobs:
             existing_release_path="$RUNNER_TEMP/existing-fork-release.json"
             existing_assets_dir="$RUNNER_TEMP/existing-fork-release-assets"
             printf '%s' "$existing_release" > "$existing_release_path"
-            SOURCE_SHA="$source_sha" UPSTREAM_BASE="$upstream_base" MANIFEST_VERSION="$manifest_version" node - \
+            SOURCE_SHA="$source_sha" UPSTREAM_BASE="$upstream_base" UPSTREAM_TAG="$upstream_tag" MANIFEST_VERSION="$manifest_version" node - \
               "$existing_release_path" <<'NODE'
           const fs = require("node:fs");
           const { assertExistingForkReleaseMetadata } = require("./.github/scripts/fork-release.cjs");
@@ -215,11 +260,12 @@ jobs:
             version: process.env.MANIFEST_VERSION,
             sha: process.env.SOURCE_SHA,
             upstreamBase: process.env.UPSTREAM_BASE,
+            upstreamTag: process.env.UPSTREAM_TAG,
               sourceBranch: process.env.SOURCE_BRANCH || "main",
           });
           NODE
             gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir "$existing_assets_dir"
-            SOURCE_SHA="$source_sha" UPSTREAM_BASE="$upstream_base" MANIFEST_VERSION="$manifest_version" node - \
+            SOURCE_SHA="$source_sha" UPSTREAM_BASE="$upstream_base" UPSTREAM_TAG="$upstream_tag" MANIFEST_VERSION="$manifest_version" node - \
               "$existing_release_path" "$existing_assets_dir" <<'NODE'
           const fs = require("node:fs");
           const { verifyExistingForkReleaseAssets } = require("./.github/scripts/fork-release.cjs");
@@ -229,18 +275,21 @@ jobs:
             version: process.env.MANIFEST_VERSION,
             sha: process.env.SOURCE_SHA,
             upstreamBase: process.env.UPSTREAM_BASE,
+            upstreamTag: process.env.UPSTREAM_TAG,
               sourceBranch: process.env.SOURCE_BRANCH || "main",
           }).catch((error) => { console.error(error.message); process.exitCode = 1; });
           NODE
             existing_assets_verified=true
           fi
 
-          source_branch="${SOURCE_BRANCH:-main}"
           export SOURCE_SHA="$source_sha" SOURCE_ON_MAIN="$source_on_main" SOURCE_BRANCH="$source_branch"
           export EXISTING_TAG_SHA="$existing_tag_sha" RELEASE_EXISTS="$release_exists"
           export EXISTING_RELEASE="$existing_release"
           export EXISTING_ASSETS_VERIFIED="$existing_assets_verified"
           export UPSTREAM_BASE="$upstream_base"
+          export UPSTREAM_TAG="$upstream_tag"
+          export UPSTREAM_BASE_IS_ANCESTOR="$upstream_base_is_ancestor"
+          export UPSTREAM_HISTORY_JSON="$history_json"
           export PUBLICATION_MODE="$publication_mode"
           node - "$manifest_versions" <<'NODE' >> "$GITHUB_OUTPUT"
           const { resolveForkRelease } = require("./.github/scripts/fork-release.cjs");
@@ -254,6 +303,9 @@ jobs:
             sha: process.env.SOURCE_SHA,
             sourceBranch: process.env.SOURCE_BRANCH,
             upstreamBase: process.env.UPSTREAM_BASE,
+            upstreamTag: process.env.UPSTREAM_TAG,
+            upstreamBaseIsAncestor: process.env.UPSTREAM_BASE_IS_ANCESTOR === "true",
+            unreleasedUpstreamCommits: JSON.parse(process.env.UPSTREAM_HISTORY_JSON).commits,
             sourceOnMain: process.env.SOURCE_ON_MAIN === "true",
             existingTagSha: process.env.EXISTING_TAG_SHA,
             releaseExists: process.env.RELEASE_EXISTS === "true",
@@ -267,8 +319,9 @@ jobs:
             release_name: result.releaseName,
             runner: result.runner,
             already_published: result.alreadyPublished ? "true" : "false",
-            artifact_name: `t3-code-nitestack-installers-${result.version}-${result.sha.slice(0, 12)}-attempt-${process.env.RUN_ATTEMPT}`,
+            artifact_name: `t3-code-nitestack-installers-${result.version}-${result.sha.slice(0, 12)}`,
             upstream_base: process.env.UPSTREAM_BASE,
+            upstream_tag: process.env.UPSTREAM_TAG,
             source_branch: process.env.SOURCE_BRANCH,
             publication_mode: process.env.PUBLICATION_MODE,
           })) {
@@ -337,12 +390,13 @@ jobs:
       - name: Upload desktop bundle
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: js-bundle-attempt-${{ github.run_attempt }}
+          name: js-bundle
           path: |
             apps/server/dist
             apps/desktop/dist-electron
           if-no-files-found: error
           retention-days: 1
+          overwrite: true
 
   fork_desktop_linux:
     name: Build Linux CLI runtime for Windows
@@ -470,13 +524,13 @@ jobs:
       - name: Download signed Android build
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: t3-code-nitestack-android-${{ github.run_id }}-${{ github.run_attempt }}
+          name: t3-code-nitestack-android-${{ github.run_id }}
           path: incoming/android
 
       - name: Download Windows installer build
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: desktop-win-x64-attempt-${{ github.run_attempt }}
+          name: desktop-win-x64
           path: incoming/windows
 
       - name: Verify both installers and prepare a build-only artifact
@@ -484,9 +538,13 @@ jobs:
           EXPECTED_VERSION: ${{ needs.fork_preflight.outputs.version }}
           EXPECTED_SHA: ${{ needs.fork_preflight.outputs.sha }}
           UPSTREAM_BASE: ${{ needs.fork_preflight.outputs.upstream_base }}
+          UPSTREAM_TAG: ${{ needs.fork_preflight.outputs.upstream_tag }}
           SOURCE_BRANCH: ${{ needs.fork_preflight.outputs.source_branch }}
           ARTIFACT_NAME: ${{ needs.fork_preflight.outputs.artifact_name }}
           NIX_STORE_PATH: ${{ needs.fork_nix.outputs.store_path }}
+          BUILD_RUN_ID: ${{ github.run_id }}
+          BUILD_RUN_ATTEMPT: ${{ github.run_attempt }}
+          PUBLICATION_MODE: ${{ needs.fork_preflight.outputs.publication_mode }}
         shell: bash
         run: |
           set -euo pipefail
@@ -528,8 +586,25 @@ jobs:
           cp "$android_meta" release-assets/metadata.json
           cp "$windows_meta" release-assets/windows-metadata.json
 
+          EXPECTED_SHA="$EXPECTED_SHA" UPSTREAM_BASE="$UPSTREAM_BASE" UPSTREAM_TAG="$UPSTREAM_TAG" BUILD_RUN_ID="$BUILD_RUN_ID" BUILD_RUN_ATTEMPT="$BUILD_RUN_ATTEMPT" node - <<'NODE'
+          const fs = require("node:fs");
+          const { buildForkArtifactSourceMetadata } = require("./.github/scripts/fork-release.cjs");
+          const metadata = buildForkArtifactSourceMetadata({
+            sha: process.env.EXPECTED_SHA,
+            upstreamTag: process.env.UPSTREAM_TAG,
+            upstreamBase: process.env.UPSTREAM_BASE,
+            buildRunId: process.env.BUILD_RUN_ID,
+            buildRunAttempt: process.env.BUILD_RUN_ATTEMPT,
+          });
+          for (const file of ["metadata.json", "windows-metadata.json"]) {
+            const current = JSON.parse(fs.readFileSync(`release-assets/${file}`, "utf8"));
+            fs.writeFileSync(`release-assets/${file}`, `${JSON.stringify({ ...current, ...metadata }, null, 2)}\n`);
+          }
+          NODE
+
           node - "$NIX_STORE_PATH" <<'NODE'
           const fs = require("node:fs");
+          const { buildForkArtifactSourceMetadata } = require("./.github/scripts/fork-release.cjs");
           const [storePath] = process.argv.slice(2);
           if (!/^\/nix\/store\/[a-z0-9]{32}-t3code-fork-\d+\.\d+\.\d+$/.test(storePath)) {
             throw new Error("Nix build output is not a verified versioned package path.");
@@ -539,6 +614,13 @@ jobs:
             version: process.env.EXPECTED_VERSION,
             gitSha: process.env.EXPECTED_SHA,
             storePath,
+            ...buildForkArtifactSourceMetadata({
+              sha: process.env.EXPECTED_SHA,
+              upstreamTag: process.env.UPSTREAM_TAG,
+              upstreamBase: process.env.UPSTREAM_BASE,
+              buildRunId: process.env.BUILD_RUN_ID,
+              buildRunAttempt: process.env.BUILD_RUN_ATTEMPT,
+            }),
           }, null, 2)}\n`);
           NODE
 
@@ -551,37 +633,32 @@ jobs:
           fs.writeFileSync("release-assets/windows-metadata.json", `${JSON.stringify(meta, null, 2)}\n`);
           NODE
 
-          cat > release-assets/BUILD-INFO.md <<EOF
-          T3 Code Nitestack build-only artifacts
+          EXPECTED_VERSION="$EXPECTED_VERSION" EXPECTED_SHA="$EXPECTED_SHA" UPSTREAM_BASE="$UPSTREAM_BASE" UPSTREAM_TAG="$UPSTREAM_TAG" SOURCE_BRANCH="$SOURCE_BRANCH" BUILD_RUN_ID="$BUILD_RUN_ID" BUILD_RUN_ATTEMPT="$BUILD_RUN_ATTEMPT" node - <<'NODE'
+          const fs = require("node:fs");
+          const { buildForkBuildInfo } = require("./.github/scripts/fork-release.cjs");
+          fs.writeFileSync("release-assets/BUILD-INFO.md", buildForkBuildInfo({
+            version: process.env.EXPECTED_VERSION,
+            sha: process.env.EXPECTED_SHA,
+            upstreamTag: process.env.UPSTREAM_TAG,
+            upstreamBase: process.env.UPSTREAM_BASE,
+            sourceBranch: process.env.SOURCE_BRANCH,
+            buildRunId: process.env.BUILD_RUN_ID,
+            buildRunAttempt: process.env.BUILD_RUN_ATTEMPT,
+            publicationMode: process.env.PUBLICATION_MODE,
+          }));
+          NODE
 
-          Version: ${EXPECTED_VERSION}
-          Fork commit: ${EXPECTED_SHA}
-          Upstream base: ${UPSTREAM_BASE}
-          Source branch: ${SOURCE_BRANCH}
-          Build-only Actions run: ${GITHUB_RUN_ID}
-
-          The Windows x64 installer was built and its packaged native runtime was verified on the standard Windows 2025 runner. Windows signing status is recorded in windows-metadata.json.
-          The Android APK was signed with the Nitestack upload certificate and verified by the Android build job.
-          The matching `t3code-fork-${EXPECTED_VERSION}` Nix package was built successfully; its exact source and store path are in nix-build.json.
-
-          No Git tag or GitHub release was created by this build-only run.
-          Build the matching Nix package from this source with:
-
-          ```sh
-          nix build 'github:Nitestack/t3code/${EXPECTED_SHA}#t3code-fork'
-          ```
-
-          After an authorized release publishes its matching tag, install it with:
-
-          ```sh
-          nix profile add 'github:Nitestack/t3code/v${EXPECTED_VERSION}#t3code-fork'
-          ```
-          EOF
-
-          printf 'Build-only artifact: %s\n' "$ARTIFACT_NAME" >> "$GITHUB_STEP_SUMMARY"
-          printf 'Fork source: `%s`\n' "$EXPECTED_SHA" >> "$GITHUB_STEP_SUMMARY"
-          printf 'Upstream base: `%s`\n' "$UPSTREAM_BASE" >> "$GITHUB_STEP_SUMMARY"
-          printf 'No tag or release was created.\n' >> "$GITHUB_STEP_SUMMARY"
+          {
+            printf 'Build-only artifact: %s\n' "$ARTIFACT_NAME"
+            printf 'Fork commit (built source): %s\n' "$EXPECTED_SHA"
+            printf 'Upstream stable base: %s = %s\n' "$UPSTREAM_TAG" "$UPSTREAM_BASE"
+            printf 'These artifacts are built from the fork commit and include fork changes plus upstream through %s.\n' "$UPSTREAM_TAG"
+            if [[ "$PUBLICATION_MODE" == "build-only" ]]; then
+              printf 'No tag or release was created.\n'
+            else
+              printf 'Authorized publication proceeds only after final artifact verification.\n'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload Windows and Android installers
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -590,6 +667,7 @@ jobs:
           path: release-assets/*
           if-no-files-found: error
           retention-days: 30
+          overwrite: true
 
   fork_verify_tested_artifact:
     name: Verify tested build-only artifact
@@ -608,6 +686,7 @@ jobs:
       contents: read
     outputs:
       artifact_name: ${{ steps.verify.outputs.artifact_name }}
+      build_run_attempt: ${{ steps.verify.outputs.build_run_attempt }}
     steps:
       - name: Check out the trusted release verifier
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
@@ -659,8 +738,9 @@ jobs:
             sha: process.env.EXPECTED_SHA,
           });
           process.stdout.write(`Verified ${result.artifactName} from build-only run ${result.runId}.\n`);
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `build_run_attempt=${result.runAttempt}\n`);
           NODE
-          artifact_name="t3-code-nitestack-installers-${EXPECTED_VERSION}-${EXPECTED_SHA:0:12}-attempt-${attempt}"
+          artifact_name="t3-code-nitestack-installers-${EXPECTED_VERSION}-${EXPECTED_SHA:0:12}"
           printf 'artifact_name=%s\n' "$artifact_name" >> "$GITHUB_OUTPUT"
           printf 'The exact tested build-only artifact from run %s is ready for promotion.\n' "$ARTIFACT_RUN_ID" >> "$GITHUB_STEP_SUMMARY"
 
@@ -722,12 +802,14 @@ jobs:
           RELEASE_SHA: ${{ needs.fork_preflight.outputs.sha }}
           RELEASE_VERSION: ${{ needs.fork_preflight.outputs.version }}
           UPSTREAM_BASE: ${{ needs.fork_preflight.outputs.upstream_base }}
+          UPSTREAM_TAG: ${{ needs.fork_preflight.outputs.upstream_tag }}
           SOURCE_BRANCH: ${{ needs.fork_preflight.outputs.source_branch }}
           BUILD_ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id || github.run_id }}
+          BUILD_ARTIFACT_RUN_ATTEMPT: ${{ inputs.artifact_run_id != '' && needs.fork_verify_tested_artifact.outputs.build_run_attempt || github.run_attempt }}
         run: |
           set -euo pipefail
           cd release-assets
-          RELEASE_VERSION="$RELEASE_VERSION" RELEASE_SHA="$RELEASE_SHA" UPSTREAM_BASE="$UPSTREAM_BASE" SOURCE_BRANCH="$SOURCE_BRANCH" BUILD_ARTIFACT_RUN_ID="$BUILD_ARTIFACT_RUN_ID" \
+          RELEASE_VERSION="$RELEASE_VERSION" RELEASE_SHA="$RELEASE_SHA" UPSTREAM_BASE="$UPSTREAM_BASE" UPSTREAM_TAG="$UPSTREAM_TAG" SOURCE_BRANCH="$SOURCE_BRANCH" BUILD_ARTIFACT_RUN_ID="$BUILD_ARTIFACT_RUN_ID" BUILD_ARTIFACT_RUN_ATTEMPT="$BUILD_ARTIFACT_RUN_ATTEMPT" \
             node - <<'NODE'
           const { verifyForkBuildArtifactAssets } = require("../.github/scripts/fork-release.cjs");
           verifyForkBuildArtifactAssets({
@@ -735,8 +817,10 @@ jobs:
             version: process.env.RELEASE_VERSION,
             sha: process.env.RELEASE_SHA,
             upstreamBase: process.env.UPSTREAM_BASE,
+            upstreamTag: process.env.UPSTREAM_TAG,
             sourceBranch: process.env.SOURCE_BRANCH,
             buildRunId: process.env.BUILD_ARTIFACT_RUN_ID,
+            buildRunAttempt: process.env.BUILD_ARTIFACT_RUN_ATTEMPT,
           }).then(() => {
             process.stdout.write("Verified exact Windows, Android, and Nix build artifacts.\n");
           }).catch((error) => {
@@ -760,13 +844,15 @@ jobs:
             echo "::error::Could not confirm that release $RELEASE_TAG is absent." >&2
             exit 1
           fi
-          node - <<'NODE' > ../release-notes.md
+          UPSTREAM_BASE="$UPSTREAM_BASE" UPSTREAM_TAG="$UPSTREAM_TAG" RELEASE_SHA="$RELEASE_SHA" SOURCE_BRANCH="$SOURCE_BRANCH" BUILD_ARTIFACT_RUN_ID="$BUILD_ARTIFACT_RUN_ID" BUILD_ARTIFACT_RUN_ATTEMPT="$BUILD_ARTIFACT_RUN_ATTEMPT" RELEASE_TAG="$RELEASE_TAG" node - <<'NODE' > ../release-notes.md
           const { buildForkReleaseNotes } = require("../.github/scripts/fork-release.cjs");
           process.stdout.write(buildForkReleaseNotes({
             upstreamBase: process.env.UPSTREAM_BASE,
+            upstreamTag: process.env.UPSTREAM_TAG,
             sha: process.env.RELEASE_SHA,
             sourceBranch: process.env.SOURCE_BRANCH,
             buildArtifactRunId: process.env.BUILD_ARTIFACT_RUN_ID,
+            buildArtifactRunAttempt: process.env.BUILD_ARTIFACT_RUN_ATTEMPT,
             releaseTag: process.env.RELEASE_TAG,
           }));
           NODE
@@ -971,8 +1057,9 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: release-dependency-verification-attempt-${{ github.run_attempt }}
+          name: release-dependency-verification
           path: ${{ runner.temp }}/pnpm-metadata/lockfile-verified.jsonl
+          overwrite: true
 
   quality:
     name: Release quality checks
@@ -1208,10 +1295,11 @@ jobs:
       - name: Upload relay client tracing config
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: relay-client-tracing-config-attempt-${{ github.run_attempt }}
+          name: relay-client-tracing-config
           path: ${{ runner.temp }}/relay-client-tracing.env
           if-no-files-found: error
           retention-days: 1
+          overwrite: true
 
       - id: public_config
         name: Resolve production relay public config
@@ -1290,7 +1378,7 @@ jobs:
         continue-on-error: true
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: release-dependency-verification-attempt-${{ github.run_attempt }}
+          name: release-dependency-verification
           path: ${{ runner.temp }}/pnpm-metadata
 
       - name: Setup dependencies
@@ -1303,7 +1391,7 @@ jobs:
       - name: Download relay client tracing config
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: relay-client-tracing-config-attempt-${{ github.run_attempt }}
+          name: relay-client-tracing-config
           path: ${{ runner.temp }}/relay-client-tracing
 
       - name: Load relay client tracing config
@@ -1349,12 +1437,13 @@ jobs:
       - name: Upload JS bundle
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: js-bundle-attempt-${{ github.run_attempt }}
+          name: js-bundle
           path: |
             apps/server/dist
             apps/desktop/dist-electron
           if-no-files-found: error
           retention-days: 1
+          overwrite: true
 
       # publish_cli publishes this exact tarball, so the trusted publisher
       # needs no workspace checkout or install. It is version-matched here.
@@ -1367,10 +1456,11 @@ jobs:
         id: npm_launcher
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: npm-launcher-attempt-${{ github.run_attempt }}
+          name: npm-launcher
           path: npm-packages/t3.tgz
           if-no-files-found: error
           retention-days: 30
+          overwrite: true
 
   # One job per platform and architecture (see release-desktop.yml), each
   # gated only on the JS bundle. Windows targets build on Linux and run their
@@ -1597,14 +1687,14 @@ jobs:
       - name: Download all desktop artifacts
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          pattern: desktop-*-attempt-${{ github.run_attempt }}
+          pattern: desktop-*
           merge-multiple: true
           path: release-assets
 
       - name: Download all CLI archives
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          pattern: cli-*-attempt-${{ github.run_attempt }}
+          pattern: cli-*
           merge-multiple: true
           path: release-assets
 
@@ -1957,7 +2047,7 @@ jobs:
       - name: Download relay client tracing config
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: relay-client-tracing-config-attempt-${{ github.run_attempt }}
+          name: relay-client-tracing-config
           path: ${{ runner.temp }}/relay-client-tracing
 
       - name: Load relay client tracing config

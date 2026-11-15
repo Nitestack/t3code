@@ -26,7 +26,19 @@ function requiredReleaseAssets(version) {
   ];
 }
 
-function resolveForkUpstreamBase({ markerContents, explicitBase = "", sourceBranch = "main" }) {
+function resolveForkUpstreamBase({
+  markerContents,
+  explicitBase = "",
+  sourceBranch = "main",
+  expectedVersion,
+  peeledTagCommit,
+}) {
+  const expectedTag = `v${expectedVersion}`;
+  if (!STABLE_VERSION.test(expectedVersion ?? "") || !COMMIT_SHA.test(peeledTagCommit ?? "")) {
+    throw new Error(
+      "The upstream stable tag and its peeled commit must be verified before release.",
+    );
+  }
   if (markerContents !== undefined) {
     let marker;
     try {
@@ -38,8 +50,9 @@ function resolveForkUpstreamBase({ markerContents, explicitBase = "", sourceBran
       !marker ||
       typeof marker !== "object" ||
       typeof marker.tag !== "string" ||
-      !STABLE_VERSION.test(marker.tag.replace(/^v/, "")) ||
-      !COMMIT_SHA.test(marker.commit)
+      marker.tag !== expectedTag ||
+      !COMMIT_SHA.test(marker.commit) ||
+      marker.commit.toLowerCase() !== peeledTagCommit.toLowerCase()
     ) {
       throw new Error("Upstream stable marker is invalid; refusing to resolve a release base.");
     }
@@ -49,9 +62,12 @@ function resolveForkUpstreamBase({ markerContents, explicitBase = "", sourceBran
   if (/^automation\/upstream-stable-/.test(sourceBranch)) {
     throw new Error("Upstream stable marker is missing for an automated sync release.");
   }
-  if (!COMMIT_SHA.test(explicitBase)) {
+  if (
+    !COMMIT_SHA.test(explicitBase) ||
+    explicitBase.toLowerCase() !== peeledTagCommit.toLowerCase()
+  ) {
     throw new Error(
-      "A missing upstream stable marker requires the upstream_base input to be a full 40-character commit SHA.",
+      "A missing upstream stable marker requires upstream_base to equal the verified full commit SHA for the matching upstream stable tag.",
     );
   }
   return explicitBase.toLowerCase();
@@ -71,23 +87,104 @@ function buildForkNixBuildSummary({ packageName, sourceSha }) {
   return `Built ${markdownCode(packageName)} from ${markdownCode(sourceSha)}.\n`;
 }
 
+function buildForkArtifactSourceMetadata({
+  sha,
+  upstreamTag,
+  upstreamBase,
+  buildRunId = "",
+  buildRunAttempt = "",
+}) {
+  return {
+    "Fork commit (built source)": sha,
+    "Upstream stable base": { tag: upstreamTag, commit: upstreamBase },
+    sourceDescription: `Artifacts are built from the fork commit and include fork changes plus upstream through ${upstreamTag}.`,
+    "Build Actions run": { id: buildRunId, attempt: buildRunAttempt },
+  };
+}
+
+function buildForkBuildInfo({
+  version,
+  sha,
+  upstreamTag,
+  upstreamBase,
+  sourceBranch,
+  buildRunId,
+  buildRunAttempt,
+  publicationMode = "build-only",
+}) {
+  return [
+    "T3 Code Nitestack build artifacts",
+    "",
+    `Version: ${version}`,
+    `Fork commit (built source): ${markdownCode(sha)}`,
+    `Upstream stable base: ${markdownCode(upstreamTag)} = ${markdownCode(upstreamBase)}`,
+    `Source branch: ${markdownCode(sourceBranch)}`,
+    `Actions build run: ${markdownCode(buildRunId)} (attempt: ${markdownCode(buildRunAttempt)})`,
+    "",
+    `These artifacts are built from the fork commit and include fork changes plus upstream through ${upstreamTag}.`,
+    "",
+    "The Windows x64 installer was built and its packaged native runtime was verified on the standard Windows 2025 runner. Windows signing status is recorded in windows-metadata.json.",
+    "The Android APK was signed with the Nitestack upload certificate and verified by the Android build job.",
+    `The matching ${markdownCode(`t3code-fork-${version}`)} Nix package was built successfully; its exact source and store path are in nix-build.json.`,
+    "",
+    publicationMode === "authorized-auto-publish"
+      ? "This build is part of an explicitly authorized stable release run."
+      : "Build-only mode: this run creates no Git tag or GitHub release, including a draft.",
+    "Build the matching Nix package from this source with:",
+    "",
+    "```sh",
+    `nix build 'github:Nitestack/t3code/${sha}#t3code-fork'`,
+    "```",
+    "",
+    "After an authorized release publishes its matching tag, install it with:",
+    "",
+    "```sh",
+    `nix profile add 'github:Nitestack/t3code/${upstreamTag}#t3code-fork'`,
+    "```",
+    "",
+  ].join("\n");
+}
+
+function analyzeForkUpstreamHistory({ sourceRangeCommits, upstreamMainCommits }) {
+  if (!Array.isArray(sourceRangeCommits) || !Array.isArray(upstreamMainCommits)) {
+    throw new Error("Fork and upstream history must be provided as commit lists.");
+  }
+  if (
+    [...sourceRangeCommits, ...upstreamMainCommits].some(
+      (commit) => typeof commit !== "string" || !COMMIT_SHA.test(commit),
+    )
+  ) {
+    throw new Error("Fork and upstream history contain an invalid commit SHA.");
+  }
+  const upstream = new Set(upstreamMainCommits.map((commit) => commit.toLowerCase()));
+  const commits = [...new Set(sourceRangeCommits.map((commit) => commit.toLowerCase()))]
+    .filter((commit) => upstream.has(commit))
+    .toSorted();
+  return {
+    commits,
+    blocked: commits.length > 0,
+  };
+}
+
 function buildForkReleaseNotes({
   upstreamBase,
   sha,
   sourceBranch,
   buildArtifactRunId,
+  buildArtifactRunAttempt,
+  upstreamTag,
   releaseTag,
 }) {
   return [
-    `Upstream base: ${markdownCode(upstreamBase)}`,
+    `Fork commit (built source): ${markdownCode(sha)}`,
     "",
-    `Fork commit: ${markdownCode(sha)}`,
+    `Upstream stable base: ${markdownCode(upstreamTag)} = ${markdownCode(upstreamBase)}`,
     "",
     `Source branch: ${markdownCode(sourceBranch)}`,
     "",
-    `Tested build artifact run: ${markdownCode(buildArtifactRunId)}`,
+    `Tested build artifact run: ${markdownCode(buildArtifactRunId)} (attempt: ${markdownCode(buildArtifactRunAttempt)})`,
     "",
-    "The Windows installer, signed Android APK, and versioned Nix package were built from this exact fork commit. Checksums and build metadata are attached.",
+    `The Windows installer, signed Android APK, and versioned Nix package are built from the fork commit and include fork changes plus upstream through ${upstreamTag}. Checksums and build metadata are attached.`,
     "",
     "Install the matching Nix build from this release tag:",
     "",
@@ -122,7 +219,7 @@ function validateForkPublicationMode({ publish, artifactRunId = "", autoPublishA
 
 function validateForkBuildOnlyRun({ run, jobs, artifacts, expectedRunId, version, sha }) {
   const runId = Number(expectedRunId);
-  const artifactName = `t3-code-nitestack-installers-${version}-${sha.slice(0, 12)}-attempt-${run?.run_attempt}`;
+  const artifactName = `t3-code-nitestack-installers-${version}-${sha.slice(0, 12)}`;
   if (
     !STABLE_VERSION.test(version) ||
     !COMMIT_SHA.test(sha) ||
@@ -175,7 +272,7 @@ function validateForkBuildOnlyRun({ run, jobs, artifacts, expectedRunId, version
   ) {
     throw new Error("Selected build-only artifact is missing, expired, or incomplete.");
   }
-  return { artifactName, runId };
+  return { artifactName, runId, runAttempt: run.run_attempt };
 }
 
 function assertExistingForkReleaseMetadata({
@@ -183,13 +280,16 @@ function assertExistingForkReleaseMetadata({
   version,
   sha,
   upstreamBase,
+  upstreamTag,
   sourceBranch = "",
 }) {
   const expectedTag = `v${version}`;
   const expectedName = `T3 Code ${expectedTag}`;
   const expectedAssets = requiredReleaseAssets(version).toSorted();
   const actualAssets = release?.assets?.map((asset) => asset.name).toSorted();
-  const buildRunId = /^Tested build artifact run: `([1-9]\d*)`$/m.exec(release?.body ?? "")?.[1];
+  const buildRun = /^Tested build artifact run: `([1-9]\d*)` \(attempt: `([1-9]\d*)`\)$/m.exec(
+    release?.body ?? "",
+  );
   if (
     release?.tag_name !== expectedTag ||
     release.name !== expectedName ||
@@ -197,11 +297,14 @@ function assertExistingForkReleaseMetadata({
     release.prerelease ||
     !COMMIT_SHA.test(upstreamBase) ||
     typeof release.body !== "string" ||
-    !release.body.includes(`Upstream base: ${markdownCode(upstreamBase)}`) ||
-    !release.body.includes(`Fork commit: ${markdownCode(sha)}`) ||
+    !release.body.includes(
+      `Upstream stable base: ${markdownCode(upstreamTag)} = ${markdownCode(upstreamBase)}`,
+    ) ||
+    !release.body.includes(`Fork commit (built source): ${markdownCode(sha)}`) ||
+    !release.body.includes(`include fork changes plus upstream through ${upstreamTag}`) ||
     (sourceBranch !== "" &&
       !release.body.includes(`Source branch: ${markdownCode(sourceBranch)}`)) ||
-    buildRunId === undefined ||
+    buildRun === null ||
     !Array.isArray(actualAssets) ||
     actualAssets.length !== expectedAssets.length ||
     actualAssets.some((name, index) => name !== expectedAssets[index])
@@ -232,11 +335,25 @@ async function verifyForkBuildArtifactAssets({
   version,
   sha,
   upstreamBase,
+  upstreamTag,
   sourceBranch = "",
   buildRunId = "",
+  buildRunAttempt = "",
 }) {
+  if (upstreamTag !== `v${version}` || !COMMIT_SHA.test(sha) || !COMMIT_SHA.test(upstreamBase)) {
+    throw new Error(
+      "Build artifact source identity has an invalid version or upstream stable base.",
+    );
+  }
   const actualAssets = fs.readdirSync(directory).toSorted();
   const expectedAssets = requiredReleaseAssets(version).toSorted();
+  const sourceMetadata = buildForkArtifactSourceMetadata({
+    sha,
+    upstreamTag,
+    upstreamBase,
+    buildRunId,
+    buildRunAttempt,
+  });
   if (
     actualAssets.length !== expectedAssets.length ||
     actualAssets.some((name, index) => name !== expectedAssets[index])
@@ -285,6 +402,11 @@ async function verifyForkBuildArtifactAssets({
     nixMetadata.package !== "t3code-fork" ||
     nixMetadata.version !== version ||
     nixMetadata.gitSha?.toLowerCase() !== sha.toLowerCase() ||
+    [androidMetadata, windowsMetadata, nixMetadata].some((metadata) =>
+      Object.entries(sourceMetadata).some(
+        ([key, value]) => JSON.stringify(metadata[key]) !== JSON.stringify(value),
+      ),
+    ) ||
     !/^[a-z0-9]{32}$/.test(nixStoreHash) ||
     nixStoreName.slice(33) !== `t3code-fork-${version}`
   ) {
@@ -296,10 +418,14 @@ async function verifyForkBuildArtifactAssets({
   const buildInfo = fs.readFileSync(path.join(directory, "BUILD-INFO.md"), "utf8");
   if (
     !buildInfo.includes(`Version: ${version}`) ||
-    !buildInfo.includes(`Fork commit: ${sha}`) ||
-    !buildInfo.includes(`Upstream base: ${upstreamBase}`) ||
-    (sourceBranch !== "" && !buildInfo.includes(`Source branch: ${sourceBranch}`)) ||
-    (buildRunId !== "" && !buildInfo.includes(`Build-only Actions run: ${buildRunId}`)) ||
+    !buildInfo.includes(`Fork commit (built source): ${markdownCode(sha)}`) ||
+    !buildInfo.includes(
+      `Upstream stable base: ${markdownCode(upstreamTag)} = ${markdownCode(upstreamBase)}`,
+    ) ||
+    !buildInfo.includes(`include fork changes plus upstream through ${upstreamTag}`) ||
+    (sourceBranch !== "" && !buildInfo.includes(`Source branch: ${markdownCode(sourceBranch)}`)) ||
+    (buildRunId !== "" && !buildInfo.includes(`Actions build run: ${markdownCode(buildRunId)}`)) ||
+    (buildRunAttempt !== "" && !buildInfo.includes(`attempt: ${markdownCode(buildRunAttempt)}`)) ||
     !buildInfo.includes(`nix build 'github:Nitestack/t3code/${sha}#t3code-fork'`)
   ) {
     throw new Error("Build information does not match its source identity.");
@@ -313,17 +439,29 @@ async function verifyExistingForkReleaseAssets({
   version,
   sha,
   upstreamBase,
+  upstreamTag,
   sourceBranch = "",
 }) {
-  assertExistingForkReleaseMetadata({ release, version, sha, upstreamBase, sourceBranch });
-  const buildRunId = /^Tested build artifact run: `([1-9]\d*)`$/m.exec(release.body)[1];
+  assertExistingForkReleaseMetadata({
+    release,
+    version,
+    sha,
+    upstreamBase,
+    upstreamTag,
+    sourceBranch,
+  });
+  const buildRun = /^Tested build artifact run: `([1-9]\d*)` \(attempt: `([1-9]\d*)`\)$/m.exec(
+    release.body,
+  );
   return verifyForkBuildArtifactAssets({
     directory,
     version,
     sha,
     upstreamBase,
+    upstreamTag,
     sourceBranch,
-    buildRunId,
+    buildRunId: buildRun[1],
+    buildRunAttempt: buildRun[2],
   });
 }
 
@@ -337,6 +475,9 @@ function resolveForkRelease({
   sha,
   sourceBranch = "",
   upstreamBase = "",
+  upstreamTag = "",
+  upstreamBaseIsAncestor = false,
+  unreleasedUpstreamCommits = [],
   sourceOnMain,
   existingTagSha = "",
   releaseExists = false,
@@ -373,6 +514,18 @@ function resolveForkRelease({
   if (!COMMIT_SHA.test(upstreamBase)) {
     throw new Error("Release upstream base must be a full 40-character commit SHA.");
   }
+  if (upstreamTag !== tag) {
+    throw new Error(`Upstream stable tag ${upstreamTag || "(missing)"} does not match ${tag}.`);
+  }
+  if (!upstreamBaseIsAncestor) {
+    throw new Error("The upstream stable base must be an ancestor of the fork release source.");
+  }
+  if (unreleasedUpstreamCommits.length > 0) {
+    const offending = unreleasedUpstreamCommits.slice(0, 5).map((commit) => commit.slice(0, 12));
+    throw new Error(
+      `Fork source contains ${unreleasedUpstreamCommits.length} upstream-main commit(s) beyond ${upstreamTag}: ${offending.join(", ")}${unreleasedUpstreamCommits.length > offending.length ? ", …" : ""}. Main accepts stable upstream tags only.`,
+    );
+  }
   if (sourceBranch && sourceBranch !== "main") {
     const match =
       /^automation\/upstream-stable-(v?(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))-([0-9a-f]{8})$/.exec(
@@ -400,8 +553,10 @@ function resolveForkRelease({
     !existingRelease.prerelease &&
     typeof existingRelease.body === "string" &&
     upstreamBase !== "" &&
-    existingRelease.body.includes(`Upstream base: ${markdownCode(upstreamBase)}`) &&
-    existingRelease.body.includes(`Fork commit: ${markdownCode(sha)}`) &&
+    existingRelease.body.includes(
+      `Upstream stable base: ${markdownCode(upstreamTag)} = ${markdownCode(upstreamBase)}`,
+    ) &&
+    existingRelease.body.includes(`Fork commit (built source): ${markdownCode(sha)}`) &&
     Array.isArray(existingAssetNames) &&
     existingAssetNames.length === expectedAssets.length &&
     existingAssetNames.every((asset, index) => asset === expectedAssets[index]) &&
@@ -423,7 +578,10 @@ function resolveForkRelease({
 
 module.exports = {
   RELEASE_REPOSITORY,
+  analyzeForkUpstreamHistory,
   assertExistingForkReleaseMetadata,
+  buildForkArtifactSourceMetadata,
+  buildForkBuildInfo,
   buildForkNixBuildSummary,
   buildForkReleaseNotes,
   requiredReleaseAssets,

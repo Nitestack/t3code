@@ -9,11 +9,14 @@ import ForkCiChecks from "../.github/scripts/fork-ci-checks.cjs";
 
 import {
   classifyGitHubFailure,
+  findUpstreamCommitsAlreadyInForkMain,
+  findUpstreamCommitsMissingFromStableTag,
   getSyncDecision,
   isStableRelease,
   mergeStableRelease,
   parseStableVersion,
   queueForkRelease,
+  validateMergedSyncReleaseSource,
   validateSyncBranch,
   validateForkMergeProtection,
 } from "./upstream-stable-sync.mjs";
@@ -29,6 +32,8 @@ async function createSyncFixture({
   pullRequestApiError,
   dispatchError,
   dryRun = false,
+  upstreamMainAheadOfStable = false,
+  forkMainIncludesUpstreamMain = false,
 } = {}) {
   const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t17-sync-boundary-"));
   const upstream = NodePath.join(root, "upstream.git");
@@ -54,15 +59,32 @@ async function createSyncFixture({
   git(upstreamWork, ["config", "tag.forceSignAnnotated", "false"]);
   git(upstreamWork, ["config", "core.editor", "true"]);
   await NodeFSP.writeFile(NodePath.join(upstreamWork, "README.md"), "upstream base\n");
-  git(upstreamWork, ["add", "README.md"]);
+  await NodeFSP.mkdir(NodePath.join(upstreamWork, "apps", "server"), { recursive: true });
+  await NodeFSP.writeFile(
+    NodePath.join(upstreamWork, "apps", "server", "package.json"),
+    JSON.stringify({ version: "0.1.9" }, null, 2) + "\n",
+  );
+  git(upstreamWork, ["add", "."]);
   git(upstreamWork, ["commit", "-m", "upstream 0.1.9"]);
   git(upstreamWork, ["tag", "v0.1.9"]);
   for (const [index, tag] of releases.entries()) {
     if (tag === "v0.1.9") continue;
     await NodeFSP.writeFile(NodePath.join(upstreamWork, `upstream-${index}.txt`), `${tag}\n`);
+    await NodeFSP.writeFile(
+      NodePath.join(upstreamWork, "apps", "server", "package.json"),
+      JSON.stringify({ version: tag.replace(/^v/, "") }, null, 2) + "\n",
+    );
     git(upstreamWork, ["add", "."]);
     git(upstreamWork, ["commit", "-m", `upstream ${tag}`]);
     git(upstreamWork, ["tag", tag]);
+  }
+  if (upstreamMainAheadOfStable) {
+    await NodeFSP.writeFile(
+      NodePath.join(upstreamWork, "unreleased-upstream-main.txt"),
+      "unreleased\n",
+    );
+    git(upstreamWork, ["add", "unreleased-upstream-main.txt"]);
+    git(upstreamWork, ["commit", "-m", "upstream main after stable tag"]);
   }
   git(root, ["init", "--bare", upstream]);
   git(upstreamWork, ["remote", "add", "origin", upstream]);
@@ -79,6 +101,9 @@ async function createSyncFixture({
   await NodeFSP.writeFile(NodePath.join(forkWork, "fork.txt"), "fork change\n");
   git(forkWork, ["add", "."]);
   git(forkWork, ["commit", "-m", "fork change"]);
+  if (forkMainIncludesUpstreamMain) {
+    git(forkWork, ["merge", "--no-ff", "--no-edit", "origin/main"]);
+  }
   git(root, ["clone", "--bare", forkWork, fork]);
   git(root, ["clone", "--branch", "main", fork, checkout]);
   git(checkout, ["config", "user.name", "T17 fixture"]);
@@ -403,6 +428,65 @@ NodeTest.test("skips the already integrated tag and selects a newer stable relea
   NodeAssert.equal(getSyncDecision(numericallySorted).release.tag_name, "v4.10.0");
 });
 
+NodeTest.test(
+  "stable sync waits until a tag contains upstream commits already in fork main",
+  () => {
+    const base = "a".repeat(40);
+    const upstreamMainOnly = "b".repeat(40);
+    const other = "c".repeat(40);
+    NodeAssert.deepEqual(
+      findUpstreamCommitsAlreadyInForkMain({
+        forkMainCommits: [base, upstreamMainOnly],
+        upstreamMainCommits: [base, upstreamMainOnly, other],
+      }),
+      [base, upstreamMainOnly],
+    );
+    NodeAssert.deepEqual(
+      findUpstreamCommitsMissingFromStableTag({
+        upstreamCommitsPresentInMain: [base, upstreamMainOnly],
+        stableTagCommits: [base],
+      }),
+      [upstreamMainOnly],
+    );
+
+    const stableReleases = [
+      { tag_name: "v4.2.0", name: "T3 Code 4.2.0", draft: false, prerelease: false },
+      { tag_name: "v4.3.0", name: "T3 Code 4.3.0", draft: false, prerelease: false },
+    ];
+    NodeAssert.deepEqual(
+      getSyncDecision(stableReleases, {
+        integratedTag: "v4.2.0",
+        compatibleTags: [],
+        upstreamCommitsPresentInMain: [base, upstreamMainOnly],
+        missingUpstreamCommitsByTag: { "v4.3.0": [upstreamMainOnly] },
+      }),
+      {
+        kind: "incompatible-upstream-history",
+        tags: ["v4.3.0"],
+        upstreamCommits: [base, upstreamMainOnly],
+        missingUpstreamCommits: [upstreamMainOnly],
+      },
+    );
+    NodeAssert.deepEqual(
+      getSyncDecision([stableReleases[0]], {
+        integratedTag: "v4.2.0",
+        compatibleTags: ["v4.2.0"],
+        upstreamCommitsPresentInMain: [base, upstreamMainOnly],
+      }),
+      { kind: "up-to-date", tag: "v4.2.0" },
+    );
+    NodeAssert.deepEqual(
+      getSyncDecision(stableReleases, {
+        integratedTag: "v4.1.0",
+        compatibleTags: ["v4.2.0"],
+        upstreamCommitsPresentInMain: [base, upstreamMainOnly],
+        missingUpstreamCommitsByTag: { "v4.3.0": [upstreamMainOnly] },
+      }),
+      { kind: "update", release: stableReleases[0], skippedTags: ["v4.3.0"] },
+    );
+  },
+);
+
 NodeTest.test("an empty stable release list is a successful no-op", () => {
   NodeAssert.deepEqual(getSyncDecision([]), { kind: "no-releases" });
   NodeAssert.throws(
@@ -429,7 +513,7 @@ NodeTest.test(
         queueForkRelease({
           version: "0.1.10",
           sourceSha,
-          sourceBranch: "automation/upstream-stable-v0.1.10-c2e54e3a",
+          sourceBranch: "main",
           runCommand,
           publish: false,
         }),
@@ -449,7 +533,7 @@ NodeTest.test(
       queueForkRelease({
         version: "0.1.10",
         sourceSha,
-        sourceBranch: "automation/upstream-stable-v0.1.10-c2e54e3a",
+        sourceBranch: "main",
         runCommand: retryRun,
         publish: false,
       }),
@@ -457,9 +541,7 @@ NodeTest.test(
     );
     NodeAssert.equal(retryCalls.length, 2);
     NodeAssert.ok(retryCalls[1].includes(`inputs[source_commit]=${sourceSha}`));
-    NodeAssert.ok(
-      retryCalls[1].includes("inputs[source_branch]=automation/upstream-stable-v0.1.10-c2e54e3a"),
-    );
+    NodeAssert.ok(retryCalls[1].includes("inputs[source_branch]=main"));
   },
 );
 
@@ -679,20 +761,83 @@ NodeTest.test(
   },
 );
 
-NodeTest.test("a 0.1.9 release already in main is a true no-op", async () => {
+NodeTest.test("a compatible stable tag already in main gets a marker-only sync PR", async () => {
   const fixture = await createSyncFixture({ releases: ["v0.1.9"] });
   try {
     const result = fixture.runSync();
     NodeAssert.equal(result.status, 0, result.output);
-    NodeAssert.match(result.output, /Up to date through upstream stable tag `v0\.1\.9`/);
+    NodeAssert.match(result.output, /Created the sync pull request/);
+    const state = await fixture.readState();
+    NodeAssert.equal(state.pullRequests.length, 1);
+    const branch = state.pullRequests[0].headRefName;
+    const branchCommit = fixture.git(fixture.fork, ["rev-parse", `refs/heads/${branch}`]);
+    const parent = fixture.git(fixture.fork, ["show", "-s", "--format=%P", branchCommit]);
+    NodeAssert.equal(parent.split(" ").length, 1);
+    NodeAssert.doesNotThrow(() =>
+      fixture.git(fixture.fork, ["merge-base", "--is-ancestor", "refs/tags/v0.1.9", parent]),
+    );
+    NodeAssert.doesNotThrow(() =>
+      validateSyncBranch({
+        branch,
+        branchCommit,
+        mainRef: "refs/remotes/origin/main",
+        targetTag: "v0.1.9",
+        targetCommit: fixture.git(fixture.fork, ["rev-parse", "refs/tags/v0.1.9^{commit}"]),
+        cwd: fixture.checkout,
+      }),
+    );
+    fixture.git(fixture.checkout, ["switch", "main"]);
+    fixture.git(fixture.checkout, ["fetch", "origin", "main"]);
+    fixture.git(fixture.checkout, ["merge", "--no-ff", "--no-edit", branch]);
+    const integrationSha = fixture.git(fixture.checkout, ["rev-parse", "HEAD"]);
+    fixture.git(fixture.checkout, ["push", "origin", "HEAD:refs/heads/main"]);
+    fixture.git(fixture.checkout, ["fetch", "origin", "main"]);
     NodeAssert.equal(
-      (await fixture.readCalls()).some((args) => args.includes("--method")),
-      false,
+      validateMergedSyncReleaseSource({
+        sourceSha: integrationSha,
+        mainRef: "refs/remotes/origin/main",
+        cwd: fixture.checkout,
+      }).upstreamTag,
+      "v0.1.9",
     );
   } finally {
     await NodeFSP.rm(fixture.root, { recursive: true, force: true });
   }
 });
+
+NodeTest.test(
+  "stable sync skips tags that omit upstream commits already merged into fork main",
+  async () => {
+    const fixture = await createSyncFixture({
+      releases: ["v0.1.9", "v0.1.10"],
+      upstreamMainAheadOfStable: true,
+      forkMainIncludesUpstreamMain: true,
+    });
+    try {
+      const result = fixture.runSync();
+      NodeAssert.equal(result.status, 0, result.output);
+      NodeAssert.match(result.output, /Skipped upstream stable tag\(s\) `v0\.1\.10`/);
+      NodeAssert.match(result.output, /upstream commits already in fork main/);
+      NodeAssert.match(
+        result.output,
+        /Waiting for a stable tag that contains all upstream commits already in main/,
+      );
+      const state = await fixture.readState();
+      NodeAssert.equal(state.pullRequests.length, 0);
+      NodeAssert.equal(state.runs.length, 0);
+      NodeAssert.equal(
+        fixture.git(fixture.fork, [
+          "for-each-ref",
+          "--format=%(refname:short)",
+          "refs/heads/automation",
+        ]),
+        "",
+      );
+    } finally {
+      await NodeFSP.rm(fixture.root, { recursive: true, force: true });
+    }
+  },
+);
 
 NodeTest.test(
   "an empty upstream release list succeeds without querying or mutating the fork",
@@ -1057,26 +1202,107 @@ NodeTest.test(
 );
 
 NodeTest.test(
-  "merge handler checks exact CI, merges by head SHA, and queues one release",
+  "merge handler checks the exact PR head and queues only after exact integration-commit CI",
   async () => {
     const fixture = await createSyncFixture();
     try {
       const event = await prepareSuccessfulCiEvent(fixture);
       const result = fixture.runSync({ env: event.env });
       NodeAssert.equal(result.status, 0, result.output);
-      NodeAssert.match(result.output, /queued the fork release for exact source/);
+      NodeAssert.match(
+        result.output,
+        /Release dispatch waits for all four checks on the resulting integration commit/,
+      );
       const state = await fixture.readState();
       NodeAssert.equal(state.mergeCalls, 1);
-      NodeAssert.equal(state.syncAppWrites, 2);
-      NodeAssert.equal(state.runs.length, 1);
-      NodeAssert.equal(
-        state.runs[0].displayTitle,
-        `Fork build-only stable 0.1.10 source ${event.headSha}`,
-      );
+      NodeAssert.equal(state.syncAppWrites, 1);
+      NodeAssert.equal(state.runs.length, 0);
       const mergeCall = (await fixture.readCalls()).find(
         (args) => args.includes("--method") && args.includes("PUT"),
       );
       NodeAssert.ok(mergeCall.includes(`sha=${event.headSha}`));
+
+      fixture.git(fixture.checkout, [
+        "fetch",
+        "origin",
+        `+refs/heads/${event.branch}:refs/remotes/origin/${event.branch}`,
+      ]);
+      fixture.git(fixture.checkout, ["switch", "main"]);
+      fixture.git(fixture.checkout, [
+        "merge",
+        "--no-ff",
+        "--no-edit",
+        `refs/remotes/origin/${event.branch}`,
+      ]);
+      const integrationSha = fixture.git(fixture.checkout, ["rev-parse", "HEAD"]);
+      fixture.git(fixture.checkout, ["push", "origin", "HEAD:refs/heads/main"]);
+      fixture.git(fixture.checkout, ["fetch", "origin", "main"]);
+      NodeAssert.deepEqual(
+        validateMergedSyncReleaseSource({
+          sourceSha: integrationSha,
+          mainRef: "refs/remotes/origin/main",
+          cwd: fixture.checkout,
+        }),
+        {
+          sourceSha: integrationSha,
+          upstreamTag: "v0.1.10",
+          upstreamBase: fixture.git(fixture.checkout, [
+            "rev-parse",
+            "refs/tags/upstream/v0.1.10^{commit}",
+          ]),
+          version: "0.1.10",
+        },
+      );
+
+      const mainCiRunId = 79002;
+      const completedMainRun = {
+        id: mainCiRunId,
+        path: ".github/workflows/ci.yml",
+        event: "push",
+        status: "completed",
+        conclusion: "success",
+        run_attempt: 1,
+        head_repository: { full_name: "Nitestack/t3code" },
+        head_branch: "main",
+        head_sha: integrationSha,
+      };
+      state.ciRunId = mainCiRunId;
+      state.ciRuns = [
+        {
+          databaseId: mainCiRunId,
+          event: "push",
+          headBranch: "main",
+          headSha: integrationSha,
+          status: "completed",
+          conclusion: "success",
+        },
+      ];
+      state.workflowRun = completedMainRun;
+      state.workflowJobs = REQUIRED_FORK_CHECKS.map((name) => ({ name, conclusion: "success" }));
+      await fixture.writeState(state);
+      const releaseQueue = fixture.runSync({
+        env: {
+          UPSTREAM_SYNC_MODE: "release-after-main-ci",
+          WORKFLOW_RUN_ID: String(mainCiRunId),
+          WORKFLOW_RUN_BRANCH: "main",
+          WORKFLOW_RUN_ATTEMPT: "1",
+          WORKFLOW_RUN_CONCLUSION: "success",
+          WORKFLOW_RUN_SHA: integrationSha,
+        },
+      });
+      NodeAssert.equal(releaseQueue.status, 0, releaseQueue.output);
+      NodeAssert.match(
+        releaseQueue.output,
+        /All four Fork CI jobs succeeded on integration commit/,
+      );
+      const finalState = await fixture.readState();
+      NodeAssert.equal(finalState.syncAppWrites, 2);
+      NodeAssert.equal(finalState.runs.length, 1);
+      NodeAssert.equal(
+        finalState.runs[0].displayTitle,
+        `Fork build-only stable 0.1.10 source ${integrationSha}`,
+      );
+      NodeAssert.equal(finalState.runs[0].sourceBranch, "main");
     } finally {
       await NodeFSP.rm(fixture.root, { recursive: true, force: true });
     }
@@ -1216,10 +1442,7 @@ NodeTest.test("stops on unexpected changes in an existing update branch", async 
 
     const retry = fixture.runSync();
     NodeAssert.equal(retry.status, 1);
-    NodeAssert.match(
-      retry.output,
-      /contains unexpected commits or does not merge the expected upstream tag/,
-    );
+    NodeAssert.match(retry.output, /not based on the current fork main history/);
     NodeAssert.equal(
       fixture.git(fixture.fork, ["rev-parse", `refs/heads/${branch}`]),
       unexpectedCommit,

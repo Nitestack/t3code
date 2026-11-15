@@ -21,12 +21,13 @@ Android APK, a Windows installer, source, or the pinned Nix flake, as the
    workflow builds the signed Android APK, Windows x64 installer, and Nix package from the exact
    source commit, verifies their version and source metadata, and uploads one build-only artifact.
    This run creates no tag or release, including a draft release. If the selected source has no
-   `.github/upstream-stable.json` marker, provide `upstream_base` as the full 40-character upstream
-   commit SHA. An invalid marker always blocks the run.
-7. Download `t3-code-nitestack-installers-<version>-<12-char-source-sha>-attempt-<run-attempt>` from that Actions run.
+   `.github/upstream-stable.json` marker, provide `upstream_base` as the full peeled commit SHA for
+   the matching upstream `v<version>` tag. An invalid or mismatched marker always blocks the run.
+7. Download `t3-code-nitestack-installers-<version>-<12-char-source-sha>` from that Actions run.
    It contains `t3-code-nitestack-<version>-windows-x64.exe`,
    `t3-code-nitestack-<version>.apk`, their `.sha256` files, platform metadata, `nix-build.json`,
-   and `BUILD-INFO.md`. The Windows runner records its Authenticode status; without fork Windows
+   and `BUILD-INFO.md`. All metadata names the fork integration commit as the built source and
+   records the upstream stable tag and peeled base commit separately. The Windows runner records its Authenticode status; without fork Windows
    signing credentials it is expected to be unsigned. The Android APK is signed with the fork's
    upload certificate. Check both checksums and metadata before local installation.
 8. After local acceptance, record the build-only run ID, exact commit, and source branch from
@@ -37,7 +38,9 @@ Android APK, a Windows installer, source, or the pinned Nix flake, as the
    exact artifact, and rechecks every file and source field before creating the upstream-matched
    `vX.Y.Z` tag and `T3 Code vX.Y.Z` release. It does not rebuild the tested installers. A manual
    publish without a tested artifact run is rejected unless ongoing automatic publication is
-   explicitly enabled. Do not move or force-push tags.
+   explicitly enabled. A manual `publish=true` dispatch with `artifact_run_id` is explicit
+   authorization; `FORK_AUTO_PUBLISH_STABLE_RELEASES=true` authorizes automatic publication only.
+   Do not move or force-push tags.
 9. Confirm release notes identify the actual fork commit, source branch, upstream base, and tested
    artifact run, and attach both installers, checksums, platform metadata, Nix build verification,
    and the pinned Nix install command. The Nix build is a required publication gate.
@@ -65,7 +68,7 @@ daily. An empty stable list or no newer stable version succeeds without writing 
 run is a dry run unless `dry_run` is cleared, and `target_tag` can select a published stable tag.
 Drafts, prereleases, and tags with test labels are ignored.
 
-When a newer stable release exists, the workflow creates an upstream merge branch and pull request.
+When a newer compatible stable release exists, the workflow creates a stable-tag branch and pull request.
 The push to that exact branch runs the four fork jobs: `Fork Server`, `Fork Web`, `Fork Desktop
 Build`, and `Fork Mobile Type and Unit`. The completion handler accepts only the latest successful
 push run attempt for the current PR head, verifies each named job individually, checks that the PR
@@ -76,9 +79,20 @@ for a maintainer to repair. The automated job does not request an administrative
 If `main` advances while the sync checks are running, the handler leaves the PR open and unmerged.
 Update its branch and let the resulting push run all four checks again before the next merge attempt.
 
-After a verified merge, the handler queues the existing `Release` workflow for that exact fork
-commit and upstream version. Its default is build-only: Windows, signed Android, and Nix must all
-build before the combined Actions artifact is available. Automatic publication is off by default.
+Fork `main` accepts only published upstream stable tags; never merge upstream `main`. A tag is
+eligible only when it contains every upstream commit already present in fork `main`. The first
+release can be cut only at the first stable tag that contains all upstream commits already merged
+into fork `main`.
+
+After the sync PR merges, the main push runs all four Fork CI jobs on its integration merge commit.
+Only that exact successful main CI run queues the existing `Release` workflow, passing the fork
+integration commit as `source_commit`; the upstream tag commit is recorded only as `upstream_base`.
+The integration commit tree contains the fork changes and upstream through the stable tag. The
+workflow compares commits reachable from that source after the stable base with upstream `main`;
+any upstream-main commit beyond the selected stable tag fails the release preflight and reports the
+count and first short SHAs. This read-only history check never merges upstream `main`. Its default is
+build-only: Windows, signed Android, and Nix must all build before the combined Actions artifact is
+available. Automatic publication is off by default.
 Setting the `FORK_AUTO_PUBLISH_STABLE_RELEASES` repository variable to `true` is the user's explicit
 standing authorization for every eligible sync to publish; unset it to revoke that authorization.
 No workflow sets this variable. With it unset, each public release needs a separate authorized
@@ -101,10 +115,11 @@ this implementation does not change repository settings:
   only on `Nitestack/t3code`, with exactly `actions:write`, `administration:read`, `contents:write`,
   and `pull_requests:write`. Administration read inspects branch protection and rulesets. Contents
   and pull-request write push the sync branch and open and merge its PR. Actions write lets the
-  merge job dispatch the existing `Release` workflow. The branch-creation token is scoped to the
+  main-CI completion job dispatch the existing `Release` workflow. The branch-creation token is scoped to the
   other three permissions. The App must not have repository administrator access and must not be a
   ruleset bypass actor.
-- The merge job uses the App token for the protected merge and release dispatch. Its `GITHUB_TOKEN`
+- The merge job uses the App token for the protected merge; the main-CI completion job uses it for
+  release dispatch. Their `GITHUB_TOKEN`
   is limited to contents read for checkout; the release publisher requests `contents:write`. The
   repository's read-only default can remain in place because each job declares its own scoped
   permissions. The workflow does not approve pull requests or use GitHub's auto-merge setting.
@@ -141,6 +156,9 @@ Credentials stay out of settings, logs, client responses, and artifacts. Before 
   git diff "$BASE"..origin/main -- . ':!.repos' ':!pnpm-lock.yaml' ':!*.lock' | grep -E '^\+' |
     grep -nEi '/home/|/Users/|/nix/store/|\.jks|BEGIN [A-Z ]*PRIVATE|ghp_|github_pat_|sk-[A-Za-z0-9_-]{12,}'
   ```
+
+  `upstream/main` is used here only to find a read-only comparison base; it is never merged into
+  fork `main`.
 
   Expected hits are test sentinels, the `/home/user` fixture paths, and the keystore steps in the
   Android workflow and guide. Anything else needs a look before releasing.
@@ -179,7 +197,10 @@ here still needs evidence before release:
 ## First release
 
 The clone contains an imported upstream `v0.1.9` tag. It is not a Nitestack release, and it must not
-be moved, deleted, or force-pushed. Start `Release` manually from a reviewed, green `main` commit
+be moved, deleted, or force-pushed. Current `main` already includes upstream commit
+`f82162f0336c226ae1f2927f781a0fb660869a51`, which is beyond `v0.1.9`, so the first release must
+wait for and sync the first upstream stable tag that contains every upstream commit already in
+`main`. Start `Release` manually from a reviewed, green `main` commit
 with `publish` unchecked to build the Windows installer, signed APK, and same-version Nix package.
 Download the resulting Actions artifact and test it locally. No tag or release is created by this
 step. After explicit authorization, dispatch the stable workflow for the reviewed exact source with

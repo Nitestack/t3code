@@ -50,9 +50,53 @@ export function isStableRelease(release) {
   return !TEST_RELEASE_LABEL.test(`${release.tag_name} ${release.name ?? ""}`);
 }
 
+export function findUpstreamCommitsAlreadyInForkMain({ forkMainCommits, upstreamMainCommits }) {
+  if (!Array.isArray(forkMainCommits) || !Array.isArray(upstreamMainCommits)) {
+    throw new Error("Fork main and upstream main histories must be commit lists.");
+  }
+  if (
+    [...forkMainCommits, ...upstreamMainCommits].some(
+      (commit) => typeof commit !== "string" || !/^[0-9a-f]{40}$/i.test(commit),
+    )
+  ) {
+    throw new Error("Fork main and upstream main histories contain an invalid commit SHA.");
+  }
+  const forkMain = new Set(forkMainCommits.map((commit) => commit.toLowerCase()));
+  return [...new Set(upstreamMainCommits.map((commit) => commit.toLowerCase()))]
+    .filter((commit) => forkMain.has(commit))
+    .toSorted();
+}
+
+export function findUpstreamCommitsMissingFromStableTag({
+  upstreamCommitsPresentInMain,
+  stableTagCommits,
+}) {
+  if (!Array.isArray(upstreamCommitsPresentInMain) || !Array.isArray(stableTagCommits)) {
+    throw new Error("Fork main and stable tag histories must be commit lists.");
+  }
+  if (
+    [...upstreamCommitsPresentInMain, ...stableTagCommits].some(
+      (commit) => typeof commit !== "string" || !/^[0-9a-f]{40}$/i.test(commit),
+    )
+  ) {
+    throw new Error("Fork main and stable tag histories contain an invalid commit SHA.");
+  }
+  const stableTagHistory = new Set(stableTagCommits.map((commit) => commit.toLowerCase()));
+  return [...new Set(upstreamCommitsPresentInMain.map((commit) => commit.toLowerCase()))]
+    .filter((commit) => !stableTagHistory.has(commit))
+    .toSorted();
+}
+
 export function getSyncDecision(
   releases,
-  { integratedTag, targetTag, openSyncPullRequests = [] } = {},
+  {
+    integratedTag,
+    targetTag,
+    openSyncPullRequests = [],
+    compatibleTags,
+    upstreamCommitsPresentInMain = [],
+    missingUpstreamCommitsByTag = {},
+  } = {},
 ) {
   const openSyncPullRequest = getSyncPullRequests(openSyncPullRequests)[0];
   if (openSyncPullRequest) {
@@ -72,17 +116,57 @@ export function getSyncDecision(
     throw new Error("Target tag is not a published stable SemVer release: " + targetTag);
   }
 
-  const release =
+  const explicitRelease =
     targetTag === undefined
-      ? stable[0]
+      ? undefined
       : stable.find((candidate) => candidate.tag_name === targetTag);
-  if (!release)
+  if (targetTag !== undefined && !explicitRelease)
     throw new Error(`Target tag is not a published stable SemVer release: ${targetTag}`);
 
-  if (integratedTag !== undefined && compareVersions(release.tag_name, integratedTag) <= 0) {
+  if (
+    explicitRelease &&
+    integratedTag !== undefined &&
+    compareVersions(explicitRelease.tag_name, integratedTag) <= 0
+  ) {
     return { kind: "up-to-date", tag: integratedTag };
   }
-  return { kind: "update", release };
+
+  const pending = explicitRelease
+    ? [explicitRelease]
+    : stable.filter(
+        (release) =>
+          integratedTag === undefined || compareVersions(release.tag_name, integratedTag) > 0,
+      );
+  if (pending.length === 0) {
+    return { kind: "up-to-date", tag: integratedTag ?? stable[0].tag_name };
+  }
+  const compatible = new Set(compatibleTags ?? stable.map((release) => release.tag_name));
+  const release = pending.find((candidate) => compatible.has(candidate.tag_name));
+  if (release) {
+    const skippedTags = pending
+      .filter(
+        (candidate) =>
+          !compatible.has(candidate.tag_name) &&
+          compareVersions(candidate.tag_name, release.tag_name) > 0,
+      )
+      .map((candidate) => candidate.tag_name);
+    return {
+      ...(skippedTags.length > 0 ? { skippedTags } : {}),
+      kind: "update",
+      release,
+    };
+  }
+  const missingUpstreamCommits = [
+    ...new Set(
+      pending.flatMap((candidate) => missingUpstreamCommitsByTag[candidate.tag_name] ?? []),
+    ),
+  ].toSorted();
+  return {
+    kind: "incompatible-upstream-history",
+    tags: pending.map((candidate) => candidate.tag_name),
+    upstreamCommits: upstreamCommitsPresentInMain,
+    missingUpstreamCommits,
+  };
 }
 
 export function validateForkMergeProtection({ protection, repository, rulesets = [] }) {
@@ -275,22 +359,26 @@ export function validateSyncBranch({
     throw new Error(`Existing update branch ${branch} has an unexpected upstream marker.`);
   }
 
-  const mergeParents = runGit(["show", "-s", "--format=%P", branchCommit]).split(" ");
-  if (mergeParents.length !== 2 || mergeParents[1] !== targetCommit) {
+  const branchParents = runGit(["show", "-s", "--format=%P", branchCommit]).split(" ");
+  const mergesStableTag = branchParents.length === 2 && branchParents[1] === targetCommit;
+  const recordsTagAlreadyInMain =
+    branchParents.length === 1 && isAncestor(targetCommit, branchParents[0], cwd);
+  if (!mergesStableTag && !recordsTagAlreadyInMain) {
     throw new Error(
-      `Existing update branch ${branch} contains unexpected commits or does not merge the expected upstream tag.`,
+      `Existing update branch ${branch} contains unexpected commits or does not sync the expected upstream stable tag.`,
     );
   }
-  if (!isAncestor(mergeParents[0], mainRef, cwd)) {
+  const baseCommit = branchParents[0];
+  if (!isAncestor(baseCommit, mainRef, cwd)) {
     throw new Error(
       `Existing update branch ${branch} is not based on the current fork main history.`,
     );
   }
   let expectedMergeTree;
   try {
-    expectedMergeTree = runGit(["merge-tree", "--write-tree", mergeParents[0], targetCommit])
-      .split("\n")[0]
-      .trim();
+    expectedMergeTree = mergesStableTag
+      ? runGit(["merge-tree", "--write-tree", baseCommit, targetCommit]).split("\n")[0].trim()
+      : runGit(["rev-parse", `${baseCommit}^{tree}`]);
   } catch {
     throw new Error(`Existing update branch ${branch} contains an unresolved upstream merge.`);
   }
@@ -302,6 +390,77 @@ export function validateSyncBranch({
       `Existing update branch ${branch} contains unexpected fork changes or merge resolutions.`,
     );
   }
+}
+
+export function validateMergedSyncReleaseSource({ sourceSha, mainRef, cwd = process.cwd() }) {
+  if (!/^[0-9a-f]{40}$/i.test(sourceSha ?? "")) {
+    throw new Error("The integration release source must be a full fork commit SHA.");
+  }
+  const runGit = (args, options) => git(args, { ...options, cwd });
+  if (!isAncestor(sourceSha, mainRef, cwd)) {
+    throw new Error("The integration release source is not contained in fork main.");
+  }
+  const integrationParents = runGit(["show", "-s", "--format=%P", sourceSha]).split(" ");
+  if (integrationParents.length !== 2) {
+    throw new Error("The integration release source is not the sync pull request merge commit.");
+  }
+  const [mainParent, syncBranchCommit] = integrationParents;
+  const integrationTree = runGit(["rev-parse", `${sourceSha}^{tree}`]);
+  const syncBranchTree = runGit(["rev-parse", `${syncBranchCommit}^{tree}`]);
+  if (integrationTree !== syncBranchTree) {
+    throw new Error("The fork integration merge tree differs from the verified sync PR head.");
+  }
+
+  let marker;
+  try {
+    marker = JSON.parse(runGit(["show", `${sourceSha}:${MARKER_PATH}`]));
+  } catch {
+    throw new Error("The fork integration commit is missing its upstream stable marker.");
+  }
+  if (
+    typeof marker?.tag !== "string" ||
+    !parseStableVersion(marker.tag) ||
+    typeof marker.commit !== "string" ||
+    !/^[0-9a-f]{40}$/i.test(marker.commit)
+  ) {
+    throw new Error("The fork integration commit has an invalid upstream stable marker.");
+  }
+  const targetCommit = resolveTagCommit(marker.tag, cwd);
+  if (targetCommit.toLowerCase() !== marker.commit.toLowerCase()) {
+    throw new Error("The upstream marker base does not equal the peeled stable tag commit.");
+  }
+  const expectedBranch = `${BRANCH_PREFIX}${marker.tag}-${targetCommit.slice(0, 8)}`;
+  const syncParents = runGit(["show", "-s", "--format=%P", syncBranchCommit]).split(" ");
+  const syncBranchMergesTag =
+    syncParents.length === 2 && syncParents[0] === mainParent && syncParents[1] === targetCommit;
+  const syncBranchRecordsTagAlreadyOnMain =
+    syncParents.length === 1 &&
+    syncParents[0] === mainParent &&
+    isAncestor(targetCommit, mainParent, cwd);
+  if (!syncBranchMergesTag && !syncBranchRecordsTagAlreadyOnMain) {
+    throw new Error("The fork integration merge does not preserve the exact sync PR parents.");
+  }
+  validateSyncBranch({
+    branch: expectedBranch,
+    branchCommit: syncBranchCommit,
+    mainRef: mainParent,
+    targetTag: marker.tag,
+    targetCommit,
+    cwd,
+  });
+  const manifest = JSON.parse(runGit(["show", `${sourceSha}:apps/server/package.json`]));
+  if (manifest.version !== marker.tag.replace(/^v/, "")) {
+    throw new Error("The fork integration version does not match its upstream stable marker.");
+  }
+  if (!isAncestor(targetCommit, sourceSha, cwd)) {
+    throw new Error("The upstream stable base is not an ancestor of the fork integration commit.");
+  }
+  return {
+    sourceSha,
+    upstreamTag: marker.tag,
+    upstreamBase: targetCommit,
+    version: manifest.version,
+  };
 }
 
 function getSyncPullRequests(pullRequests) {
@@ -400,9 +559,9 @@ function createSyncPullRequest(branch, targetTag, bodyPath) {
   }
 }
 
-function resolveTagCommit(tag) {
+function resolveTagCommit(tag, cwd = process.cwd()) {
   const ref = `refs/tags/upstream/${tag}^{commit}`;
-  const commit = git(["rev-parse", "--verify", ref], { allowFailure: true });
+  const commit = git(["rev-parse", "--verify", ref], { cwd, allowFailure: true });
   if (!commit) throw new Error(`Upstream release tag ${tag} could not be resolved to a commit.`);
   return commit;
 }
@@ -447,6 +606,22 @@ function readIntegratedMarker(mainRef, releases) {
     );
   }
   return marker;
+}
+
+function commitsAt(ref) {
+  return git(["rev-list", ref]).split("\n").filter(Boolean);
+}
+
+function describeSkippedStableTags({ tags, missingCommits, upstreamCommitCount }) {
+  const firstCommits = missingCommits.slice(0, 5).map((commit) => commit.slice(0, 12));
+  return `Skipped upstream stable tag(s) ${tags.map((tag) => `\`${tag}\``).join(", ")} because their histories omit ${missingCommits.length} of the ${upstreamCommitCount} upstream commits already in fork main: ${firstCommits.join(", ")}${missingCommits.length > firstCommits.length ? ", …" : ""}. Waiting for a stable tag that contains all upstream commits already in main.`;
+}
+
+function stableTagMissingCommits(tag, upstreamCommitsPresentInMain) {
+  return findUpstreamCommitsMissingFromStableTag({
+    upstreamCommitsPresentInMain,
+    stableTagCommits: commitsAt(resolveTagCommit(tag)),
+  });
 }
 
 function getPublishedReleases() {
@@ -660,6 +835,14 @@ export function queueForkRelease({
   runCommand = run,
   publish = process.env.FORK_AUTO_PUBLISH_STABLE_RELEASES === "true",
 }) {
+  if (!parseStableVersion(version) || !/^[0-9a-f]{40}$/i.test(sourceSha ?? "")) {
+    throw new Error(
+      "Fork release dispatch requires a stable version and full integration commit SHA.",
+    );
+  }
+  if (sourceBranch !== "main") {
+    throw new Error("Fork releases must be queued from the integration commit on main.");
+  }
   const mode = publish ? "publish" : "build-only";
   const displayTitle = `Fork ${mode} stable ${version} source ${sourceSha}`;
   let runs;
@@ -767,9 +950,28 @@ async function mergeSyncPullRequestFromCi() {
     UPSTREAM_URL,
     `+refs/tags/${release.tag_name}:refs/tags/upstream/${release.tag_name}`,
   ]);
+  git(["fetch", "--no-tags", UPSTREAM_URL, "+refs/heads/main:refs/remotes/upstream/main"]);
   const targetCommit = resolveTagCommit(release.tag_name);
   if (!targetCommit.startsWith(commitPrefix)) {
     throw new Error("The sync branch name does not match the published upstream tag commit.");
+  }
+  const upstreamCommitsPresentInMain = findUpstreamCommitsAlreadyInForkMain({
+    forkMainCommits: commitsAt(mainRef),
+    upstreamMainCommits: commitsAt("refs/remotes/upstream/main"),
+  });
+  const missingUpstreamCommits = stableTagMissingCommits(
+    release.tag_name,
+    upstreamCommitsPresentInMain,
+  );
+  if (missingUpstreamCommits.length > 0) {
+    const message = describeSkippedStableTags({
+      tags: [release.tag_name],
+      missingCommits: missingUpstreamCommits,
+      upstreamCommitCount: upstreamCommitsPresentInMain.length,
+    });
+    console.log(message);
+    await writeStepSummary(message);
+    return;
   }
 
   let branchCommit;
@@ -873,16 +1075,77 @@ async function mergeSyncPullRequestFromCi() {
     throw new Error("The sync pull request is not in a verified merged state.");
   }
 
-  const version = release.tag_name.replace(/^v/, "");
+  const message = `Merged upstream stable ${release.tag_name} after all four checks succeeded on exact PR head ${branchCommit}. Release dispatch waits for all four checks on the resulting integration commit on main.`;
+  console.log(message);
+  await writeStepSummary(message);
+}
+
+async function queueReleaseFromMainCi() {
+  const eventRunId = process.env.WORKFLOW_RUN_ID;
+  const sourceSha = process.env.WORKFLOW_RUN_SHA;
+  if (!eventRunId || !sourceSha) return;
+  const eventAttempt = Number(process.env.WORKFLOW_RUN_ATTEMPT);
+  const eventRun = getWorkflowRun(eventRunId);
+  validateForkCiCompletion({
+    run: eventRun,
+    eventConclusion: process.env.WORKFLOW_RUN_CONCLUSION,
+    eventRunId,
+    eventAttempt,
+    expectedBranch: "main",
+    expectedSha: sourceSha,
+  });
+  const latestCiRun = selectLatestForkCiRun(getForkCiRuns("main", sourceSha), {
+    expectedBranch: "main",
+    expectedSha: sourceSha,
+  });
+  if (latestCiRun.databaseId !== Number(eventRunId)) {
+    throw new Error(
+      "A newer exact-head main CI run exists; only its completion event may queue a release.",
+    );
+  }
+  const jobs = getWorkflowRunJobs(eventRunId, eventAttempt);
+  validateForkCiRun({ run: eventRun, jobs, expectedBranch: "main", expectedSha: sourceSha });
+
+  const sourceMessage = git(["show", "-s", "--format=%B", sourceSha]);
+  if (!sourceMessage.includes(BRANCH_PREFIX)) {
+    const summary = `Main CI passed for ${sourceSha}; it is not an upstream stable-sync integration commit, so no fork release was queued.`;
+    console.log(summary);
+    await writeStepSummary(summary);
+    return;
+  }
+
+  const mainRef = "refs/remotes/origin/main";
+  git(["fetch", "origin", "main"]);
+  git(["fetch", "--no-tags", UPSTREAM_URL, "+refs/tags/*:refs/tags/upstream/*"]);
+  git(["fetch", "--no-tags", UPSTREAM_URL, "+refs/heads/main:refs/remotes/upstream/main"]);
+  const upstreamCommitsPresentInMain = findUpstreamCommitsAlreadyInForkMain({
+    forkMainCommits: commitsAt(sourceSha),
+    upstreamMainCommits: commitsAt("refs/remotes/upstream/main"),
+  });
+  const releaseSource = validateMergedSyncReleaseSource({ sourceSha, mainRef });
+  const missingUpstreamCommits = stableTagMissingCommits(
+    releaseSource.upstreamTag,
+    upstreamCommitsPresentInMain,
+  );
+  if (missingUpstreamCommits.length > 0) {
+    const message = describeSkippedStableTags({
+      tags: [releaseSource.upstreamTag],
+      missingCommits: missingUpstreamCommits,
+      upstreamCommitCount: upstreamCommitsPresentInMain.length,
+    });
+    console.log(message);
+    await writeStepSummary(message);
+    return;
+  }
   const dispatched = queueForkRelease({
-    version,
-    sourceSha: branchCommit,
-    sourceBranch: eventBranch,
+    version: releaseSource.version,
+    sourceSha,
+    sourceBranch: "main",
     runCommand: runWithSyncApp,
   });
   const message = dispatched
-    ? `Merged upstream stable ${release.tag_name}; queued the fork release for exact source ${branchCommit}.`
-    : `Upstream stable ${release.tag_name} is merged; the matching fork release is already queued or published.`;
+    ? `All four Fork CI jobs succeeded on integration commit ${sourceSha}; queued stable ${releaseSource.upstreamTag} with upstream base ${releaseSource.upstreamBase}.`
+    : `All four Fork CI jobs succeeded on integration commit ${sourceSha}; the matching stable ${releaseSource.upstreamTag} release is already queued or published.`;
   console.log(message);
   await writeStepSummary(message);
 }
@@ -917,6 +1180,10 @@ async function main() {
     await mergeSyncPullRequestFromCi();
     return;
   }
+  if (process.env.UPSTREAM_SYNC_MODE === "release-after-main-ci") {
+    await queueReleaseFromMainCi();
+    return;
+  }
   const dryRun = process.env.DRY_RUN === "true";
   const preflight = process.env.PREFLIGHT === "true";
   const releases = getPublishedReleases();
@@ -938,6 +1205,11 @@ async function main() {
   const mainRef = "refs/remotes/origin/main";
   git(["fetch", "origin", "main"]);
   git(["fetch", "--no-tags", UPSTREAM_URL, "+refs/tags/*:refs/tags/upstream/*"]);
+  git(["fetch", "--no-tags", UPSTREAM_URL, "+refs/heads/main:refs/remotes/upstream/main"]);
+  const upstreamCommitsPresentInMain = findUpstreamCommitsAlreadyInForkMain({
+    forkMainCommits: commitsAt(mainRef),
+    upstreamMainCommits: commitsAt("refs/remotes/upstream/main"),
+  });
 
   const syncPullRequests = getSyncPullRequests(openSyncPullRequests);
   if (syncPullRequests.length > 1) {
@@ -951,6 +1223,21 @@ async function main() {
     const targetCommit = resolveTagCommit(release.tag_name);
     if (!targetCommit.startsWith(commitPrefix)) {
       throw new Error(`Existing sync branch ${branch} does not match the release tag commit.`);
+    }
+    const missingUpstreamCommits = stableTagMissingCommits(
+      release.tag_name,
+      upstreamCommitsPresentInMain,
+    );
+    if (missingUpstreamCommits.length > 0) {
+      const message = describeSkippedStableTags({
+        tags: [release.tag_name],
+        missingCommits: missingUpstreamCommits,
+        upstreamCommitCount: upstreamCommitsPresentInMain.length,
+      });
+      console.log(message);
+      await writeOutput("requires_write", "false");
+      await writeStepSummary(message);
+      return;
     }
     const branchCommit = getRemoteBranchCommit(branch);
     if (!branchCommit)
@@ -977,15 +1264,26 @@ async function main() {
   }
 
   const marker = readIntegratedMarker(mainRef, stableReleases);
-  const integratedRelease = marker
-    ? { tag: marker.tag, commit: marker.commit }
-    : stableReleases
-        .filter((release) => isAncestor(resolveTagCommit(release.tag_name), mainRef))
-        .sort((left, right) => compareVersions(right.tag_name, left.tag_name))[0];
-  const integratedTag = integratedRelease?.tag_name ?? integratedRelease?.tag;
+  const integratedTag = marker?.tag;
+  const candidateReleases = stableReleases.filter((release) => {
+    if (process.env.TARGET_TAG) return release.tag_name === process.env.TARGET_TAG;
+    return integratedTag === undefined || compareVersions(release.tag_name, integratedTag) > 0;
+  });
+  const missingUpstreamCommitsByTag = Object.fromEntries(
+    candidateReleases.map((release) => [
+      release.tag_name,
+      stableTagMissingCommits(release.tag_name, upstreamCommitsPresentInMain),
+    ]),
+  );
+  const compatibleTags = candidateReleases
+    .filter((release) => missingUpstreamCommitsByTag[release.tag_name].length === 0)
+    .map((release) => release.tag_name);
   const decision = getSyncDecision(releases, {
     integratedTag,
     targetTag: process.env.TARGET_TAG || undefined,
+    compatibleTags,
+    upstreamCommitsPresentInMain,
+    missingUpstreamCommitsByTag,
   });
 
   if (decision.kind === "duplicate") {
@@ -1003,6 +1301,28 @@ async function main() {
     return;
   }
 
+  if (decision.kind === "incompatible-upstream-history") {
+    const message = describeSkippedStableTags({
+      tags: decision.tags,
+      missingCommits: decision.missingUpstreamCommits,
+      upstreamCommitCount: decision.upstreamCommits.length,
+    });
+    console.log(message);
+    await writeOutput("requires_write", "false");
+    await writeStepSummary(message);
+    return;
+  }
+
+  const skippedTagSummary = decision.skippedTags?.length
+    ? describeSkippedStableTags({
+        tags: decision.skippedTags,
+        missingCommits: [
+          ...new Set(decision.skippedTags.flatMap((tag) => missingUpstreamCommitsByTag[tag] ?? [])),
+        ].toSorted(),
+        upstreamCommitCount: upstreamCommitsPresentInMain.length,
+      })
+    : "";
+
   const targetTag = decision.release.tag_name;
   const targetCommit = resolveTagCommit(targetTag);
   if (git(["cat-file", "-t", `${targetCommit}:${MARKER_PATH}`], { allowFailure: true })) {
@@ -1010,22 +1330,12 @@ async function main() {
       `Upstream already uses ${MARKER_PATH}; refusing to overwrite it with fork sync state.`,
     );
   }
-  if (isAncestor(targetCommit, mainRef)) {
-    const message = `Upstream tag \`${targetTag}\` is already in the fork history; no pull request created.`;
-    console.log(message);
-    await writeOutput("requires_write", "false");
-    await writeStepSummary(message);
-    return;
-  }
-
-  const baseCommit =
-    integratedRelease?.commit ??
-    (integratedTag ? resolveTagCommit(integratedTag) : git(["merge-base", mainRef, targetCommit]));
+  const baseCommit = marker?.commit ?? git(["merge-base", mainRef, targetCommit]);
   const branch = `${BRANCH_PREFIX}${targetTag}-${targetCommit.slice(0, 8)}`;
 
   if (preflight) {
     if (dryRun) {
-      const message = `Dry run only; upstream stable ${targetTag} needs a sync pull request.`;
+      const message = `${skippedTagSummary ? `${skippedTagSummary}\n\n` : ""}Dry run only; upstream stable ${targetTag} needs a sync pull request.`;
       console.log(message);
       await writeOutput("requires_write", "false");
       await writeOutput("target_tag", targetTag);
@@ -1034,7 +1344,7 @@ async function main() {
       await writeStepSummary(message);
       return;
     }
-    const message = `Stable upstream release ${targetTag} needs a sync pull request.`;
+    const message = `${skippedTagSummary ? `${skippedTagSummary}\n\n` : ""}Stable upstream release ${targetTag} needs a sync pull request.`;
     console.log(message);
     await writeOutput("requires_write", "true");
     await writeOutput("target_tag", targetTag);
@@ -1058,12 +1368,16 @@ async function main() {
   } else {
     git(["config", "user.name", "github-actions[bot]"]);
     git(["config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"]);
-    mergeStableRelease({
-      targetTag,
-      mainRef,
-      branch,
-      tagRef: `refs/tags/upstream/${targetTag}`,
-    });
+    if (isAncestor(targetCommit, mainRef)) {
+      git(["switch", "--create", branch, mainRef]);
+    } else {
+      mergeStableRelease({
+        targetTag,
+        mainRef,
+        branch,
+        tagRef: `refs/tags/upstream/${targetTag}`,
+      });
+    }
 
     await NodeFSP.writeFile(
       MARKER_PATH,
@@ -1086,10 +1400,11 @@ async function main() {
           )}${commits.length > 60 ? `\n- … and ${commits.length - 60} more upstream commits` : ""}`
       : "No upstream commit messages were found between the recorded stable tags.";
   const body = [
-    `This pull request merges upstream stable release **${targetTag}** (${targetCommit}).`,
+    `This pull request synchronizes upstream stable release **${targetTag}** (${targetCommit}).`,
     "",
-    "The update branch is based on the fork's current `main` and merges the upstream tag, preserving fork commits. The branch is pushed first so eligible push checks run on its exact head SHA. Automatic merge requires all four fork checks and strict protected-main rules; it never uses an administrator bypass.",
+    "The update branch is based on fork `main` and uses only this upstream stable tag; it never merges upstream `main`. If the tag commit is not already in fork `main`, the branch merges that tag while preserving fork commits. If the tag is already present, the branch records only the stable marker. The branch is pushed first so eligible push checks run on its exact head SHA. Automatic merge requires all four fork checks and strict protected-main rules; it never uses an administrator bypass.",
     "",
+    ...(skippedTagSummary ? [skippedTagSummary, ""] : []),
     "### Upstream change summary",
     changeSummary,
     "",
@@ -1097,7 +1412,7 @@ async function main() {
     "- The GitHub App token pushes the branch and opens this PR so CI runs on its exact head without workflow approval. Merge automation waits for all four checks to succeed on that exact SHA.",
   ].join("\n");
   if (dryRun) {
-    const summary = `## Upstream stable sync: ${targetTag}\n\n${changeSummary}\n\nDry run only; no branch was pushed and no pull request was created.`;
+    const summary = `## Upstream stable sync: ${targetTag}\n\n${skippedTagSummary ? `${skippedTagSummary}\n\n` : ""}${changeSummary}\n\nDry run only; no branch was pushed and no pull request was created.`;
     console.log(summary);
     await writeStepSummary(summary);
     return;
@@ -1106,7 +1421,7 @@ async function main() {
   await NodeFSP.writeFile(bodyPath, `${body}\n`);
   if (!existingBranchCommit) git(["push", "origin", `HEAD:refs/heads/${branch}`]);
   const pullRequestUrl = createSyncPullRequest(branch, targetTag, bodyPath);
-  const summary = `## Upstream stable sync: ${targetTag}\n\n${changeSummary}\n\nCreated the sync pull request: ${pullRequestUrl}\n\nFork CI was triggered by the push of ${branch}. The CI completion workflow verifies all four checks against the exact head before protected merging.`;
+  const summary = `## Upstream stable sync: ${targetTag}\n\n${skippedTagSummary ? `${skippedTagSummary}\n\n` : ""}${changeSummary}\n\nCreated the sync pull request: ${pullRequestUrl}\n\nFork CI was triggered by the push of ${branch}. The CI completion workflow verifies all four checks against the exact head before protected merging.`;
   console.log(summary);
   await writeStepSummary(summary);
 }

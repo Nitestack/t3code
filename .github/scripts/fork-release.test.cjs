@@ -5,7 +5,10 @@ const path = require("node:path");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const {
+  analyzeForkUpstreamHistory,
   assertExistingForkReleaseMetadata,
+  buildForkArtifactSourceMetadata,
+  buildForkBuildInfo,
   buildForkNixBuildSummary,
   buildForkReleaseNotes,
   requiredReleaseAssets,
@@ -29,25 +32,33 @@ const dispatch = {
   manifestVersions,
   sha,
   upstreamBase,
+  upstreamTag: "v0.1.9",
+  upstreamBaseIsAncestor: true,
   sourceOnMain: true,
 };
+const verifiedBase = { expectedVersion: "0.1.9", peeledTagCommit: upstreamBase };
 
 test("upstream base requires a valid marker or an explicit full manual input", () => {
   const markerContents = JSON.stringify({ tag: "v0.1.9", commit: upstreamBase });
-  assert.equal(resolveForkUpstreamBase({ markerContents }), upstreamBase);
+  assert.equal(resolveForkUpstreamBase({ markerContents, ...verifiedBase }), upstreamBase);
   assert.equal(
-    resolveForkUpstreamBase({ markerContents: undefined, explicitBase: upstreamBase }),
+    resolveForkUpstreamBase({
+      markerContents: undefined,
+      explicitBase: upstreamBase,
+      ...verifiedBase,
+    }),
     upstreamBase,
   );
   assert.throws(
-    () => resolveForkUpstreamBase({ markerContents: undefined }),
-    /requires the upstream_base input to be a full 40-character commit SHA/,
+    () => resolveForkUpstreamBase({ markerContents: undefined, ...verifiedBase }),
+    /upstream_base to equal the verified full commit SHA/,
   );
   assert.throws(
     () =>
       resolveForkUpstreamBase({
         markerContents: "{invalid-json",
         explicitBase: upstreamBase,
+        ...verifiedBase,
       }),
     /marker is invalid/,
   );
@@ -56,6 +67,7 @@ test("upstream base requires a valid marker or an explicit full manual input", (
       resolveForkUpstreamBase({
         markerContents: JSON.stringify({ tag: "v0.1.9", commit: "24e77473ec" }),
         explicitBase: upstreamBase,
+        ...verifiedBase,
       }),
     /marker is invalid/,
   );
@@ -65,8 +77,25 @@ test("upstream base requires a valid marker or an explicit full manual input", (
         markerContents: undefined,
         explicitBase: upstreamBase,
         sourceBranch: "automation/upstream-stable-v0.1.9-24e77473",
+        ...verifiedBase,
       }),
     /marker is missing for an automated sync release/,
+  );
+  assert.throws(
+    () =>
+      resolveForkUpstreamBase({
+        markerContents: JSON.stringify({ tag: "v0.1.8", commit: upstreamBase }),
+        ...verifiedBase,
+      }),
+    /marker is invalid/,
+  );
+  assert.throws(
+    () =>
+      resolveForkUpstreamBase({
+        markerContents: JSON.stringify({ tag: "v0.1.9", commit: "f".repeat(40) }),
+        ...verifiedBase,
+      }),
+    /marker is invalid/,
   );
 });
 
@@ -77,6 +106,8 @@ test("release notes and summaries preserve backticks and dollar signs", () => {
     sha,
     sourceBranch,
     buildArtifactRunId: "12345",
+    buildArtifactRunAttempt: "2",
+    upstreamTag: "v0.1.9",
     releaseTag: "v0.1.9",
   });
   const release = {
@@ -88,6 +119,15 @@ test("release notes and summaries preserve backticks and dollar signs", () => {
     assets: requiredReleaseAssets("0.1.9").map((name) => ({ name })),
   };
   assert.match(releaseNotes, /Source branch: ``manual`\$source``/);
+  assert.match(
+    releaseNotes,
+    /Fork commit \(built source\): `466b0b0968b7b7ae2016d742a52f3407c629564a`/,
+  );
+  assert.match(
+    releaseNotes,
+    /Upstream stable base: `v0\.1\.9` = `24e77473ecf41bc1f7142529c7911c1c1aae1d76`/,
+  );
+  assert.match(releaseNotes, /include fork changes plus upstream through v0\.1\.9/);
   assert.match(releaseNotes, /nix profile add 'github:Nitestack\/t3code\/v0\.1\.9#t3code-fork'/);
   assert.doesNotThrow(() =>
     assertExistingForkReleaseMetadata({
@@ -95,6 +135,7 @@ test("release notes and summaries preserve backticks and dollar signs", () => {
       version: "0.1.9",
       sha,
       upstreamBase,
+      upstreamTag: "v0.1.9",
       sourceBranch,
     }),
   );
@@ -125,6 +166,76 @@ test("release tags derive from the synchronized application version and cannot s
     () =>
       resolveForkRelease({ ...dispatch, manifestVersions: { ...manifestVersions, web: "0.1.8" } }),
     /must have the same application version/,
+  );
+  assert.throws(
+    () => resolveForkRelease({ ...dispatch, upstreamTag: "v0.1.8" }),
+    /does not match v0\.1\.9/,
+  );
+  assert.throws(
+    () => resolveForkRelease({ ...dispatch, upstreamBaseIsAncestor: false }),
+    /must be an ancestor of the fork release source/,
+  );
+});
+
+test("upstream history preflight detects upstream-main commits beyond the stable tag", () => {
+  const stableCommit = "a".repeat(40);
+  const laterUpstreamCommit = "b".repeat(40);
+  const forkCommit = "c".repeat(40);
+  assert.deepEqual(
+    analyzeForkUpstreamHistory({
+      sourceRangeCommits: [forkCommit, laterUpstreamCommit],
+      upstreamMainCommits: [stableCommit, laterUpstreamCommit],
+    }),
+    { commits: [laterUpstreamCommit], blocked: true },
+  );
+  assert.deepEqual(
+    analyzeForkUpstreamHistory({
+      sourceRangeCommits: [forkCommit],
+      upstreamMainCommits: [stableCommit, laterUpstreamCommit],
+    }),
+    { commits: [], blocked: false },
+  );
+  assert.throws(
+    () =>
+      resolveForkRelease({
+        ...dispatch,
+        unreleasedUpstreamCommits: [laterUpstreamCommit],
+      }),
+    /Fork source contains 1 upstream-main commit\(s\) beyond v0\.1\.9: b{12}.*stable upstream tags only/,
+  );
+});
+
+test("BUILD-INFO generation preserves literal backticks and dollar signs", () => {
+  const buildInfo = buildForkBuildInfo({
+    version: "0.1.9",
+    sha,
+    upstreamTag: "v0.1.9",
+    upstreamBase,
+    sourceBranch: "main`$branch",
+    buildRunId: "12345",
+    buildRunAttempt: "2",
+  });
+  assert.match(buildInfo, /Source branch: ``main`\$branch``/);
+  assert.match(
+    buildInfo,
+    /Build-only mode: this run creates no Git tag or GitHub release, including a draft/,
+  );
+  assert.match(
+    buildInfo,
+    /nix build 'github:Nitestack\/t3code\/466b0b0968b7b7ae2016d742a52f3407c629564a#t3code-fork'/,
+  );
+  assert.match(
+    buildForkBuildInfo({
+      version: "0.1.9",
+      sha,
+      upstreamTag: "v0.1.9",
+      upstreamBase,
+      sourceBranch: "main",
+      buildRunId: "12345",
+      buildRunAttempt: "1",
+      publicationMode: "authorized-auto-publish",
+    }),
+    /explicitly authorized stable release run/,
   );
 });
 
@@ -184,7 +295,7 @@ test("manual publication promotes only a selected tested build-only run", () => 
 });
 
 test("publication accepts only a successful matching build-only run and artifact", () => {
-  const artifactName = `t3-code-nitestack-installers-0.1.9-${sha.slice(0, 12)}-attempt-1`;
+  const artifactName = `t3-code-nitestack-installers-0.1.9-${sha.slice(0, 12)}`;
   const run = {
     id: 12345,
     path: ".github/workflows/release.yml",
@@ -211,9 +322,9 @@ test("publication accepts only a successful matching build-only run and artifact
       version: "0.1.9",
       sha,
     }),
-    { artifactName, runId: 12345 },
+    { artifactName, runId: 12345, runAttempt: 1 },
   );
-  const rerunArtifactName = `t3-code-nitestack-installers-0.1.9-${sha.slice(0, 12)}-attempt-2`;
+  const rerunArtifactName = artifactName;
   assert.deepEqual(
     validateForkBuildOnlyRun({
       run: { ...run, run_attempt: 2 },
@@ -223,14 +334,14 @@ test("publication accepts only a successful matching build-only run and artifact
       version: "0.1.9",
       sha,
     }),
-    { artifactName: rerunArtifactName, runId: 12345 },
+    { artifactName: rerunArtifactName, runId: 12345, runAttempt: 2 },
   );
   assert.throws(
     () =>
       validateForkBuildOnlyRun({
         run: { ...run, run_attempt: 2 },
         jobs,
-        artifacts,
+        artifacts: [{ ...artifacts[0], name: `${artifactName}-attempt-1` }],
         expectedRunId: "12345",
         version: "0.1.9",
         sha,
@@ -246,7 +357,7 @@ test("publication accepts only a successful matching build-only run and artifact
       version: "0.1.9",
       sha,
     }),
-    { artifactName, runId: 12345 },
+    { artifactName, runId: 12345, runAttempt: 1 },
   );
   assert.throws(
     () =>
@@ -305,7 +416,7 @@ test("sync releases bind their branch to the exact source and upstream version",
     sourceBranch: `automation/upstream-stable-v0.1.9-${upstreamBase.slice(0, 8)}`,
   };
   assert.equal(resolveForkRelease(syncRelease).tag, "v0.1.9");
-  assert.equal(syncRelease.sha.startsWith(syncRelease.sourceBranch.slice(-8)), false);
+  assert.notEqual(syncRelease.sha.slice(0, 8), upstreamBase.slice(0, 8));
   assert.throws(
     () =>
       resolveForkRelease({
@@ -334,6 +445,8 @@ test("an existing release is idempotent only with its exact source and complete 
       sha,
       sourceBranch: "main",
       buildArtifactRunId: "12345",
+      buildArtifactRunAttempt: "1",
+      upstreamTag: "v0.1.9",
       releaseTag: "v0.1.9",
     }),
     draft: false,
@@ -400,6 +513,8 @@ test("existing release assets must have matching source metadata and file checks
       sha,
       sourceBranch: "main",
       buildArtifactRunId: "12345",
+      buildArtifactRunAttempt: "1",
+      upstreamTag: "v0.1.9",
       releaseTag: "v0.1.9",
     }),
     draft: false,
@@ -427,6 +542,13 @@ test("existing release assets must have matching source metadata and file checks
         versionCode: 1009,
         gitSha: sha,
         sha256: digest(androidBytes),
+        ...buildForkArtifactSourceMetadata({
+          sha,
+          upstreamTag: "v0.1.9",
+          upstreamBase,
+          buildRunId: "12345",
+          buildRunAttempt: "1",
+        }),
       }),
     );
     fs.writeFileSync(
@@ -440,6 +562,13 @@ test("existing release assets must have matching source metadata and file checks
         installer: windows,
         windowsSigning: "unsigned",
         sha256: digest(windowsBytes),
+        ...buildForkArtifactSourceMetadata({
+          sha,
+          upstreamTag: "v0.1.9",
+          upstreamBase,
+          buildRunId: "12345",
+          buildRunAttempt: "1",
+        }),
       }),
     );
     fs.writeFileSync(
@@ -449,18 +578,26 @@ test("existing release assets must have matching source metadata and file checks
         version: "0.1.9",
         gitSha: sha,
         storePath: `/nix/store/${"a".repeat(32)}-t3code-fork-0.1.9`,
+        ...buildForkArtifactSourceMetadata({
+          sha,
+          upstreamTag: "v0.1.9",
+          upstreamBase,
+          buildRunId: "12345",
+          buildRunAttempt: "1",
+        }),
       }),
     );
     fs.writeFileSync(
       path.join(directory, "BUILD-INFO.md"),
-      [
-        "Version: 0.1.9",
-        `Fork commit: ${sha}`,
-        `Upstream base: ${upstreamBase}`,
-        "Source branch: main",
-        "Build-only Actions run: 12345",
-        `nix build 'github:Nitestack/t3code/${sha}#t3code-fork'`,
-      ].join("\n"),
+      buildForkBuildInfo({
+        version: "0.1.9",
+        sha,
+        upstreamTag: "v0.1.9",
+        upstreamBase,
+        sourceBranch: "main",
+        buildRunId: "12345",
+        buildRunAttempt: "1",
+      }),
     );
 
     await assert.doesNotReject(() =>
@@ -470,6 +607,7 @@ test("existing release assets must have matching source metadata and file checks
         version: "0.1.9",
         sha,
         upstreamBase,
+        upstreamTag: "v0.1.9",
       }),
     );
     await assert.doesNotReject(() =>
@@ -478,8 +616,10 @@ test("existing release assets must have matching source metadata and file checks
         version: "0.1.9",
         sha,
         upstreamBase,
+        upstreamTag: "v0.1.9",
         sourceBranch: "main",
         buildRunId: "12345",
+        buildRunAttempt: "1",
       }),
     );
     await assert.rejects(
@@ -488,8 +628,10 @@ test("existing release assets must have matching source metadata and file checks
         version: "0.1.9",
         sha,
         upstreamBase,
+        upstreamTag: "v0.1.9",
         sourceBranch: "automation/upstream-stable-v0.1.9-deadbeef",
         buildRunId: "12345",
+        buildRunAttempt: "1",
       }),
       /source identity/,
     );
@@ -501,6 +643,7 @@ test("existing release assets must have matching source metadata and file checks
         version: "0.1.9",
         sha,
         upstreamBase,
+        upstreamTag: "v0.1.9",
       }),
       /contents do not match/,
     );

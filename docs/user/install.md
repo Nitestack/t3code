@@ -132,9 +132,12 @@ Nix manages both the desktop app and the bundled
 ### T3 Code fork (Nix)
 
 The fork has its own flake and command names, so it can be installed next to the
-nixpkgs `t3code` package. After an authorized release is available, use its
-upstream-matched version tag; the flake reads the application version from the
-source and pins nixpkgs in `flake.lock`:
+nixpkgs `t3code` package. A stable release tag points to the fork integration
+commit on `main`, with fork changes and upstream through the matching stable
+tag; metadata records that upstream tag's peeled commit as the stable base.
+After an authorized release is available, use its upstream-matched version tag;
+the flake reads the application version from the source and pins nixpkgs in
+`flake.lock`:
 
 ```bash
 nix profile add 'github:Nitestack/t3code/v0.1.9#t3code-fork'
@@ -163,10 +166,15 @@ Before a public fork release is authorized, collaborators can get installable te
 fork's GitHub Actions. Open **Actions → Release**, run it from `main` with channel `stable`, and
 leave **publish** unchecked. If the selected source has no upstream sync marker, enter the full
 40-character upstream commit in `upstream_base`. Download the combined artifact named
-`t3-code-nitestack-installers-<version>-<12-character-commit>-attempt-<run-attempt>` from that run. It contains the
+`t3-code-nitestack-installers-<version>-<12-character-commit>` from that run. It contains the
 Windows x64 `.exe`, the signed Android `.apk`, SHA-256 files, and metadata. Check the matching
 checksum before installing. `windows-metadata.json` reports whether the Windows installer has an
-Authenticode signature; current fork builds are expected to be unsigned. After an authorized public
+Authenticode signature; current fork builds are expected to be unsigned. Its metadata and
+`BUILD-INFO.md` identify the fork integration commit that was built and the upstream stable tag plus
+peeled base SHA. The release tag points to the fork integration commit, whose tree includes fork
+changes and upstream through that stable tag. Fork `main` takes only stable upstream tags and never
+merges upstream `main`; its first release can use only a stable tag containing every upstream commit
+already present in `main`. After an authorized public
 release exists, use its matching assets from the fork's GitHub Releases page instead. See the
 [fork release guide](../operations/fork-release.md) for the build and release process.
 

@@ -6,19 +6,11 @@ reviewed fork releases.
 
 ## Verified starting point
 
-The ticket branch started from `daed91f26464a280796e38911b7b97455226ef9e`, which was also
-`origin/main` at bootstrap. GitHub identifies `Nitestack/t3code` as a public fork of
-`pingdotgg/t3code`, with `main` as its default branch. The checkout's `origin` points to the fork
-and `upstream` points to the original repository. `gh` uses `Nitestack/t3code` as its local default.
-
-The latest stable upstream release at bootstrap was `v0.1.9`, published on 2026-11-11 and pointing
-to `24e77473ecf41bc1f7142529c7911c1c1aae1d76`. GitHub's compare API reported the checkout base
-974 commits ahead of that release and zero commits behind. At bootstrap, the checkout was based on
-upstream `main`, not that older stable tag. During the T00 implementation, upstream `main` was
-`065aca4889fb422c536bbf673d2f2beba50df3cb`, three commits ahead of the ticket base.
-
-Recheck these values before a future upstream sync; they describe the bootstrap, not a moving
-version pin.
+GitHub identifies `Nitestack/t3code` as a public fork of `pingdotgg/t3code`, with `main` as its
+default branch. The checkout's `origin` points to the fork and `upstream` points to the original
+repository. `gh` uses `Nitestack/t3code` as its local default. The fork history includes upstream
+commits beyond the imported `v0.1.9` stable tag, so the sync automation waits for a stable tag that
+contains them before creating the first release.
 
 ## Bootstrap from an upstream clone
 
@@ -78,12 +70,19 @@ open PRs against the fork's `main`. Use conventional commit titles. The daily st
 PR for a newer upstream release and merges it only after all four exact-head fork CI jobs succeed
 under protected `main`. Conflicts or stale checks leave the sync unmerged for manual repair.
 
+Fork `main` takes only published upstream stable tags; never merge upstream `main`. A stable tag is
+skipped until it contains every upstream commit already present in fork `main`, so the first release
+can happen only at the first stable tag that contains all commits already merged there.
+
 The fork keeps the upstream application version values. The existing `Release` workflow from
 `main` checks all four fork CI jobs on the exact source commit, confirms the application manifests
 agree, and builds a Windows x64 installer, signed Android APK, and matching Nix package. Its default
 build-only mode uploads an Actions artifact without creating a tag or release. After explicit
 authorization, a stable dispatch can publish the upstream-matched `vX.Y.Z` tag and `T3 Code vX.Y.Z`
-release; the notes identify the fork commit and upstream base, and the Nix command pins to that tag.
+release. The tag points to the fork integration merge commit on `main`: its tree includes fork changes
+and upstream through the matching stable tag. The upstream tag's peeled commit is recorded only as
+the stable base. Notes and artifact metadata show both full SHAs, and the Nix command pins to the fork
+release tag.
 The old imported tag in this clone is not a fork release: the workflow refuses to move it or replace
 an existing release.
 
@@ -93,11 +92,11 @@ To inspect upstream changes manually without applying them:
 git fetch upstream --tags
 gh api repos/pingdotgg/t3code/releases/latest \
   --jq '{tag_name, target_commitish, draft, prerelease, published_at}'
-git log --oneline --decorate --left-right origin/main...upstream/main
 ```
 
 `releases/latest` selects GitHub's latest stable release. To resolve its exact commit after fetching
-tags, use `git rev-parse '<tag>^{commit}'`. Review the commit range and CI before syncing it.
+tags, use `git rev-parse '<tag>^{commit}'`. Review that stable tag and its CI before syncing it;
+upstream `main` is not a sync source.
 
 ## Local development and separate server data
 

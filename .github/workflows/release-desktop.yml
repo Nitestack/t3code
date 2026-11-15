@@ -182,7 +182,7 @@ jobs:
         continue-on-error: true
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: release-dependency-verification-attempt-${{ github.run_attempt }}
+          name: release-dependency-verification
           path: ${{ runner.temp }}/pnpm-metadata
 
       - name: Setup dependencies
@@ -266,7 +266,7 @@ jobs:
         if: inputs.relay_client_tracing
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: relay-client-tracing-config-attempt-${{ github.run_attempt }}
+          name: relay-client-tracing-config
           path: ${{ runner.temp }}/relay-client-tracing
 
       - name: Load relay client tracing config
@@ -287,7 +287,7 @@ jobs:
       - name: Download JS bundle
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: js-bundle-attempt-${{ github.run_attempt }}
+          name: js-bundle
           path: apps
 
       - name: Install cargo-xwin
@@ -504,11 +504,12 @@ jobs:
         if: inputs.cli_archive && inputs.platform != 'mac'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: cli-${{ inputs.platform }}-${{ inputs.arch }}-attempt-${{ github.run_attempt }}
+          name: cli-${{ inputs.platform }}-${{ inputs.arch }}
           path: release-cli/*
           if-no-files-found: error
           # The archive is already gzip or zip; deflating it again saves under 2%.
           compression-level: 0
+          overwrite: true
 
       - name: Install Linux desktop build libraries
         if: inputs.platform == 'linux'
@@ -535,7 +536,7 @@ jobs:
         timeout-minutes: 40
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          ARTIFACT: cli-linux-${{ inputs.arch }}-attempt-${{ github.run_attempt }}
+          ARTIFACT: cli-linux-${{ inputs.arch }}
           LINUX_JOB: Build Linux ${{ inputs.arch }}
         run: |
           $headers = @{ Authorization = "Bearer $env:GITHUB_TOKEN"; Accept = "application/vnd.github+json" }
@@ -581,7 +582,7 @@ jobs:
         if: inputs.platform == 'win'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: cli-linux-${{ inputs.arch }}-attempt-${{ github.run_attempt }}
+          name: cli-linux-${{ inputs.arch }}
           path: wsl-runtime
 
       - name: Build desktop artifact
@@ -735,11 +736,12 @@ jobs:
         if: inputs.cli_archive && inputs.platform == 'mac'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: cli-${{ inputs.platform }}-${{ inputs.arch }}-attempt-${{ github.run_attempt }}
+          name: cli-${{ inputs.platform }}-${{ inputs.arch }}
           path: release-cli/*
           if-no-files-found: error
           # The archive is already gzip or zip; deflating it again saves under 2%.
           compression-level: 0
+          overwrite: true
 
       # Warm installs only touch the store index, so new content means a fetch.
       - name: Check staged install cache for new content
@@ -786,9 +788,10 @@ jobs:
         if: failure() && inputs.launch_check
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: desktop-launch-check-${{ inputs.platform }}-${{ inputs.arch }}-attempt-${{ github.run_attempt }}
+          name: desktop-launch-check-${{ inputs.platform }}-${{ inputs.arch }}
           path: ${{ runner.temp }}/desktop-launch-check
           if-no-files-found: ignore
+          overwrite: true
 
       # The verify job runs what this host could not: the packaged natives and
       # the CLI. Its scripts are bundled so that job needs no install.
@@ -814,11 +817,12 @@ jobs:
         if: inputs.verify_runner != ''
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: verify-${{ inputs.platform }}-${{ inputs.arch }}-attempt-${{ github.run_attempt }}
+          name: verify-${{ inputs.platform }}-${{ inputs.arch }}
           path: verify/*
           if-no-files-found: error
           retention-days: 1
           compression-level: 1
+          overwrite: true
 
       - name: Collect release assets
         shell: bash
@@ -933,18 +937,20 @@ jobs:
       - name: Upload build artifacts
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: desktop-${{ inputs.platform }}-${{ inputs.arch }}-attempt-${{ github.run_attempt }}
+          name: desktop-${{ inputs.platform }}-${{ inputs.arch }}
           path: release-publish/*
           if-no-files-found: error
           # Installers, zips and blockmaps are already compressed; deflating them again saves under 0.3%.
           compression-level: 0
+          overwrite: true
 
       - name: Upload resource monitor
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: resource-monitor-${{ inputs.resource_key }}-attempt-${{ github.run_attempt }}
+          name: resource-monitor-${{ inputs.resource_key }}
           path: resource-monitor-publish/${{ inputs.resource_key }}/*
           if-no-files-found: error
+          overwrite: true
 
   verify:
     name: Verify
@@ -956,14 +962,14 @@ jobs:
       - name: Download verification inputs
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: verify-${{ inputs.platform }}-${{ inputs.arch }}-attempt-${{ github.run_attempt }}
+          name: verify-${{ inputs.platform }}-${{ inputs.arch }}
           path: verify
 
       - name: Download CLI archive
         if: inputs.cli_archive
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: cli-${{ inputs.platform }}-${{ inputs.arch }}-attempt-${{ github.run_attempt }}
+          name: cli-${{ inputs.platform }}-${{ inputs.arch }}
           path: release-cli
 
       - name: Verify packaged natives
