@@ -3,6 +3,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
+import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
@@ -39,6 +40,7 @@ import {
   makeClaudeEnvironment,
   validateClaudeAixSettingsAuth,
 } from "../provider/Drivers/ClaudeHome.ts";
+import { readClaudeLaunchArgSettings } from "../orchestration-v2/Adapters/ClaudeAdapterV2.ts";
 
 const CLAUDE_TIMEOUT_MS = 180_000;
 /** `--tools` takes bare names; patterns go in the allow list. */
@@ -104,6 +106,10 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
   claudeSettings: ClaudeSettings,
   environment?: NodeJS.ProcessEnv,
   modelCatalog: Effect.Effect<ClaudeModelCatalog> = Effect.succeed(BUNDLED_CLAUDE_MODEL_CATALOG),
+  routeModelCatalog: (
+    catalog: ClaudeModelCatalog,
+    cwd: string,
+  ) => Effect.Effect<ClaudeModelCatalog> = Effect.succeed,
   resolveEnvironment?: Effect.Effect<NodeJS.ProcessEnv, ProviderSetupError>,
 ) {
   const commandSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -155,9 +161,19 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
   }: TextGenerationOperations.Request<S>): Effect.fn.Return<
     S["Type"],
     TextGenerationError,
-    S["DecodingServices"]
+    S["DecodingServices"] | Scope.Scope
   > {
-    const catalog = yield* scopedModelCatalog;
+    const workingDirectory =
+      operation === "generateThreadTitle"
+        ? yield* fileSystem
+            .makeTempDirectoryScoped({ prefix: "t3code-claude-title-" })
+            .pipe(
+              Effect.mapError((cause) =>
+                normalizeCliError("claude", operation, cause, "Failed to create title directory"),
+              ),
+            )
+        : cwd;
+    const catalog = yield* routeModelCatalog(yield* scopedModelCatalog, workingDirectory);
     const resolvedModelSelection = {
       ...modelSelection,
       model: resolveClaudeModelSlug(catalog, modelSelection.model),
@@ -194,6 +210,17 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
         : undefined;
     const fastMode =
       fastModeDescriptor?.type === "boolean" ? fastModeDescriptor.currentValue : undefined;
+    const launchArgSettings = yield* readClaudeLaunchArgSettings({
+      settings: claudeSettings,
+      cwd,
+      fileSystem,
+      path,
+    }).pipe(
+      Effect.mapError(
+        (cause) => new TextGenerationError({ operation, detail: cause.message, cause }),
+      ),
+    );
+
     const runClaudeCommand = Effect.fn("runClaudeJson.runClaudeCommand")(function* (
       noSessionPersistence: boolean,
     ) {
@@ -214,10 +241,13 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
           )
         : claudeEnvironment;
       const settings = {
+        ...launchArgSettings,
         disableAllHooks: true,
         ...(resolveEnvironment === undefined
           ? {}
-          : { env: claudeAixSettingsEnvironment(processEnvironment) }),
+          : {
+              env: claudeAixSettingsEnvironment(processEnvironment, launchArgSettings?.env),
+            }),
         ...(typeof thinking === "boolean" ? { alwaysThinkingEnabled: thinking } : {}),
         ...(fastMode ? { fastMode: true } : {}),
         ...(typeof ultracode === "boolean" ? { ultracode } : {}),
@@ -227,21 +257,12 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
         settings,
         "Failed to encode Claude CLI settings.",
       );
-      const workingDirectory =
-        operation === "generateThreadTitle"
-          ? yield* fileSystem
-              .makeTempDirectoryScoped({ prefix: "t3code-claude-title-" })
-              .pipe(
-                Effect.mapError((cause) =>
-                  normalizeCliError("claude", operation, cause, "Failed to create title directory"),
-                ),
-              )
-          : cwd;
       if (resolveEnvironment !== undefined) {
         yield* validateClaudeAixSettingsAuth(
           claudeSettings,
           workingDirectory,
           processEnvironment,
+          launchArgSettings?.env,
         ).pipe(
           Effect.provideService(FileSystem.FileSystem, fileSystem),
           Effect.provideService(Path.Path, path),
@@ -388,5 +409,9 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
     );
   });
 
-  return TextGenerationOperations.fromRunner("ClaudeTextGeneration", runClaudeJson);
+  return TextGenerationOperations.fromRunner(
+    "ClaudeTextGeneration",
+    <S extends Schema.Top>(request: TextGenerationOperations.Request<S>) =>
+      Effect.scoped(runClaudeJson(request)),
+  );
 });

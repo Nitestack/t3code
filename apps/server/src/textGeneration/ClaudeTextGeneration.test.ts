@@ -113,6 +113,7 @@ function withFakeClaudeEnv<A, E, R>(
       config,
       environment,
       Effect.succeed(SYNTHETIC_CLAUDE_MODEL_CATALOG),
+      undefined,
       input.resolveEnvironment?.(environment),
     );
     return yield* effectFn(textGeneration);
@@ -270,6 +271,59 @@ it.layer(layerClaudeTextGenerationTest)("ClaudeTextGeneration", (it) => {
     }),
   );
 
+  it.effect("guards aix credentials against --settings launch-arg env", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const startedPath = path.join(
+        yield* fs.makeTempDirectoryScoped({ prefix: "claude-launch-guard-" }),
+        "started",
+      );
+      const gateway = (launchEnv: Record<string, string>) => ({
+        output: JSON.stringify({ structured_output: { title: "Launch guard verified" } }),
+        claudeConfig: { launchArgs: `--settings '${JSON.stringify({ env: launchEnv })}'` },
+        environment: {
+          ANTHROPIC_BASE_URL: "https://gateway.example.test",
+          ANTHROPIC_API_KEY: "",
+          ANTHROPIC_AUTH_TOKEN: "fresh-aix-token",
+          T3_FAKE_CLAUDE_STARTED_FILE: startedPath,
+        },
+        resolveEnvironment: (environment: NodeJS.ProcessEnv) => Effect.succeed(environment),
+      });
+      const request = {
+        cwd: process.cwd(),
+        message: "thread title",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("claudeAgent"),
+          model: SYNTHETIC_CLAUDE_STANDARD_MODEL,
+        },
+      };
+
+      yield* withFakeClaudeEnv(
+        {
+          ...gateway({
+            ANTHROPIC_API_KEY: "private-launch-api-key-sentinel",
+            ANTHROPIC_VERTEX_PROJECT_ID: "vertex-project-a",
+          }),
+          checkGatewayEnvironment: true,
+          argsMustContain: `"ANTHROPIC_VERTEX_PROJECT_ID":"vertex-project-a"`,
+          argsMustNotContain: "private-launch-api-key-sentinel",
+        },
+        (textGeneration) => textGeneration.generateThreadTitle(request),
+      );
+      expect(yield* fs.exists(startedPath)).toBe(true);
+      yield* fs.remove(startedPath);
+
+      const error = yield* withFakeClaudeEnv(
+        gateway({ ANTHROPIC_AUTH_TOKEN: "private-launch-token-sentinel" }),
+        (textGeneration) => Effect.flip(textGeneration.generateThreadTitle(request)),
+      );
+      expect(error.detail).toContain("conflicting");
+      expect(JSON.stringify(error)).not.toContain("private-launch-token-sentinel");
+      expect(yield* fs.exists(startedPath)).toBe(false);
+    }),
+  );
+
   it.effect(
     "keeps canonical built-in capabilities when a custom model collides with its alias",
     () =>
@@ -392,6 +446,35 @@ it.layer(layerClaudeTextGenerationTest)("ClaudeTextGeneration", (it) => {
           }),
       );
     }),
+  );
+
+  it.effect("passes --settings from the instance launch args to Claude text generation", () =>
+    withFakeClaudeEnv(
+      {
+        output: JSON.stringify({
+          structured_output: {
+            title: "Use instance settings",
+          },
+        }),
+        argsMustContain: `"env":{"ANTHROPIC_VERTEX_PROJECT_ID":"vertex-project-a"}`,
+        claudeConfig: {
+          launchArgs: `--settings '{"env":{"ANTHROPIC_VERTEX_PROJECT_ID":"vertex-project-a"}}'`,
+        },
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const generated = yield* textGeneration.generateThreadTitle({
+            cwd: process.cwd(),
+            message: "thread title",
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("claudeAgent"),
+              model: SYNTHETIC_CLAUDE_STANDARD_MODEL,
+            },
+          });
+
+          expect(generated.title).toBe(sanitizeThreadTitle("Use instance settings"));
+        }),
+    ),
   );
 
   it.effect("retries without --no-session-persistence when the Claude CLI rejects it", () =>
