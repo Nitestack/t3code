@@ -1,19 +1,60 @@
 import {
   DEFAULT_CLIENT_SETTINGS,
+  EnvironmentId,
   ProviderDriverKind,
   ProviderInstanceId,
   type ModelSelection,
 } from "@t3tools/contracts";
+import * as Cause from "effect/Cause";
+import { AsyncResult } from "effect/reactivity";
 import { useState } from "react";
 import { expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
 
 import "~/index.css";
 
-import { render } from "../../../test/render";
+import { act, render } from "../../../test/render";
 import { __setClientSettingsForTests } from "../../hooks/useSettings";
 import { deriveProviderInstanceEntries } from "../../providerInstances";
 import { ProviderModelPicker } from "./ProviderModelPicker";
+import { toastManager } from "../ui/toast";
+
+const aixState = vi.hoisted(() => ({
+  allowed: false,
+  refresh: vi.fn(),
+  permission: undefined as unknown,
+}));
+
+vi.mock(import("@effect/atom-react"), async (original) => {
+  const actual = await original();
+  return {
+    ...actual,
+    useAtomValue: ((atom: unknown) =>
+      atom === aixState.permission
+        ? aixState.allowed
+        : actual.useAtomValue(atom as never)) as never,
+  };
+});
+vi.mock(import("~/state/server"), async (original) => {
+  const actual = await original();
+  const { Atom } = await import("effect/reactivity");
+  const permission = Atom.make(false);
+  aixState.permission = permission;
+  return {
+    ...actual,
+    serverEnvironment: {
+      ...actual.serverEnvironment,
+      refreshProviders: {
+        ...actual.serverEnvironment.refreshProviders,
+        permissionAtom: (() => permission) as never,
+      },
+    },
+  };
+});
+vi.mock("../../state/use-atom-command", async (original) => ({
+  ...(await original()),
+  useAtomCommand: (() => aixState.refresh) as never,
+}));
 
 it("keeps each registry image when adding a model from another ACP agent", async () => {
   const icons = [
@@ -217,4 +258,117 @@ it("opens on the active provider when every favorite belongs to a disabled provi
   );
   await screen.getByRole("button", { name: "Choose model" }).click();
   await expect.element(page.getByRole("option", { name: /Codex model/ })).toBeVisible();
+});
+
+const aixEnvironmentId = EnvironmentId.make("aix-test");
+const aixInstanceId = ProviderInstanceId.make("aix-codex-work");
+const aixEntries = deriveProviderInstanceEntries([
+  {
+    instanceId: aixInstanceId,
+    driver: ProviderDriverKind.make("codex"),
+    displayName: "aix Codex",
+    enabled: true,
+    installed: true,
+    version: null,
+    status: "ready",
+    auth: { status: "authenticated" },
+    checkedAt: "2026-01-01T00:00:00.000Z",
+    models: [
+      { slug: "alpha", name: "Alpha", isCustom: false, capabilities: {} },
+      {
+        slug: "vendor/beta-v2",
+        name: "Beta",
+        isCustom: false,
+        capabilities: {},
+        catalogMetadata: { contextTokens: 128000 },
+      },
+    ],
+    slashCommands: [],
+    skills: [],
+  },
+]);
+const aixModelOptions = new Map([
+  [
+    aixInstanceId,
+    [
+      { slug: "alpha", name: "Alpha" },
+      {
+        slug: "vendor/beta-v2",
+        name: "Beta",
+        catalogMetadata: { contextTokens: 128000 },
+      },
+    ],
+  ],
+]);
+
+function renderAixPicker(permission: boolean) {
+  aixState.allowed = permission;
+  function Picker() {
+    const [model, setModel] = useState("alpha");
+    return (
+      <ProviderModelPicker
+        environmentId={aixEnvironmentId}
+        activeInstanceId={aixInstanceId}
+        model={model}
+        lockedProvider={null}
+        instanceEntries={aixEntries}
+        modelOptionsByInstance={aixModelOptions}
+        triggerAriaLabel="Choose aix model"
+        onInstanceModelChange={(_, nextModel) => setModel(nextModel)}
+      />
+    );
+  }
+  return render(<Picker />);
+}
+
+it("copies a non-selected aix model ID without selecting it", async () => {
+  aixState.refresh.mockReset().mockResolvedValue({ _tag: "Success" });
+  using writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+  await using screen = await renderAixPicker(false);
+  await screen.getByRole("button", { name: "Choose aix model" }).click();
+  await page.getByRole("button", { name: "Model details for Beta" }).click();
+  await page.getByRole("button", { name: "Copy model ID" }).click();
+  await expect.element(page.getByRole("button", { name: "Model ID copied" })).toBeVisible();
+  expect(writeText).toHaveBeenCalledWith("vendor/beta-v2");
+  await expect
+    .element(page.getByRole("button", { name: "Choose aix model" }))
+    .toHaveTextContent("Alpha");
+});
+
+it("permission-gates aix catalog refresh and reports a failed refresh", async () => {
+  await using screen = await renderAixPicker(false);
+  await screen.getByRole("button", { name: "Choose aix model" }).click();
+  await expect
+    .element(page.getByRole("button", { name: "Refresh aix catalogs" }))
+    .not.toBeInTheDocument();
+});
+
+it("disables aix catalog refresh while pending and surfaces a failed result", async () => {
+  let finishRefresh!: (result: unknown) => void;
+  aixState.refresh
+    .mockReset()
+    .mockImplementation(({ input }: { input: { refreshModels?: boolean } }) =>
+      input.refreshModels
+        ? new Promise((resolve) => (finishRefresh = resolve))
+        : Promise.resolve({ _tag: "Success" }),
+    );
+  using toast = vi.spyOn(toastManager, "add");
+  await using screen = await renderAixPicker(true);
+  await screen.getByRole("button", { name: "Choose aix model" }).click();
+  const refreshButton = page.getByRole("button", { name: "Refresh aix catalogs" });
+  await expect.element(refreshButton).toBeVisible();
+  await refreshButton.click();
+  await expect.element(refreshButton).toBeDisabled();
+  await act(async () =>
+    finishRefresh(AsyncResult.failure(Cause.fail(new Error("refresh failed")))),
+  );
+  await vi.waitFor(() =>
+    expect(toast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "error",
+        title: "Could not refresh aix catalogs",
+      }),
+    ),
+  );
+  await expect.element(refreshButton).toBeEnabled();
 });
