@@ -88,7 +88,7 @@ There is no fork iOS app.
 ## What this fork changes
 
 Compared with upstream T3 Code at
-[`0de6ddb823`](https://github.com/pingdotgg/t3code/commit/0de6ddb8235debee8c7119343e1a4da9cd8b5de8), the upstream commit last merged into the fork:
+[`f82162f033`](https://github.com/pingdotgg/t3code/commit/f82162f0336c226ae1f2927f781a0fb660869a51), the upstream commit last merged into the fork:
 
 - aix API-key profiles as provider instances for Codex, Claude Code, and a T3-managed OpenCode,
   enabled with `T3CODE_AIX=1`.
