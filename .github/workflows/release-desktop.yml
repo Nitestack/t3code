@@ -104,6 +104,12 @@ on:
         required: false
         default: true
         type: boolean
+      # Fork builds are allowed only through the release workflow's verified
+      # build-only path; upstream release callers keep their existing guard.
+      fork_build_only:
+        required: false
+        default: false
+        type: boolean
       clerk_publishable_key:
         required: true
         type: string
@@ -129,7 +135,9 @@ permissions:
 
 jobs:
   build:
-    if: github.repository == 'pingdotgg/t3code'
+    if: >-
+      github.repository == 'pingdotgg/t3code' ||
+      (github.repository == 'Nitestack/t3code' && inputs.fork_build_only)
     name: Build ${{ inputs.label }}
     runs-on: ${{ inputs.runner }}
     # Windows waits for the Linux CLI archive inside its own budget (see
@@ -213,7 +221,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: native/resource-monitor/target/${{ inputs.rust_target }}/release/t3-resource-monitor${{ inputs.platform == 'win' && '.exe' || '' }}
-          key: resource-monitor-${{ inputs.rust_target }}-${{ hashFiles('native/resource-monitor/Cargo.lock', 'native/resource-monitor/Cargo.toml', 'native/resource-monitor/src/**') }}
+          key: resource-monitor-${{ inputs.rust_target }}-${{ inputs.platform == 'win' && startsWith(inputs.runner, 'windows-') && 'native-' || '' }}${{ hashFiles('native/resource-monitor/Cargo.lock', 'native/resource-monitor/Cargo.toml', 'native/resource-monitor/src/**') }}
 
       - name: Cache Linux capture helpers
         if: inputs.platform == 'linux'
@@ -283,7 +291,7 @@ jobs:
           path: apps
 
       - name: Install cargo-xwin
-        if: inputs.platform == 'win' && steps.resource_monitor_cache.outputs.cache-hit != 'true'
+        if: inputs.platform == 'win' && !startsWith(inputs.runner, 'windows-') && steps.resource_monitor_cache.outputs.cache-hit != 'true'
         uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: cargo-xwin@0.23.1
@@ -293,12 +301,12 @@ jobs:
       - name: Build resource monitor
         if: steps.resource_monitor_cache.outputs.cache-hit != 'true'
         shell: bash
-        run: cargo ${{ inputs.platform == 'win' && 'xwin build' || 'build' }} --locked --release --manifest-path native/resource-monitor/Cargo.toml --target "${{ inputs.rust_target }}"
+        run: cargo ${{ inputs.platform == 'win' && !startsWith(inputs.runner, 'windows-') && 'xwin build' || 'build' }} --locked --release --manifest-path native/resource-monitor/Cargo.toml --target "${{ inputs.rust_target }}"
 
       # Off Windows, scripts/lib/windows-jsign.ts signs through jsign instead of
       # the TrustedSigning PowerShell module.
       - name: Install jsign
-        if: inputs.platform == 'win'
+        if: inputs.platform == 'win' && !startsWith(inputs.runner, 'windows-')
         shell: bash
         run: |
           set -euo pipefail
@@ -616,6 +624,9 @@ jobs:
           if [[ -n "${{ inputs.verify_runner }}" ]]; then
             args+=(--keep-stage)
           fi
+          if [[ "${{ inputs.platform == 'win' && startsWith(inputs.runner, 'windows-') }}" == "true" ]]; then
+            args+=(--keep-stage)
+          fi
 
           has_all() {
             for value in "$@"; do
@@ -670,6 +681,23 @@ jobs:
           fi
 
           vp run dist:desktop:artifact "${args[@]}"
+
+      - name: Verify packaged Windows natives on Windows
+        if: github.repository == 'Nitestack/t3code' && inputs.fork_build_only && inputs.platform == 'win' && startsWith(inputs.runner, 'windows-')
+        shell: bash
+        run: |
+          set -euo pipefail
+          temp_dir="$(cygpath -u "$(node -p 'require("node:os").tmpdir()')")"
+          unpacked="$(find "$temp_dir" -path '*/app/dist/win-unpacked' -type d -print -quit)"
+          if [[ -z "$unpacked" ]]; then
+            echo "::error::The native Windows build did not preserve its unpacked app for verification."
+            exit 1
+          fi
+          stage_root="$(dirname "$(dirname "$(dirname "$unpacked")")")"
+          trap 'rm -rf "$stage_root"' EXIT
+          node scripts/verify-windows-desktop-artifact.ts \
+            --app-dir "$unpacked" --arch "${{ inputs.arch }}" \
+            --build-version "${{ inputs.version }}" --verbose
 
       # The CLI was submitted without waiting so Apple reviews it while the
       # desktop builds. Notarization does not change the archive bytes, but
@@ -808,6 +836,57 @@ jobs:
               cp "$file" release-publish/
             done
           done
+
+      - name: Inspect Windows installer signature
+        id: windows_signature
+        if: github.repository == 'Nitestack/t3code' && inputs.fork_build_only && inputs.platform == 'win' && startsWith(inputs.runner, 'windows-')
+        shell: pwsh
+        run: |
+          $installers = @(Get-ChildItem -Path release-publish -Filter *.exe -File)
+          if ($installers.Count -ne 1) {
+            throw "Expected one Windows installer, found $($installers.Count)."
+          }
+          $signature = Get-AuthenticodeSignature -FilePath $installers[0].FullName
+          if ($signature.Status -eq 'Valid') {
+            $mode = 'signed'
+          } elseif ($signature.Status -eq 'NotSigned') {
+            $mode = 'unsigned'
+          } else {
+            throw "Windows installer signature status is $($signature.Status)."
+          }
+          "mode=$mode" >> $env:GITHUB_OUTPUT
+
+      - name: Add Windows installer checksum and metadata
+        if: github.repository == 'Nitestack/t3code' && inputs.fork_build_only && inputs.platform == 'win' && startsWith(inputs.runner, 'windows-')
+        shell: bash
+        env:
+          WINDOWS_SIGNING: ${{ steps.windows_signature.outputs.mode }}
+          SOURCE_SHA: ${{ inputs.ref }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          installers=(release-publish/*.exe)
+          if [[ ${#installers[@]} -ne 1 ]]; then
+            echo "Expected one Windows installer, found ${#installers[@]}." >&2
+            exit 1
+          fi
+          installer="${installers[0]}"
+          installer_name="$(basename "$installer")"
+          (cd release-publish && sha256sum "$installer_name" > "$installer_name.sha256")
+          WINDOWS_INSTALLER="$(basename "$installer")" node - <<'NODE'
+          const fs = require("node:fs");
+          const metadata = {
+            application: "T3 Code",
+            version: process.env.VERSION,
+            platform: "windows",
+            architecture: "x64",
+            gitSha: process.env.SOURCE_SHA,
+            installer: process.env.WINDOWS_INSTALLER,
+            windowsSigning: process.env.WINDOWS_SIGNING,
+            sha256: fs.readFileSync(`release-publish/${process.env.WINDOWS_INSTALLER}.sha256`, "utf8").split(" ")[0],
+          };
+          fs.writeFileSync("release-publish/windows-metadata.json", `${JSON.stringify(metadata, null, 2)}\n`);
+          NODE
 
           if [[ "${{ inputs.platform }}" == "mac" && "${{ inputs.arch }}" != "arm64" ]]; then
             shopt -s nullglob

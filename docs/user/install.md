@@ -131,30 +131,43 @@ Nix manages both the desktop app and the bundled
 
 ### T3 Code fork (Nix)
 
-The fork has its own pinned flake and command names, so it can be installed next to
-the nixpkgs `t3code` package. Replace `FULL_COMMIT` with a reviewed 40-character
-commit from the fork; the profile records that revision, and the flake pins its
-nixpkgs input in `flake.lock`:
+The fork has its own flake and command names, so it can be installed next to the
+nixpkgs `t3code` package. After an authorized release is available, use its
+upstream-matched version tag; the flake reads the application version from the
+source and pins nixpkgs in `flake.lock`:
 
 ```bash
-nix profile add 'github:Nitestack/t3code/FULL_COMMIT#t3code-fork'
+nix profile add 'github:Nitestack/t3code/v0.1.9#t3code-fork'
 ```
 
-Update to another reviewed commit by replacing `FULL_COMMIT` and installing that
-source. Check `nix profile list` afterwards and remove the previous fork entry
-by its index if Nix kept both revisions:
+Replace `v0.1.9` with the desired release tag. Update by installing the new tag,
+then check `nix profile list` and remove the previous fork entry by its index if
+Nix kept both revisions:
 
 ```bash
-nix profile install 'github:Nitestack/t3code/NEW_FULL_COMMIT#t3code-fork'
+nix profile install 'github:Nitestack/t3code/v0.2.0#t3code-fork'
 ```
 
 For NixOS, use the same package in `environment.systemPackages`. In a flake-based
 Home Manager configuration, add a pinned input and include
 `inputs.t3code-fork.packages.${pkgs.system}.t3code-fork` in `home.packages`.
-To update either configuration, change the input to a reviewed full commit and
-rebuild so its lock file records the new source.
+To update either configuration, change the input to the desired release tag and
+rebuild so its lock file records the new source. For a reviewed unreleased build,
+a full fork commit SHA can still be used in place of a tag.
 The package provides `t3code-fork` for the CLI and `t3code-fork-desktop` for the
 desktop app; neither replaces the original `t3` or `t3code-desktop` commands.
+
+### T3 Code fork (Windows and Android)
+
+Before a public fork release is authorized, collaborators can get installable test builds from the
+fork's GitHub Actions. Open **Actions → Release**, run it from `main` with channel `stable`, and
+leave **publish** unchecked. Download the combined artifact named
+`t3-code-nitestack-installers-<version>-<12-character-commit>` from that run. It contains the
+Windows x64 `.exe`, the signed Android `.apk`, SHA-256 files, and metadata. Check the matching
+checksum before installing. `windows-metadata.json` reports whether the Windows installer has an
+Authenticode signature; current fork builds are expected to be unsigned. After an authorized public
+release exists, use its matching assets from the fork's GitHub Releases page instead. See the
+[fork release guide](../operations/fork-release.md) for the build and release process.
 
 Give the fork its own data directory and an unused port when launching it. On
 Linux, the desktop app also needs a separate `XDG_CONFIG_HOME`: Electron stores

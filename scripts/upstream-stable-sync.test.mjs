@@ -12,6 +12,7 @@ import {
   isStableRelease,
   mergeStableRelease,
   parseStableVersion,
+  validateForkMergeProtection,
 } from "./upstream-stable-sync.mjs";
 
 const syncScript = NodeURL.fileURLToPath(new URL("./upstream-stable-sync.mjs", import.meta.url));
@@ -130,6 +131,13 @@ if (args[0] === "api" && args.some((arg) => arg.includes("/releases?"))) {
   } else {
     output(state.releasePages);
   }
+} else if (args[0] === "api" && args[1] === "repos/Nitestack/t3code/branches/main/protection") {
+  output(state.branchProtection);
+} else if (args[0] === "api" && args.some((arg) => arg.includes("/rulesets?"))) {
+  const rulesets = state.rulesets ?? [];
+  process.stdout.write(rulesets.map((ruleset) => JSON.stringify(ruleset)).join("\\n") + (rulesets.length ? "\\n" : ""));
+} else if (args[0] === "api" && args[1] === "repos/Nitestack/t3code") {
+  output(state.repositorySettings);
 } else if (args[0] === "api" && args.includes("--method") && args.includes("POST")) {
   if (state.dispatchError) fail(state.dispatchError);
   const ref = args.find((arg) => arg.startsWith("ref="))?.slice(4);
@@ -167,6 +175,21 @@ if (args[0] === "api" && args.some((arg) => arg.includes("/releases?"))) {
       releasePages: pages,
       pullRequests: [],
       runs: [],
+      branchProtection: {
+        required_status_checks: {
+          strict: true,
+          checks: [
+            { context: "Fork Server", app_id: 15368 },
+            { context: "Fork Web", app_id: 15368 },
+            { context: "Fork Desktop Build", app_id: 15368 },
+            { context: "Fork Mobile Type and Unit", app_id: 15368 },
+          ],
+        },
+        enforce_admins: { enabled: true },
+        required_linear_history: { enabled: false },
+      },
+      repositorySettings: { allow_merge_commit: true },
+      rulesets: [],
       prCreateError,
       releaseApiError,
       pullRequestApiError,
@@ -182,7 +205,7 @@ if (args[0] === "api" && args.some((arg) => arg.includes("/releases?"))) {
           encoding: "utf8",
           env: {
             ...process.env,
-            PATH: `${bin}:${process.env.PATH}`,
+            PATH: `${bin}:${NodePath.dirname(process.execPath)}:${process.env.PATH}`,
             GITHUB_REPOSITORY: "Nitestack/t3code",
             DRY_RUN: runDryRun ? "true" : "false",
             T17_GH_STATE: statePath,
@@ -250,6 +273,92 @@ NodeTest.test("skips the already integrated tag and selects a newer stable relea
     { tag_name: "v4.10.0", name: "T3 Code 4.10.0", draft: false, prerelease: false },
   ];
   NodeAssert.equal(getSyncDecision(numericallySorted).release.tag_name, "v4.10.0");
+});
+
+NodeTest.test("an empty stable release list is a successful no-op", () => {
+  NodeAssert.deepEqual(getSyncDecision([]), { kind: "no-releases" });
+  NodeAssert.throws(
+    () => getSyncDecision([], { targetTag: "v1.2.3" }),
+    /Target tag is not a published stable SemVer release/,
+  );
+});
+
+NodeTest.test("automatic merge requires strict fork checks and enforced administrators", () => {
+  const protection = {
+    required_status_checks: {
+      strict: true,
+      checks: [
+        { context: "Fork Server", app_id: 15368 },
+        { context: "Fork Web", app_id: 15368 },
+        { context: "Fork Desktop Build", app_id: 15368 },
+        { context: "Fork Mobile Type and Unit", app_id: 15368 },
+      ],
+    },
+    enforce_admins: { enabled: true },
+    required_linear_history: { enabled: false },
+  };
+  NodeAssert.doesNotThrow(() =>
+    validateForkMergeProtection({ protection, repository: { allow_merge_commit: true } }),
+  );
+  NodeAssert.throws(
+    () =>
+      validateForkMergeProtection({
+        protection: {
+          ...protection,
+          required_status_checks: { ...protection.required_status_checks, strict: false },
+        },
+        repository: { allow_merge_commit: true },
+      }),
+    /up-to-date status checks/,
+  );
+  NodeAssert.throws(
+    () =>
+      validateForkMergeProtection({
+        protection: { ...protection, enforce_admins: { enabled: false } },
+        repository: { allow_merge_commit: true },
+      }),
+    /enforce branch protection for administrators/,
+  );
+  NodeAssert.throws(
+    () =>
+      validateForkMergeProtection({
+        protection: {
+          ...protection,
+          required_status_checks: {
+            ...protection.required_status_checks,
+            checks: protection.required_status_checks.checks.map((check) =>
+              check.context === "Fork Web" ? { ...check, app_id: null } : check,
+            ),
+          },
+        },
+        repository: { allow_merge_commit: true },
+      }),
+    /GitHub Actions app \(15368\)/,
+  );
+  NodeAssert.throws(
+    () => validateForkMergeProtection({ protection, repository: { allow_merge_commit: false } }),
+    /allow merge commits/,
+  );
+  NodeAssert.throws(
+    () =>
+      validateForkMergeProtection({
+        protection: {
+          ...protection,
+          required_pull_request_reviews: { required_approving_review_count: 1 },
+        },
+        repository: { allow_merge_commit: true },
+      }),
+    /cannot require additional pull request approvals/,
+  );
+  NodeAssert.throws(
+    () =>
+      validateForkMergeProtection({
+        protection,
+        repository: { allow_merge_commit: true },
+        rulesets: [{ name: "main", bypass_actors: [{ actor_id: 1, actor_type: "Team" }] }],
+      }),
+    /must not give any actor a branch-protection bypass/,
+  );
 });
 
 NodeTest.test(
@@ -352,6 +461,33 @@ NodeTest.test("a 0.1.9 release already in main is a true no-op", async () => {
 });
 
 NodeTest.test(
+  "an empty upstream release list succeeds without querying or mutating the fork",
+  async () => {
+    const fixture = await createSyncFixture({ releaseApiPages: [[]] });
+    try {
+      const result = fixture.runSync();
+      NodeAssert.equal(result.status, 0, result.output);
+      NodeAssert.match(
+        result.output,
+        /No published stable upstream release was found; nothing to sync/,
+      );
+      const calls = await fixture.readCalls();
+      NodeAssert.equal(calls.length, 1);
+      NodeAssert.equal(
+        calls[0].some((argument) => argument.includes("/releases?")),
+        true,
+      );
+      NodeAssert.equal(
+        calls.some((args) => args[0] === "pr" || args.includes("--method")),
+        false,
+      );
+    } finally {
+      await NodeFSP.rm(fixture.root, { recursive: true, force: true });
+    }
+  },
+);
+
+NodeTest.test(
   "dry run reports the candidate without pushing or opening a pull request",
   async () => {
     for (const foreignPr of [false, true]) {
@@ -390,7 +526,7 @@ NodeTest.test(
 );
 
 NodeTest.test(
-  "reuses a pushed sync branch after PR creation fails and dispatches CI on retry",
+  "reuses a pushed sync branch after PR creation fails without dispatching PR-head CI",
   async () => {
     const fixture = await createSyncFixture({
       prCreateError:
@@ -399,7 +535,7 @@ NodeTest.test(
     try {
       const failed = fixture.runSync();
       NodeAssert.equal(failed.status, 1);
-      NodeAssert.match(failed.output, /maintainer.*allow GitHub Actions to create pull requests/i);
+      NodeAssert.match(failed.output, /FORK_SYNC_APP_ID.*contents:write and pull_requests:write/i);
       const pushedBranch = fixture
         .git(fixture.fork, ["for-each-ref", "--format=%(refname:short)", "refs/heads/automation"])
         .split("\n")
@@ -422,10 +558,7 @@ NodeTest.test(
       );
       const finalState = await fixture.readState();
       NodeAssert.equal(finalState.pullRequests.length, 1);
-      NodeAssert.deepEqual(
-        finalState.runs.map(({ event, branch }) => ({ event, branch })),
-        [{ event: "workflow_dispatch", branch: finalState.pullRequests[0].headRefName }],
-      );
+      NodeAssert.equal(finalState.runs.length, 0);
     } finally {
       await NodeFSP.rm(fixture.root, { recursive: true, force: true });
     }
@@ -433,7 +566,7 @@ NodeTest.test(
 );
 
 NodeTest.test(
-  "an existing sync PR catches up a missing dispatch once without another PR",
+  "an existing sync PR is idempotent and waits for event-driven exact-head CI",
   async () => {
     const fixture = await createSyncFixture();
     try {
@@ -453,17 +586,12 @@ NodeTest.test(
       NodeAssert.equal(retry.status, 0, retry.output);
       const recovered = await fixture.readState();
       NodeAssert.equal(recovered.pullRequests.length, 1);
-      NodeAssert.equal(recovered.runs.length, 1);
-      NodeAssert.equal(recovered.runs[0].branch, recovered.pullRequests[0].headRefName);
+      NodeAssert.equal(recovered.runs.length, 0);
+      NodeAssert.match(retry.output, /waits for successful push checks on its exact head/);
 
-      const duplicateGuard = {
-        ...recovered,
-        runs: [{ ...recovered.runs[0], status: "in_progress" }],
-      };
-      await fixture.writeState(duplicateGuard);
       const third = fixture.runSync();
       NodeAssert.equal(third.status, 0, third.output);
-      NodeAssert.equal((await fixture.readState()).runs.length, 1);
+      NodeAssert.equal((await fixture.readState()).pullRequests.length, 1);
     } finally {
       await NodeFSP.rm(fixture.root, { recursive: true, force: true });
     }
@@ -604,26 +732,26 @@ NodeTest.test("rejects malformed projected release metadata", async () => {
 });
 
 NodeTest.test(
-  "recovers a denied CI dispatch on an existing PR without creating another PR",
+  "missing main protection blocks before pushing a branch or opening a PR",
   async () => {
-    const fixture = await createSyncFixture({
-      dispatchError: "HTTP 403: Resource not accessible by integration",
-    });
+    const fixture = await createSyncFixture();
     try {
-      const failed = fixture.runSync();
-      NodeAssert.equal(failed.status, 1);
-      NodeAssert.match(failed.output, /GitHub denied CI dispatch.*actions:write/);
       const state = await fixture.readState();
-      NodeAssert.equal(state.pullRequests.length, 1);
-      state.dispatchError = undefined;
+      state.branchProtection = null;
       await fixture.writeState(state);
 
-      const retry = fixture.runSync();
-      NodeAssert.equal(retry.status, 0, retry.output);
-      const recovered = await fixture.readState();
-      NodeAssert.equal(recovered.pullRequests.length, 1);
-      NodeAssert.equal(recovered.runs.length, 1);
-      NodeAssert.equal(recovered.runs[0].branch, recovered.pullRequests[0].headRefName);
+      const result = fixture.runSync();
+      NodeAssert.equal(result.status, 1, result.output);
+      NodeAssert.match(result.output, /strict required checks from GitHub Actions app 15368/);
+      NodeAssert.equal((await fixture.readState()).pullRequests.length, 0);
+      NodeAssert.equal(
+        fixture.git(fixture.fork, [
+          "for-each-ref",
+          "--format=%(refname:short)",
+          "refs/heads/automation",
+        ]),
+        "",
+      );
     } finally {
       await NodeFSP.rm(fixture.root, { recursive: true, force: true });
     }

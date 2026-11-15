@@ -1,8 +1,8 @@
 # T3 Code fork
 
-This fork keeps T3's provider, thread, and client behavior aligned with upstream. Fork-only
-development is identified by its Git commit; do not change upstream product versions or publish
-upstream-style `vX.Y.Z` tags from the fork.
+This fork keeps T3's provider, thread, and client behavior aligned with upstream. It keeps the
+upstream application version and uses the same `vX.Y.Z` tag and `T3 Code vX.Y.Z` release title for
+reviewed fork releases.
 
 ## Verified starting point
 
@@ -74,12 +74,18 @@ Always pass `--repo OWNER/t3code` to later mutating `gh` commands.
 ## Branches, versions, and upstream review
 
 Work from the fork's `main`; use `feature/<topic>`, `fix/<topic>`, or `chore/<topic>` branches and
-open PRs against the fork's `main`. Use conventional commit titles. Do not merge upstream changes
-blindly: T17 owns the automated stable-release check and reviewable sync process.
+open PRs against the fork's `main`. Use conventional commit titles. The daily stable sync opens a
+PR for a newer upstream release and merges it only after all four exact-head fork CI jobs succeed
+under protected `main`. Conflicts or stale checks leave the sync unmerged for manual repair.
 
-The fork keeps upstream's application version values while developing and identifies builds by
-commit SHA. Do not create upstream-style `vX.Y.Z` tags or releases in the fork. A future fork release
-must use a separate fork-prefixed version/tag scheme and its own explicit release workflow.
+The fork keeps the upstream application version values. The existing `Release` workflow from
+`main` checks all four fork CI jobs on the exact source commit, confirms the application manifests
+agree, and builds a Windows x64 installer, signed Android APK, and matching Nix package. Its default
+build-only mode uploads an Actions artifact without creating a tag or release. After explicit
+authorization, a stable dispatch can publish the upstream-matched `vX.Y.Z` tag and `T3 Code vX.Y.Z`
+release; the notes identify the fork commit and upstream base, and the Nix command pins to that tag.
+The old imported tag in this clone is not a fork release: the workflow refuses to move it or replace
+an existing release.
 
 To inspect upstream changes manually without applying them:
 
@@ -130,11 +136,15 @@ publishing, or iOS builds:
 | Mobile  | Typecheck and unit/React test projects; no native build | `vp run --filter @t3tools/mobile typecheck` and `vp run --filter @t3tools/mobile test` |
 
 The mobile test task runs the unit and React projects. The signed Android APK has its own workflow,
-described in the [Android APK guide](../operations/android-fork-apk.md); this fork does not build iOS.
-Releases follow the [fork release runbook](../operations/fork-release.md). Local mobile development may still use an existing development client
-and Metro as described in [the mobile guide](../../apps/mobile/README.md).
+described in the [Android APK guide](../operations/android-fork-apk.md); the stable release workflow
+also builds the Windows installer and Nix package. This fork does not build iOS. Releases follow the
+[fork release runbook](../operations/fork-release.md). Local mobile development may still use an
+existing development client and Metro as described in [the mobile guide](../../apps/mobile/README.md).
 
 The fork's `CI` workflow keeps its upstream jobs behind `github.repository == 'pingdotgg/t3code'`.
 This job-level guard also protects reusable workflows and triggers such as `workflow_dispatch`,
 `schedule`, `release`, `workflow_run`, and `pull_request_target`. New upstream-only jobs must carry
-the same guard. Fork baseline jobs use standard GitHub runners and need no maintainer credentials.
+the same guard. Fork baseline jobs and the fork release use standard GitHub runners. The release
+workflow passes only the four Android signing secrets to the reusable APK build; Windows and Nix
+builds receive no upstream signing, publishing, or deployment credentials. Upstream release and
+deploy jobs remain repository-guarded.

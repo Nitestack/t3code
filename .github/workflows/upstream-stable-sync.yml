@@ -6,12 +6,21 @@ on:
       - .github/workflows/upstream-stable-sync.yml
       - scripts/upstream-stable-sync.mjs
       - scripts/upstream-stable-sync.test.mjs
+      - .github/scripts/fork-ci-checks.cjs
+      - .github/scripts/fork-ci-checks.test.cjs
   push:
     branches: [main]
     paths:
       - .github/workflows/upstream-stable-sync.yml
       - scripts/upstream-stable-sync.mjs
       - scripts/upstream-stable-sync.test.mjs
+      - .github/scripts/fork-ci-checks.cjs
+      - .github/scripts/fork-ci-checks.test.cjs
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches:
+      - automation/upstream-stable-*
   schedule:
     - cron: "37 23 * * *"
   workflow_dispatch:
@@ -68,8 +77,8 @@ jobs:
         with:
           node-version: 26.12.1
 
-      - name: Test stable release filtering and failure handling
-        run: node --test scripts/upstream-stable-sync.test.mjs
+      - name: Test stable sync and exact fork CI checks
+        run: node --test scripts/upstream-stable-sync.test.mjs .github/scripts/fork-ci-checks.test.cjs .github/scripts/fork-release.test.cjs
 
   sync:
     if: ${{ github.repository == 'Nitestack/t3code' && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
@@ -77,9 +86,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
-      contents: write
-      pull-requests: write
-      actions: write
+      actions: read
+      administration: read
+      contents: read
+      pull-requests: read
     steps:
       # Keep fetch and push auth command-scoped; the complete tree is needed for merges.
       - name: Check out the complete fork main history without persisting credentials
@@ -106,14 +116,111 @@ jobs:
         with:
           node-version: 26.12.1
 
-      - name: Inspect releases and propose a reviewed update
+      - name: Inspect releases and verify write prerequisites
+        id: inspect
         env:
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
           GH_TOKEN: ${{ github.token }}
-          SYNC_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          PREFLIGHT: "true"
           RUNNER_TEMP: ${{ runner.temp }}
           TARGET_TAG: ${{ inputs.target_tag }}
+        run: node scripts/upstream-stable-sync.mjs
+
+      - name: Confirm sync App credentials are configured
+        if: steps.inspect.outputs.requires_write == 'true'
+        env:
+          FORK_SYNC_APP_ID: ${{ secrets.FORK_SYNC_APP_ID }}
+          FORK_SYNC_APP_PRIVATE_KEY: ${{ secrets.FORK_SYNC_APP_PRIVATE_KEY }}
+        run: |
+          if [[ -z "$FORK_SYNC_APP_ID" || -z "$FORK_SYNC_APP_PRIVATE_KEY" ]]; then
+            echo "::error::A fork sync GitHub App is required. Configure FORK_SYNC_APP_ID and FORK_SYNC_APP_PRIVATE_KEY; the App installation needs contents:write and pull_requests:write."
+            exit 1
+          fi
+
+      - id: sync_app_token
+        name: Mint fork sync App token
+        if: steps.inspect.outputs.requires_write == 'true'
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+        with:
+          app-id: ${{ secrets.FORK_SYNC_APP_ID }}
+          private-key: ${{ secrets.FORK_SYNC_APP_PRIVATE_KEY }}
+          owner: Nitestack
+          repositories: t3code
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Push the update branch and open its pull request
+        if: steps.inspect.outputs.requires_write == 'true'
+        env:
+          DRY_RUN: "false"
+          GH_TOKEN: ${{ steps.sync_app_token.outputs.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          RUNNER_TEMP: ${{ runner.temp }}
+          SYNC_TOKEN: ${{ steps.sync_app_token.outputs.token }}
+          TARGET_TAG: ${{ steps.inspect.outputs.target_tag }}
+        run: |
+          authorization="$(printf 'x-access-token:%s' "$SYNC_TOKEN" | base64 --wrap=0)"
+          unset SYNC_TOKEN
+          env \
+            GIT_CONFIG_COUNT=1 \
+            GIT_CONFIG_KEY_0="http.https://github.com/${GITHUB_REPOSITORY}.git/.extraheader" \
+            GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $authorization" \
+            node scripts/upstream-stable-sync.mjs
+
+  merge_after_ci:
+    if: >-
+      github.repository == 'Nitestack/t3code' &&
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      startsWith(github.event.workflow_run.head_branch, 'automation/upstream-stable-')
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: write
+      administration: read
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Check out current fork main without persisting credentials
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          git init --initial-branch=main
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          authorization="$(printf 'x-access-token:%s' "$CHECKOUT_TOKEN" | base64 --wrap=0)"
+          env \
+            GIT_CONFIG_COUNT=1 \
+            GIT_CONFIG_KEY_0="http.https://github.com/${GITHUB_REPOSITORY}.git/.extraheader" \
+            GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $authorization" \
+            git fetch --no-tags --no-recurse-submodules origin +refs/heads/main:refs/remotes/origin/main
+          unset CHECKOUT_TOKEN authorization
+          git checkout --progress --force -B main refs/remotes/origin/main
+          if git config --local --name-only --get-regexp '^(http\..*\.extraheader|includeIf\..*\.path)$'; then
+            echo "::error::checkout credentials were persisted in the local Git config"
+            exit 1
+          fi
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 26.12.1
+
+      - name: Verify exact fork CI, merge the protected PR, and queue its release
+        env:
+          FORK_AUTO_PUBLISH_STABLE_RELEASES: ${{ vars.FORK_AUTO_PUBLISH_STABLE_RELEASES == 'true' }}
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          RUNNER_TEMP: ${{ runner.temp }}
+          SYNC_TOKEN: ${{ github.token }}
+          UPSTREAM_SYNC_MODE: merge-on-ci
+          WORKFLOW_RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          WORKFLOW_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          WORKFLOW_RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+          WORKFLOW_RUN_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           authorization="$(printf 'x-access-token:%s' "$SYNC_TOKEN" | base64 --wrap=0)"
           unset SYNC_TOKEN

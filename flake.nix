@@ -9,7 +9,7 @@
       system = "x86_64-linux";
       pkgs = import nixpkgs { inherit system; };
       revision = builtins.substring 0 7 (self.rev or "working-tree");
-      version = "0.1.9-fork.${revision}";
+      version = (builtins.fromJSON (builtins.readFile ./apps/server/package.json)).version;
       src = pkgs.runCommand "t3code-fork-source" { } ''
         mkdir -p "$out"
         cp -R ${self.outPath}/. "$out/"
@@ -27,7 +27,7 @@
           pnpm = pkgs.pnpm_12;
           inherit (old) pnpmWorkspaces;
           fetcherVersion = 5;
-          hash = "sha256-pYb9FqBoYJp1AW3HK0uwNinmi0TgcTbQJQA8Yv1Hr8I=";
+          hash = "sha256-27Ljt2lY4J1Fi3ddVIflPQ5erRqmgaZ8+YBH9fhCLzo=";
         };
       });
 

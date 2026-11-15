@@ -1,6 +1,25 @@
 name: Nitestack Android APK
 
 on:
+  workflow_call:
+    inputs:
+      version:
+        description: Stable app version selected by the release workflow
+        required: true
+        type: string
+      ref:
+        description: Reviewed source commit to build
+        required: true
+        type: string
+    secrets:
+      ANDROID_KEYSTORE_BASE64:
+        required: true
+      ANDROID_KEYSTORE_PASSWORD:
+        required: true
+      ANDROID_KEY_ALIAS:
+        required: true
+      ANDROID_KEY_PASSWORD:
+        required: true
   workflow_dispatch:
     inputs:
       version:
@@ -34,6 +53,7 @@ jobs:
       EXPO_NO_GIT_STATUS: "1"
       T3CODE_MOBILE_UPDATES_ENABLED: "0"
       NODE_OPTIONS: --max-old-space-size=6144
+      T3_ANDROID_BUILD_REF: ${{ inputs.ref }}
     steps:
       # Checkout v6's auth cleanup fails on this tree's unconfigured vendor gitlinks.
       # Keep the token scoped to fetch so the build cannot read it.
@@ -48,7 +68,7 @@ jobs:
             GIT_CONFIG_COUNT=1 \
             GIT_CONFIG_KEY_0="http.https://github.com/${GITHUB_REPOSITORY}.git/.extraheader" \
             GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $authorization" \
-            git fetch --no-tags --no-recurse-submodules --depth=1 origin "$GITHUB_SHA"
+            git fetch --no-tags --no-recurse-submodules --depth=1 origin "${T3_ANDROID_BUILD_REF:-$GITHUB_SHA}"
           unset CHECKOUT_TOKEN authorization
           git checkout --progress --force --detach FETCH_HEAD
           if git config --local --name-only --get-regexp '^(http\..*\.extraheader|includeIf\..*\.path)$'; then
@@ -59,13 +79,14 @@ jobs:
       - name: Select Android app version
         env:
           REQUESTED_VERSION: ${{ inputs.version }}
+          IS_REUSABLE_WORKFLOW: ${{ inputs.ref != '' }}
         run: |
           set -euo pipefail
           version="$REQUESTED_VERSION"
-          if [ "$GITHUB_REF_TYPE" = tag ]; then
+          if [ "$IS_REUSABLE_WORKFLOW" != "true" ] && [ "$GITHUB_EVENT_NAME" = push ] && [ "$GITHUB_REF_TYPE" = tag ]; then
             version="${GITHUB_REF_NAME#t3-android-v}"
           fi
-          if [ "$GITHUB_REF_TYPE" = tag ] || [ -n "$version" ]; then
+          if [ "$IS_REUSABLE_WORKFLOW" = "true" ] || [ "$GITHUB_REF_TYPE" = tag ] || [ -n "$version" ]; then
             if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
               echo "::error::Android app version must be stable MAJOR.MINOR.PATCH."
               exit 1
@@ -171,7 +192,7 @@ jobs:
           cp "$apk" "$output_dir/$apk_name"
           (cd "$output_dir" && sha256sum "$apk_name" > "$apk_name.sha256")
           node -e 'const fs = require("node:fs"); const [file, appId, versionCode, versionName, ref, sha, shaName] = process.argv.slice(1); fs.writeFileSync(file, JSON.stringify({ applicationId: appId, versionCode: Number(versionCode), versionName, sha256: fs.readFileSync(shaName, "utf8").split(" ")[0], gitRef: ref, gitSha: sha }, null, 2) + "\n");' \
-            "$output_dir/metadata.json" "$package_name" "$version_code" "$version_name" "$GITHUB_REF_NAME" "$GITHUB_SHA" "$output_dir/$apk_name.sha256"
+            "$output_dir/metadata.json" "$package_name" "$version_code" "$version_name" "${T3_ANDROID_BUILD_REF:-$GITHUB_REF_NAME}" "${T3_ANDROID_BUILD_REF:-$GITHUB_SHA}" "$output_dir/$apk_name.sha256"
 
       - name: Upload APK, checksum, and version metadata
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -186,6 +207,7 @@ jobs:
     needs: build
     if: >-
       github.repository == 'Nitestack/t3code' && github.event_name == 'push' &&
+      github.ref_type == 'tag' &&
       startsWith(github.ref, 'refs/tags/t3-android-v')
     runs-on: ubuntu-latest
     permissions:

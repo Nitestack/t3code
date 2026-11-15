@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - automation/upstream-stable-*
   workflow_dispatch:
 
 permissions:

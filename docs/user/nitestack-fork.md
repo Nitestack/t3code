@@ -75,8 +75,12 @@ to both an original T3 server and a fork server.
 ## Mobile apps
 
 The fork's Android app uses its own package name and link scheme, so it is meant to install next to
-the official app. Its signed APK comes from the fork's build workflow; there is no store listing, and
-installing it on a device has not been verified yet. See the
+the official app. When a stable fork release is published, its signed APK appears with its SHA-256
+checksum and build metadata; there is no store listing. The stable release workflow also builds a
+Windows x64 installer and the matching Nix package. Windows signing status is recorded in
+the artifact metadata; current fork builds are expected to be unsigned. Before public publication,
+the Windows installer and APK can be downloaded from the build-only Actions artifact described in
+the [install guide](./install.md#t3-code-fork-windows-and-android). See the
 [Android build guide](../operations/android-fork-apk.md).
 
 The official Android and iOS apps are unchanged upstream clients. aix profiles reach them as regular
@@ -129,10 +133,14 @@ did not configure or test an aix profile.
 
 ## Updates
 
-The fork follows stable upstream releases only. A daily workflow checks for a new stable T3 release
-and proposes it as a pull request for review; it never merges on its own and ignores drafts and
-prereleases. Fork changes reach `main` only after review, so update from `main`, not from upstream.
-See the [fork release runbook](../operations/fork-release.md) for the current status.
+The fork follows stable upstream releases only. A daily workflow ignores drafts and prereleases and
+opens a sync pull request when a newer stable T3 release appears. It merges only after all four
+fork CI jobs pass for the exact pull request head under protected `main`; conflicts and stale or
+incomplete checks leave it unmerged. After merge, the existing release workflow builds the Windows
+installer, signed APK, and same-version Nix package. It defaults to an Actions artifact without a
+tag or GitHub release. Public publication requires explicit authorization and keeps the upstream
+version, tag, and release title. See the [fork release runbook](../operations/fork-release.md) for
+details.
 
 To update a clean source checkout to the fork's current `main`:
 

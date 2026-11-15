@@ -1,18 +1,25 @@
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeURL from "node:url";
+import ForkCiChecks from "../.github/scripts/fork-ci-checks.cjs";
 
 const FORK_REPOSITORY = "Nitestack/t3code";
 const UPSTREAM_REPOSITORY = "pingdotgg/t3code";
 const UPSTREAM_URL = "https://github.com/pingdotgg/t3code.git";
 const MARKER_PATH = ".github/upstream-stable.json";
 const BRANCH_PREFIX = "automation/upstream-stable-";
+const { REQUIRED_FORK_CHECKS, selectLatestForkCiRun, validateForkCiCompletion, validateForkCiRun } =
+  ForkCiChecks;
 const GITHUB_OPERATION_LABELS = new Map([
   ["upstreamReleases", "upstream releases lookup"],
   ["openSyncPullRequests", "open sync pull-request lookup"],
   ["workflowRuns", "CI workflow-run lookup"],
   ["workflowDispatch", "CI workflow dispatch"],
   ["createSyncPullRequest", "sync pull-request creation"],
+  ["branchProtection", "main branch protection lookup"],
+  ["repositoryRulesets", "repository branch ruleset lookup"],
+  ["repositorySettings", "repository merge-setting lookup"],
+  ["syncPullRequestMerge", "sync pull-request merge"],
 ]);
 
 const TEST_RELEASE_LABEL =
@@ -58,8 +65,10 @@ export function getSyncDecision(
       throw new Error(`Multiple published stable releases use SemVer ${stable[index].tag_name}.`);
     }
   }
-  if (stable.length === 0)
-    throw new Error("Upstream returned no published stable SemVer releases.");
+  if (stable.length === 0) {
+    if (targetTag === undefined) return { kind: "no-releases" };
+    throw new Error("Target tag is not a published stable SemVer release: " + targetTag);
+  }
 
   const release =
     targetTag === undefined
@@ -72,6 +81,70 @@ export function getSyncDecision(
     return { kind: "up-to-date", tag: integratedTag };
   }
   return { kind: "update", release };
+}
+
+export function validateForkMergeProtection({ protection, repository, rulesets = [] }) {
+  if (!protection || !repository) {
+    throw new Error("Main branch merge protection could not be verified; refusing to merge.");
+  }
+  if (!Array.isArray(rulesets)) {
+    throw new Error("Repository rulesets could not be verified; refusing to merge.");
+  }
+  if (
+    !rulesets.every(
+      (ruleset) =>
+        ruleset && typeof ruleset.name === "string" && Array.isArray(ruleset.bypass_actors),
+    )
+  ) {
+    throw new Error("Repository ruleset bypass configuration is incomplete; refusing to merge.");
+  }
+  if (
+    rulesets.some(
+      (ruleset) => Array.isArray(ruleset.bypass_actors) && ruleset.bypass_actors.length > 0,
+    )
+  ) {
+    throw new Error("Repository rulesets must not give any actor a branch-protection bypass.");
+  }
+  const checks = protection.required_status_checks;
+  if (checks?.strict !== true) {
+    throw new Error("Main must require up-to-date status checks before the sync PR can merge.");
+  }
+  const contexts = new Map();
+  for (const { context, app_id } of checks.checks ?? []) {
+    if (!REQUIRED_FORK_CHECKS.includes(context)) continue;
+    if (contexts.has(context))
+      throw new Error("Main has duplicate required status context " + context + ".");
+    contexts.set(context, app_id);
+  }
+  const missing = REQUIRED_FORK_CHECKS.filter((name) => contexts.get(name) !== 15368);
+  if (missing.length > 0) {
+    throw new Error(
+      "Main must require these four checks from the GitHub Actions app (15368): " +
+        missing.join(", ") +
+        ".",
+    );
+  }
+  if (protection.enforce_admins?.enabled !== true) {
+    throw new Error(
+      "Main must enforce branch protection for administrators; refusing an unprotected merge.",
+    );
+  }
+  if (
+    (protection.required_pull_request_reviews?.required_approving_review_count ?? 0) > 0 ||
+    protection.required_pull_request_reviews?.require_code_owner_reviews === true
+  ) {
+    throw new Error(
+      "Main cannot require additional pull request approvals for automatic sync merge.",
+    );
+  }
+  if (
+    repository.allow_merge_commit !== true ||
+    protection.required_linear_history?.enabled === true
+  ) {
+    throw new Error(
+      "Main must allow merge commits so the upstream release remains in fork history.",
+    );
+  }
 }
 
 export function classifyGitHubFailure(stderr, operation) {
@@ -221,7 +294,7 @@ function releaseFromBranch(branch, releases) {
   return { release, commitPrefix: match[2] };
 }
 
-function findWorkflowDispatch(branch) {
+function getForkCiRuns(branch, sha) {
   let runs;
   try {
     runs = JSON.parse(
@@ -237,57 +310,20 @@ function findWorkflowDispatch(branch) {
           "--branch",
           branch,
           "--event",
-          "workflow_dispatch",
+          "push",
           "--limit",
-          "1",
+          "100",
           "--json",
-          "databaseId,status,conclusion",
+          "databaseId,event,headBranch,headSha,status,conclusion",
         ],
         { githubOperation: "workflowRuns" },
       ),
     );
   } catch (error) {
-    throw new Error(`Could not check whether fork CI was already dispatched for ${branch}.`, {
-      cause: error,
-    });
+    throw new Error("Could not inspect fork CI runs for " + branch + ".", { cause: error });
   }
   if (!Array.isArray(runs)) throw new Error("GitHub returned invalid workflow run data.");
-  return runs.length > 0;
-}
-
-function dispatchForkCi(branch) {
-  if (findWorkflowDispatch(branch)) return false;
-  try {
-    run(
-      "gh",
-      [
-        "api",
-        "--method",
-        "POST",
-        `repos/${FORK_REPOSITORY}/actions/workflows/ci.yml/dispatches`,
-        "-f",
-        `ref=${branch}`,
-      ],
-      { githubOperation: "workflowDispatch" },
-    );
-  } catch (error) {
-    const details = `${error.message} ${error.cause?.message ?? ""} ${error.cause?.stderr ?? ""}`;
-    if (
-      /HTTP 403|resource not accessible by integration|permission.*actions|actions.*permission/i.test(
-        details,
-      )
-    ) {
-      throw new Error(
-        `GitHub denied CI dispatch for ${branch}. The sync job declares actions:write; a maintainer must allow that token permission. The update branch and pull request are preserved for retry.`,
-        { cause: error },
-      );
-    }
-    throw new Error(
-      `Could not dispatch fork CI for ${branch}. The update branch and pull request are preserved; retrying will recover this dispatch.`,
-      { cause: error },
-    );
-  }
-  return true;
+  return runs.filter((candidate) => candidate.headSha?.toLowerCase() === sha.toLowerCase());
 }
 
 function createSyncPullRequest(branch, targetTag, bodyPath) {
@@ -318,7 +354,7 @@ function createSyncPullRequest(branch, targetTag, bodyPath) {
       )
     ) {
       throw new Error(
-        `GitHub blocked automated pull-request creation. A maintainer must allow GitHub Actions to create pull requests in the repository Actions policy. The update branch ${branch} is preserved; retry after that policy change.`,
+        `GitHub blocked automated pull-request creation. Configure FORK_SYNC_APP_ID and FORK_SYNC_APP_PRIVATE_KEY for an installed fork App with contents:write and pull_requests:write. The update branch ${branch} is preserved for retry.`,
         { cause: error },
       );
     }
@@ -428,7 +464,7 @@ function getOpenSyncPullRequests() {
       "--base",
       "main",
       "--json",
-      "headRefName,headRepository,title,url",
+      "number,headRefName,headRefOid,headRepository,baseRefName,baseRefOid,isDraft,title,url",
       "--limit",
       "1000",
     ],
@@ -443,6 +479,344 @@ function getOpenSyncPullRequests() {
       "GitHub returned invalid JSON while checking for an existing upstream-sync pull request.",
     );
   }
+}
+
+function getWorkflowRun(runId) {
+  try {
+    return JSON.parse(
+      run("gh", ["api", `repos/${FORK_REPOSITORY}/actions/runs/${runId}`], {
+        githubOperation: "workflowRuns",
+      }),
+    );
+  } catch (error) {
+    throw new Error("Could not inspect the completed fork CI run.", { cause: error });
+  }
+}
+
+function getWorkflowRunJobs(runId, attempt) {
+  let pages;
+  try {
+    const output = run(
+      "gh",
+      [
+        "api",
+        "--paginate",
+        "--jq",
+        ".jobs | map({name, conclusion})",
+        `repos/${FORK_REPOSITORY}/actions/runs/${runId}/attempts/${attempt}/jobs?per_page=100`,
+      ],
+      { githubOperation: "workflowRuns" },
+    );
+    pages = output.split("\n").map((page) => JSON.parse(page));
+  } catch (error) {
+    throw new Error("Could not inspect fork CI job results.", { cause: error });
+  }
+  if (!pages.every(Array.isArray)) throw new Error("GitHub returned invalid fork CI job data.");
+  return pages.flat();
+}
+
+function getSyncPullRequest(branch, state = "all") {
+  const output = run(
+    "gh",
+    [
+      "pr",
+      "list",
+      "--repo",
+      FORK_REPOSITORY,
+      "--state",
+      state,
+      "--base",
+      "main",
+      "--json",
+      "number,headRefName,headRefOid,headRepository,baseRefName,baseRefOid,isDraft,mergedAt,state,title,url",
+      "--limit",
+      "1000",
+    ],
+    { githubOperation: "openSyncPullRequests" },
+  );
+  let pullRequests;
+  try {
+    pullRequests = JSON.parse(output);
+    if (!Array.isArray(pullRequests)) throw new Error("not an array");
+  } catch {
+    throw new Error("GitHub returned invalid JSON while checking for a sync pull request.");
+  }
+  const matches = getSyncPullRequests(pullRequests).filter(
+    (pullRequest) => pullRequest.headRefName === branch,
+  );
+  if (matches.length > 1) throw new Error("Multiple sync pull requests use branch " + branch + ".");
+  return matches[0];
+}
+
+function getMainProtection() {
+  let protection;
+  let repository;
+  let rulesets;
+  try {
+    protection = JSON.parse(
+      run("gh", ["api", `repos/${FORK_REPOSITORY}/branches/main/protection`], {
+        githubOperation: "branchProtection",
+      }),
+    );
+    repository = JSON.parse(
+      run("gh", ["api", `repos/${FORK_REPOSITORY}`, "--jq", "{allow_merge_commit}"], {
+        githubOperation: "repositorySettings",
+      }),
+    );
+    rulesets = run(
+      "gh",
+      [
+        "api",
+        "--paginate",
+        "--jq",
+        ".[] | {name, bypass_actors}",
+        `repos/${FORK_REPOSITORY}/rulesets?includes_parents=true&per_page=100`,
+      ],
+      { githubOperation: "repositoryRulesets" },
+    )
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+  } catch (error) {
+    throw new Error(
+      "Automatic merge is blocked until main protection, repository rulesets, and merge settings can be verified.",
+      { cause: error },
+    );
+  }
+  try {
+    validateForkMergeProtection({ protection, repository, rulesets });
+  } catch (error) {
+    throw new Error(
+      "Automatic sync is blocked until main has strict required checks from GitHub Actions app 15368, administrator enforcement, merge commits enabled, and no ruleset bypass actors.",
+      { cause: error },
+    );
+  }
+}
+
+function queueForkRelease({ version, sourceSha, sourceBranch }) {
+  const publish = process.env.FORK_AUTO_PUBLISH_STABLE_RELEASES === "true";
+  const mode = publish ? "publish" : "build-only";
+  const displayTitle = `Fork ${mode} stable ${version} source ${sourceSha}`;
+  let runs;
+  try {
+    runs = JSON.parse(
+      run(
+        "gh",
+        [
+          "run",
+          "list",
+          "--repo",
+          FORK_REPOSITORY,
+          "--workflow",
+          "release.yml",
+          "--branch",
+          "main",
+          "--event",
+          "workflow_dispatch",
+          "--limit",
+          "100",
+          "--json",
+          "displayTitle,status,conclusion",
+        ],
+        { githubOperation: "workflowRuns" },
+      ),
+    );
+  } catch (error) {
+    throw new Error("Could not check for an existing release workflow run.", { cause: error });
+  }
+  if (!Array.isArray(runs)) throw new Error("GitHub returned invalid release workflow data.");
+  const previous = runs.find((candidate) => candidate.displayTitle === displayTitle);
+  if (previous && (previous.status !== "completed" || previous.conclusion === "success")) {
+    return false;
+  }
+  try {
+    run(
+      "gh",
+      [
+        "api",
+        "--method",
+        "POST",
+        `repos/${FORK_REPOSITORY}/actions/workflows/release.yml/dispatches`,
+        "-f",
+        "ref=main",
+        "-f",
+        "inputs[channel]=stable",
+        "-f",
+        `inputs[version]=${version}`,
+        "-F",
+        `inputs[publish]=${publish}`,
+        "-f",
+        `inputs[source_commit]=${sourceSha}`,
+        "-f",
+        `inputs[source_branch]=${sourceBranch}`,
+      ],
+      { githubOperation: "workflowDispatch" },
+    );
+  } catch (error) {
+    throw new Error("Could not queue the fork release workflow for " + version + ".", {
+      cause: error,
+    });
+  }
+  return true;
+}
+
+async function mergeSyncPullRequestFromCi() {
+  const eventRunId = process.env.WORKFLOW_RUN_ID;
+  const eventBranch = process.env.WORKFLOW_RUN_BRANCH;
+  if (!eventRunId || !eventBranch?.startsWith(BRANCH_PREFIX)) return;
+
+  const eventAttempt = Number(process.env.WORKFLOW_RUN_ATTEMPT);
+  const eventRun = getWorkflowRun(eventRunId);
+  validateForkCiCompletion({
+    run: eventRun,
+    eventConclusion: process.env.WORKFLOW_RUN_CONCLUSION,
+    eventRunId,
+    eventAttempt,
+    expectedBranch: eventBranch,
+    expectedSha: process.env.WORKFLOW_RUN_SHA,
+  });
+
+  const pullRequest = getSyncPullRequest(eventBranch);
+  if (!pullRequest) {
+    console.log("No open sync pull request matches completed fork CI; no merge action taken.");
+    return;
+  }
+  if (
+    pullRequest.headRepository?.nameWithOwner?.toLowerCase() !== FORK_REPOSITORY.toLowerCase() ||
+    pullRequest.baseRefName !== "main" ||
+    (pullRequest.state === "OPEN" && pullRequest.isDraft)
+  ) {
+    throw new Error("The sync pull request is not a PR from the fork into main.");
+  }
+  if (pullRequest.state === "CLOSED" && !pullRequest.mergedAt) {
+    console.log("The matching sync pull request is closed without a merge; no release queued.");
+    return;
+  }
+
+  const { release, commitPrefix } = releaseFromBranch(eventBranch, getPublishedReleases());
+  const mainRef = "refs/remotes/origin/main";
+  git(["fetch", "origin", "main"]);
+  git([
+    "fetch",
+    "--no-tags",
+    UPSTREAM_URL,
+    `+refs/tags/${release.tag_name}:refs/tags/upstream/${release.tag_name}`,
+  ]);
+  const targetCommit = resolveTagCommit(release.tag_name);
+  if (!targetCommit.startsWith(commitPrefix)) {
+    throw new Error("The sync branch name does not match the published upstream tag commit.");
+  }
+
+  let branchCommit;
+  if (pullRequest.state === "OPEN") {
+    branchCommit = getRemoteBranchCommit(eventBranch);
+    if (!branchCommit || branchCommit !== pullRequest.headRefOid) {
+      throw new Error(
+        "The sync pull request head changed while its CI results were being checked.",
+      );
+    }
+  } else {
+    const merged = JSON.parse(
+      run("gh", ["api", `repos/${FORK_REPOSITORY}/pulls/${pullRequest.number}`], {
+        githubOperation: "syncPullRequestMerge",
+      }),
+    );
+    if (
+      merged.merged !== true ||
+      !merged.merge_commit_sha ||
+      merged.head?.sha !== pullRequest.headRefOid
+    ) {
+      throw new Error(
+        "The closed sync pull request does not have a verified merge commit and head.",
+      );
+    }
+    const mergeParents = git(["show", "-s", "--format=%P", merged.merge_commit_sha]).split(" ");
+    if (mergeParents.length !== 2 || mergeParents[1] !== pullRequest.headRefOid) {
+      throw new Error(
+        "The sync pull request merge commit does not contain its recorded head as parent.",
+      );
+    }
+    branchCommit = pullRequest.headRefOid;
+  }
+  validateSyncBranch({
+    branch: eventBranch,
+    branchCommit,
+    mainRef,
+    targetTag: release.tag_name,
+    targetCommit,
+  });
+
+  const latestCiRun = selectLatestForkCiRun(getForkCiRuns(eventBranch, branchCommit), {
+    expectedBranch: eventBranch,
+    expectedSha: branchCommit,
+  });
+  if (latestCiRun.databaseId !== Number(eventRunId)) {
+    throw new Error(
+      "A newer exact-head CI run exists; only its completion event may trigger a merge.",
+    );
+  }
+  if (eventRun.head_sha?.toLowerCase() !== branchCommit.toLowerCase()) {
+    throw new Error("The completed CI run does not match the current sync pull request head.");
+  }
+  const workflowRun = getWorkflowRun(latestCiRun.databaseId);
+  const jobs = getWorkflowRunJobs(latestCiRun.databaseId, eventAttempt);
+  validateForkCiRun({
+    run: workflowRun,
+    jobs,
+    expectedBranch: eventBranch,
+    expectedSha: branchCommit,
+  });
+
+  getMainProtection();
+
+  if (pullRequest.state === "OPEN") {
+    const currentMainSha = git(["rev-parse", mainRef]);
+    if (pullRequest.baseRefOid !== currentMainSha) {
+      throw new Error("The sync pull request is behind main; update and rerun CI before merging.");
+    }
+    let merged = false;
+    try {
+      const result = JSON.parse(
+        run(
+          "gh",
+          [
+            "api",
+            "--method",
+            "PUT",
+            `repos/${FORK_REPOSITORY}/pulls/${pullRequest.number}/merge`,
+            "-f",
+            `sha=${branchCommit}`,
+            "-f",
+            "merge_method=merge",
+          ],
+          { githubOperation: "syncPullRequestMerge" },
+        ),
+      );
+      merged = result.merged === true;
+    } catch (error) {
+      const updated = run("gh", ["api", `repos/${FORK_REPOSITORY}/pulls/${pullRequest.number}`], {
+        githubOperation: "syncPullRequestMerge",
+      });
+      const current = JSON.parse(updated);
+      if (!current.merged || current.head?.sha !== branchCommit) throw error;
+      merged = true;
+    }
+    if (!merged) throw new Error("GitHub did not confirm the sync pull request merge.");
+  } else if (pullRequest.state !== "CLOSED" || !pullRequest.mergedAt) {
+    throw new Error("The sync pull request is not in a verified merged state.");
+  }
+
+  const version = release.tag_name.replace(/^v/, "");
+  const dispatched = queueForkRelease({
+    version,
+    sourceSha: branchCommit,
+    sourceBranch: eventBranch,
+  });
+  const message = dispatched
+    ? `Merged upstream stable ${release.tag_name}; queued the fork release for exact source ${branchCommit}.`
+    : `Upstream stable ${release.tag_name} is merged; the matching fork release is already queued or published.`;
+  console.log(message);
+  await writeStepSummary(message);
 }
 
 function requireFork() {
@@ -463,14 +837,34 @@ function writeStepSummary(message) {
   return Promise.resolve();
 }
 
+function writeOutput(name, value) {
+  const outputPath = process.env.GITHUB_OUTPUT;
+  if (!outputPath) return Promise.resolve();
+  return NodeFSP.appendFile(outputPath, `${name}=${value}\n`);
+}
+
 async function main() {
   requireFork();
+  if (process.env.UPSTREAM_SYNC_MODE === "merge-on-ci") {
+    await mergeSyncPullRequestFromCi();
+    return;
+  }
   const dryRun = process.env.DRY_RUN === "true";
+  const preflight = process.env.PREFLIGHT === "true";
   const releases = getPublishedReleases();
-  if (releases.length === 0) throw new Error("Upstream releases API returned no releases.");
   const stableReleases = releases.filter(isStableRelease);
-  if (stableReleases.length === 0)
-    throw new Error("Upstream releases API returned no published stable SemVer releases.");
+  if (stableReleases.length === 0) {
+    if (process.env.TARGET_TAG) {
+      throw new Error(
+        "Target tag is not a published stable SemVer release: " + process.env.TARGET_TAG,
+      );
+    }
+    const message = "No published stable upstream release was found; nothing to sync.";
+    console.log(message);
+    await writeOutput("requires_write", "false");
+    await writeStepSummary(message);
+    return;
+  }
 
   const openSyncPullRequests = getOpenSyncPullRequests();
   const mainRef = "refs/remotes/origin/main";
@@ -503,13 +897,12 @@ async function main() {
     if (dryRun) {
       const message = `Dry run only; existing sync pull request ${branch} verified without dispatching CI.`;
       console.log(message);
+      await writeOutput("requires_write", "false");
       await writeStepSummary(message);
       return;
     }
-    const dispatched = dispatchForkCi(branch);
-    const message = dispatched
-      ? `Existing sync pull request ${branch} verified; fork CI was dispatched on that branch.`
-      : `Existing sync pull request ${branch} verified; fork CI already has a workflow_dispatch run.`;
+    const message = `Existing sync pull request ${branch} verified; merge automation waits for successful push checks on its exact head.`;
+    await writeOutput("requires_write", "false");
     console.log(message);
     await writeStepSummary(message);
     return;
@@ -530,12 +923,14 @@ async function main() {
   if (decision.kind === "duplicate") {
     const message = `Skipped: an upstream stable-sync pull request is already open from \`${decision.branch}\`.`;
     console.log(message);
+    await writeOutput("requires_write", "false");
     await writeStepSummary(message);
     return;
   }
   if (decision.kind === "up-to-date") {
     const message = `Up to date through upstream stable tag \`${decision.tag}\`; no pull request created.`;
     console.log(message);
+    await writeOutput("requires_write", "false");
     await writeStepSummary(message);
     return;
   }
@@ -550,6 +945,7 @@ async function main() {
   if (isAncestor(targetCommit, mainRef)) {
     const message = `Upstream tag \`${targetTag}\` is already in the fork history; no pull request created.`;
     console.log(message);
+    await writeOutput("requires_write", "false");
     await writeStepSummary(message);
     return;
   }
@@ -558,6 +954,30 @@ async function main() {
     integratedRelease?.commit ??
     (integratedTag ? resolveTagCommit(integratedTag) : git(["merge-base", mainRef, targetCommit]));
   const branch = `${BRANCH_PREFIX}${targetTag}-${targetCommit.slice(0, 8)}`;
+
+  if (preflight) {
+    if (!dryRun) getMainProtection();
+    if (dryRun) {
+      const message = `Dry run only; upstream stable ${targetTag} needs a sync pull request.`;
+      console.log(message);
+      await writeOutput("requires_write", "false");
+      await writeOutput("target_tag", targetTag);
+      await writeOutput("target_commit", targetCommit);
+      await writeOutput("branch", branch);
+      await writeStepSummary(message);
+      return;
+    }
+    const message = `Stable upstream release ${targetTag} needs a sync pull request.`;
+    console.log(message);
+    await writeOutput("requires_write", "true");
+    await writeOutput("target_tag", targetTag);
+    await writeOutput("target_commit", targetCommit);
+    await writeOutput("branch", branch);
+    await writeStepSummary(message);
+    return;
+  }
+
+  if (!dryRun) getMainProtection();
 
   const existingBranchCommit = getRemoteBranchCommit(branch);
   if (existingBranchCommit) {
@@ -601,13 +1021,13 @@ async function main() {
   const body = [
     `This pull request merges upstream stable release **${targetTag}** (${targetCommit}).`,
     "",
-    "The update branch is based on the fork's current `main` and merges the upstream tag, preserving fork commits. Review the diff and wait for the fork CI checks before merging. This workflow never enables auto-merge.",
+    "The update branch is based on the fork's current `main` and merges the upstream tag, preserving fork commits. The branch is pushed first so eligible push checks run on its exact head SHA. Automatic merge requires all four fork checks and strict protected-main rules; it never uses an administrator bypass.",
     "",
     "### Upstream change summary",
     changeSummary,
     "",
     "### Verification",
-    "- The sync workflow dispatches Fork CI on this exact branch and fails if dispatch is rejected. Confirm a CI run exists and passes before merging; this workflow never approves or merges the pull request.",
+    "- The GitHub App token pushes the branch and opens this PR so CI runs on its exact head without workflow approval. Merge automation waits for all four checks to succeed on that exact SHA.",
   ].join("\n");
   if (dryRun) {
     const summary = `## Upstream stable sync: ${targetTag}\n\n${changeSummary}\n\nDry run only; no branch was pushed and no pull request was created.`;
@@ -619,8 +1039,7 @@ async function main() {
   await NodeFSP.writeFile(bodyPath, `${body}\n`);
   if (!existingBranchCommit) git(["push", "origin", `HEAD:refs/heads/${branch}`]);
   const pullRequestUrl = createSyncPullRequest(branch, targetTag, bodyPath);
-  const dispatched = dispatchForkCi(branch);
-  const summary = `## Upstream stable sync: ${targetTag}\n\n${changeSummary}\n\nCreated a review pull request: ${pullRequestUrl}\n\nFork CI ${dispatched ? "was dispatched" : "already has a workflow_dispatch run"} on ${branch}. No merge or release was performed.`;
+  const summary = `## Upstream stable sync: ${targetTag}\n\n${changeSummary}\n\nCreated the sync pull request: ${pullRequestUrl}\n\nFork CI was triggered by the push of ${branch}. The CI completion workflow verifies all four checks against the exact head before protected merging.`;
   console.log(summary);
   await writeStepSummary(summary);
 }
