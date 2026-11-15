@@ -99,17 +99,34 @@ change:
 | Original and fork installs coexist                                     | The Linux Nix coexistence smoke, with separate `T3CODE_HOME` and `XDG_CONFIG_HOME`                                                                                                                                                      |
 
 The official Android and iOS apps, the fork APK on a device, and macOS and Windows desktop hosts
-have not been run. Record such a run when one becomes possible.
+have not been run:
+
+Gerätetests: auf Wunsch des Users nicht Teil des Auftrags (headless Host)
+
+Record such a run when one becomes possible.
+
+## Approved exceptions
+
+The user approved these gaps as accepted exceptions to the fork acceptance on 2026-11-15. A release
+may ship with them. Anything unproven that is not listed here is a [known issue](#known-issues) and
+needs its own decision.
+
+- **Live signed-APK workflow run.** GitHub Actions rejects the run with HTTP 422. The user re-runs
+  `Nitestack Android APK` on `main` once Actions is unblocked, which also proves the fixed
+  `apksigner` certificate parsing. Approved by the user, 2026-11-15.
+- **Live aix profile switching and portable handoff.** Covered by fixture tests only; no live
+  profile-to-profile turn has run. Approved by the user, 2026-11-15.
+- **aix profile changes without a rebuild.** This needs a credential integration path that does not
+  exist yet. Approved by the user, 2026-11-15.
+- **`options: null` in a model selection.** Fork servers reject it until the upstream fix
+  `f4e65cd843` arrives with the next upstream sync. Delete this item when that sync lands.
+  Approved by the user, 2026-11-15.
 
 ## Known issues
 
 - **GitHub Actions does not start workflows on the fork.** `workflow_dispatch` returns HTTP 422
   "Actions has been disabled for this repository", although the repository's Actions permissions
   API reports Actions as enabled and the workflows are active. Push-triggered runs stay queued until
-  cancelled. Until GitHub support or a settings change resolves this, fork CI, the scheduled
-  upstream sync, and the APK workflow do not run. Use the local checks and the manual sync path.
-- **Fork servers reject `options: null` in a model selection.** Upstream fixed this in `f4e65cd843`.
-  It arrives with the next upstream sync.
-- **Android APK certificate check.** The workflow's fixed parsing of the `apksigner` certificate
-  line has not run live yet. The previous live run produced an APK whose signer certificate matched
-  the upload keystore.
+  cancelled. Until GitHub support or a settings change resolves this, fork CI and the scheduled
+  upstream sync do not run, so full CI and the sync pull request path are unproven. Use the local
+  checks and the manual sync path. The APK run is covered by the approved exception above.

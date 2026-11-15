@@ -22,6 +22,7 @@ import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Digest from "effect/crypto/Digest";
+import * as NodeUtil from "node:util";
 import * as TestClock from "effect/testing/TestClock";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -1066,40 +1067,57 @@ describe("syncAixProviderInstances", () => {
     effectIt.effect("keeps the resolved key out of logs when refreshes fail or go stale", () => {
       const lines: Array<string> = [];
       const logger = Logger.make(({ message, cause }) => {
-        lines.push(JSON.stringify(message), Cause.pretty(cause));
+        lines.push(NodeUtil.inspect(message, { depth: 10 }), Cause.pretty(cause));
       });
+      // The tagged errors have no field for text, so a leaked key would arrive as their cause.
+      const carryingKey = <E extends Error>(error: E): E =>
+        Object.assign(error, { cause: new Error(`aix stderr: OPENAI_API_KEY=${SENTINEL_KEY}`) });
       return Effect.gen(function* () {
         const { counted } = yield* countingSettings;
         const cache = yield* makeAixSyncCache;
         let failing = false;
+        let listingFails = true;
         const base = sourceFor();
         const source = sourceFor({
           listProfiles: Effect.suspend(() =>
-            failing
-              ? Effect.fail(new AixDiscoveryError({ reason: "command-failed" }))
+            failing && listingFails
+              ? Effect.fail(carryingKey(new AixDiscoveryError({ reason: "command-failed" })))
               : base.listProfiles,
           ),
-          fetchLiteLlmCatalog: () =>
+          listModels: (profileName) =>
+            failing
+              ? Effect.fail(carryingKey(new AixDiscoveryError({ reason: "gateway-unavailable" })))
+              : base.listModels(profileName),
+          fetchLiteLlmCatalog: (input) =>
             failing
               ? Effect.fail(
-                  new ModelCatalogFetchError({ stage: "models", reason: "request", status: 401 }),
+                  carryingKey(
+                    new ModelCatalogFetchError({ stage: "models", reason: "request", status: 401 }),
+                  ),
                 )
-              : Effect.succeed({ models: LITELLM_MODELS }),
+              : base.fetchLiteLlmCatalog(input),
         });
 
         yield* refreshWith(counted, source, cache);
         failing = true;
         yield* refreshWith(counted, source, cache, true);
+        listingFails = false;
+        yield* refreshWith(counted, source, yield* makeAixSyncCache, true);
         yield* refreshWith(
           counted,
-          sourceFor({ listProfiles: Effect.fail(new AixDiscoveryError({ reason: "timeout" })) }),
+          sourceFor({
+            listProfiles: Effect.fail(carryingKey(new AixDiscoveryError({ reason: "timeout" }))),
+          }),
           yield* makeAixSyncCache,
           true,
         );
 
-        expect(lines.join("\n")).toContain("stale");
-        expect(lines.join("\n")).toContain("listing failed");
-        expect(lines.join("\n")).not.toContain(SENTINEL_KEY);
+        const logged = lines.join("\n");
+        expect(logged).toContain("catalog stale");
+        expect(logged).toContain("listing stale");
+        expect(logged).toContain("unavailable");
+        expect(logged).toContain("listing failed");
+        expect(logged).not.toContain(SENTINEL_KEY);
       }).pipe(
         Effect.provide(
           Layer.merge(aixTestLayer, Logger.layer([logger], { mergeWithExisting: false })),
