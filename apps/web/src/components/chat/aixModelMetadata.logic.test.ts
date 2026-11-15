@@ -44,7 +44,7 @@ describe("aix model picker metadata", () => {
     expect(
       aixCatalogStatus(provider({ status: "warning", message: "Codex needs attention" })),
     ).toEqual({
-      kind: "current",
+      kind: "warning",
       message: "Codex needs attention",
     });
   });

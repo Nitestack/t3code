@@ -335,7 +335,36 @@ it("copies a non-selected aix model ID without selecting it", async () => {
     .toHaveTextContent("Alpha");
 });
 
-it("permission-gates aix catalog refresh and reports a failed refresh", async () => {
+it("returns focus to search after closing model details so keyboard selection still works", async () => {
+  await using screen = await renderAixPicker(false);
+  await screen.getByRole("button", { name: "Choose aix model" }).click();
+  const detailsButton = page.getByRole("button", { name: "Model details for Beta" });
+  detailsButton.element().focus();
+  await userEvent.keyboard("{Enter}");
+  await expect.element(page.getByText("Context window")).toBeVisible();
+  await userEvent.keyboard("{Escape}");
+  const search = page.getByRole("combobox", { name: "Search models..." });
+  await expect.element(search).toHaveFocus();
+  await userEvent.keyboard("{ArrowDown}{Enter}");
+  await expect
+    .element(page.getByRole("button", { name: "Choose aix model" }))
+    .toHaveTextContent("Beta");
+});
+
+it("lets Escape close the picker when focus is on model details trigger", async () => {
+  await using screen = await renderAixPicker(false);
+  await screen.getByRole("button", { name: "Choose aix model" }).click();
+  const detailsButton = page.getByRole("button", { name: "Model details for Beta" });
+  detailsButton.element().focus();
+  await userEvent.keyboard("{Enter}");
+  await expect.element(page.getByText("Context window")).toBeVisible();
+  detailsButton.element().focus();
+  await userEvent.keyboard("{Escape}");
+  await expect.element(page.getByRole("button", { name: "Choose aix model" })).toHaveFocus();
+  await expect.element(page.getByText("Context window")).not.toBeInTheDocument();
+});
+
+it("hides aix catalog refresh without permission", async () => {
   await using screen = await renderAixPicker(false);
   await screen.getByRole("button", { name: "Choose aix model" }).click();
   await expect
@@ -357,8 +386,10 @@ it("disables aix catalog refresh while pending and surfaces a failed result", as
   await screen.getByRole("button", { name: "Choose aix model" }).click();
   const refreshButton = page.getByRole("button", { name: "Refresh aix catalogs" });
   await expect.element(refreshButton).toBeVisible();
-  await refreshButton.click();
-  await expect.element(refreshButton).toBeDisabled();
+  refreshButton.element().focus();
+  await userEvent.keyboard("{Enter}");
+  await expect.element(refreshButton).toHaveAttribute("aria-disabled", "true");
+  await expect.element(refreshButton).toHaveFocus();
   await act(async () =>
     finishRefresh(AsyncResult.failure(Cause.fail(new Error("refresh failed")))),
   );

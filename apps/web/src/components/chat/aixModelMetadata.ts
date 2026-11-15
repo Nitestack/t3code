@@ -2,7 +2,7 @@ import type { ServerProvider } from "@t3tools/contracts";
 import { formatContextWindowTokens } from "../../lib/contextWindow";
 
 export function aixCatalogStatus(provider: ServerProvider): {
-  readonly kind: "current" | "stale" | "unavailable";
+  readonly kind: "current" | "warning" | "stale" | "unavailable";
   readonly message: string;
 } | null {
   if (!provider.instanceId.startsWith("aix-")) return null;
@@ -15,6 +15,9 @@ export function aixCatalogStatus(provider: ServerProvider): {
       kind: "stale",
       message,
     };
+  }
+  if (provider.status === "warning") {
+    return { kind: "warning", message: message || "The aix provider needs attention." };
   }
   return {
     kind: "current",

@@ -1,5 +1,5 @@
 import { type ProviderDriverKind, type ProviderInstanceId } from "@t3tools/contracts";
-import { memo } from "react";
+import { memo, type RefObject } from "react";
 import { CheckIcon, StarIcon } from "lucide-react";
 import { getDisplayModelName } from "./providerIconUtils";
 import { ComboboxItem } from "../ui/combobox";
@@ -19,6 +19,8 @@ export const ModelListRow = memo(function ModelListRow(props: {
   name: string;
   subProvider?: string | undefined;
   catalogMetadata?: ServerProvider["models"][number]["catalogMetadata"];
+  searchInputRef: RefObject<HTMLInputElement | null>;
+  onEscape?: (() => void) | undefined;
   isAixModel?: boolean;
   instanceId: ProviderInstanceId;
   driverKind: ProviderDriverKind;
@@ -110,6 +112,8 @@ export const ModelListRow = memo(function ModelListRow(props: {
             modelId={props.slug}
             name={getDisplayModelName(model)}
             metadata={props.catalogMetadata}
+            searchInputRef={props.searchInputRef}
+            onEscape={props.onEscape}
           />
         ) : null}
         <Tooltip>

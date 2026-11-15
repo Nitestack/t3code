@@ -280,16 +280,18 @@ function AixCatalogControls(props: {
       <p
         className={cn(
           "min-w-0 text-xs leading-snug",
-          status.kind === "stale" && "text-warning-foreground",
+          (status.kind === "stale" || status.kind === "warning") && "text-warning-foreground",
           status.kind === "unavailable" && "text-destructive-foreground",
           status.kind === "current" && "text-muted-foreground",
         )}
       >
         {status.kind === "stale"
           ? `Stale catalog: ${status.message}`
-          : status.kind === "unavailable"
-            ? `Catalog unavailable: ${status.message}`
-            : status.message}
+          : status.kind === "warning"
+            ? status.message
+            : status.kind === "unavailable"
+              ? `Catalog unavailable: ${status.message}`
+              : status.message}
         {props.refreshing ? " Refreshing…" : ""}
       </p>
       {canRefresh ? (
@@ -297,8 +299,10 @@ function AixCatalogControls(props: {
           size="xs"
           variant="ghost-muted"
           className="shrink-0"
-          disabled={props.refreshing}
-          onClick={() => props.onRefresh(props.entry.instanceId)}
+          aria-disabled={props.refreshing || undefined}
+          onClick={() => {
+            if (!props.refreshing) props.onRefresh(props.entry.instanceId);
+          }}
           aria-label="Refresh aix catalogs"
         >
           <RefreshCwIcon aria-hidden="true" />
@@ -783,7 +787,13 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
             ) &&
             (selectedEntry
               ? entry.instanceId === selectedEntry.instanceId
-              : filteredModels.length === 0),
+              : filteredModels.length === 0) &&
+            !(
+              entry.instanceId === selectedEntry?.instanceId &&
+              entry.instanceId.startsWith("aix-") &&
+              props.environmentId !== null &&
+              props.onRefreshAixCatalog
+            ),
         )
       : [];
 
@@ -1115,6 +1125,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                     name={model.name}
                     subProvider={model.subProvider}
                     catalogMetadata={model.catalogMetadata}
+                    searchInputRef={searchInputRef}
+                    onEscape={onRequestClose}
                     isAixModel={model.isAixModel === true}
                     instanceId={model.instanceId}
                     driverKind={model.driverKind}

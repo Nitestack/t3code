@@ -1,5 +1,5 @@
 import { CheckIcon, CopyIcon, InfoIcon } from "lucide-react";
-import { useState } from "react";
+import { useState, type RefObject } from "react";
 import type { ServerProvider } from "@t3tools/contracts";
 import { Button } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
@@ -10,6 +10,8 @@ export function ModelCatalogDetails(props: {
   modelId: string;
   name: string;
   metadata: ServerProvider["models"][number]["catalogMetadata"];
+  searchInputRef: RefObject<HTMLInputElement | null>;
+  onEscape?: (() => void) | undefined;
 }) {
   const [copyFailed, setCopyFailed] = useState(false);
   const { copyToClipboard, isCopied: copied } = useCopyToClipboard({
@@ -33,7 +35,10 @@ export function ModelCatalogDetails(props: {
             variant="ghost-muted"
             aria-label={`Model details for ${props.name}`}
             onClick={(event) => event.stopPropagation()}
-            onKeyDown={(event) => event.stopPropagation()}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") props.onEscape?.();
+              if (event.key === "Enter" || event.key === " ") event.stopPropagation();
+            }}
           >
             <InfoIcon aria-hidden="true" />
           </Button>
@@ -44,6 +49,7 @@ export function ModelCatalogDetails(props: {
         side="top"
         align="end"
         className="max-w-[calc(100vw-1rem)]"
+        finalFocus={() => props.searchInputRef.current}
         data-model-picker-option-menu
         onPointerDown={(event) => event.stopPropagation()}
         onClick={(event) => event.stopPropagation()}
