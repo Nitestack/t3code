@@ -113,6 +113,7 @@ function withFakeClaudeEnv<A, E, R>(
       config,
       environment,
       Effect.succeed(SYNTHETIC_CLAUDE_MODEL_CATALOG),
+      undefined,
       input.resolveEnvironment?.(environment),
     );
     return yield* effectFn(textGeneration);
