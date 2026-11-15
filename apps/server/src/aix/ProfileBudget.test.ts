@@ -240,11 +240,11 @@ it.effect.each([
     },
   },
   {
-    name: "a gateway without the key API",
+    name: "a missing gateway route",
     respond: () => new Response("not found", { status: 404 }),
     unavailable: {
-      reason: "unsupported",
-      message: "This aix profile's gateway does not report a key budget.",
+      reason: "probeFailed",
+      message: "The aix gateway budget could not be read (HTTP 404).",
     },
   },
 ])("reports $name without a window", ({ respond, unavailable }) =>

@@ -184,14 +184,6 @@ const readProfileBudget = Effect.fn("AixProfileBudget.read")(function* (
     return keyInfoUsageLimits({ profileName, keyInfo: keyInfo.success, checkedAt });
   }
   const failure = keyInfo.failure;
-  // A gateway without LiteLLM's key API has no budget to report.
-  if (failure._tag === "status" && failure.status === 404) {
-    return makeUnavailableUsageLimits({
-      checkedAt,
-      reason: "unsupported",
-      message: "This aix profile's gateway does not report a key budget.",
-    });
-  }
   return makeUnavailableUsageLimits({
     checkedAt,
     reason: "probeFailed",
