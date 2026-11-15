@@ -251,6 +251,7 @@ it.effect.each([
   Effect.gen(function* () {
     const { service } = yield* budgetFor(fakeHttp(respond));
     const limits = yield* service.usageLimits("ae");
+    expect(limits.profileName).toBe("ae");
     expect(limits.windows).toEqual([]);
     expect(limits.unavailable).toEqual(unavailable);
   }),

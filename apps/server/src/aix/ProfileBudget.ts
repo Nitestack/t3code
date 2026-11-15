@@ -213,7 +213,7 @@ export const make = Effect.fn("AixProfileBudget.make")(function* (source: AixBud
   });
   return AixProfileBudget.of({
     usageLimits: Effect.fn("AixProfileBudget.usageLimits")(function* (profileName) {
-      return yield* Cache.get(cache, profileName);
+      return { ...(yield* Cache.get(cache, profileName)), profileName };
     }),
   });
 });
@@ -241,11 +241,8 @@ export const withAixProfileBudget =
           Effect.flatMap((service) =>
             Option.isNone(service)
               ? Effect.succeed(provider)
-              : service.value.usageLimits(profileName).pipe(
-                  Effect.map((usageLimits) => ({
-                    ...provider,
-                    usageLimits: { ...usageLimits, profileName },
-                  })),
-                ),
+              : service.value
+                  .usageLimits(profileName)
+                  .pipe(Effect.map((usageLimits) => ({ ...provider, usageLimits }))),
           ),
         );
