@@ -52,6 +52,13 @@ const SUPPORTED_DRIVERS: ReadonlyArray<ProviderDriverKind> = [CODEX, CLAUDE_CODE
 export interface AixRoutedModel {
   readonly id: string;
   readonly displayName: string;
+  readonly catalogMetadata?: {
+    readonly family?: string;
+    readonly contextTokens?: number;
+    readonly maxOutputTokens?: number;
+    readonly pricing?: CatalogModel["pricing"];
+    readonly reasoning?: CatalogModel["reasoning"];
+  };
 }
 
 export type AixRouteSource = "anthropic" | "litellm";
@@ -76,7 +83,18 @@ export function routeAixModels(
     const routing = routeCatalogModel(model, { route: routeFor(source, model.id) });
     if (routing.kind !== "routed" || !SUPPORTED_DRIVERS.includes(routing.driverKind)) continue;
     const driverModels = routes.get(routing.driverKind) ?? [];
-    driverModels.push({ id: model.id, displayName: model.displayName });
+    const catalogMetadata = {
+      ...(model.family !== undefined ? { family: model.family } : {}),
+      ...(model.contextTokens !== undefined ? { contextTokens: model.contextTokens } : {}),
+      ...(model.maxOutputTokens !== undefined ? { maxOutputTokens: model.maxOutputTokens } : {}),
+      ...(model.pricing !== undefined ? { pricing: model.pricing } : {}),
+      ...(model.reasoning !== undefined ? { reasoning: model.reasoning } : {}),
+    };
+    driverModels.push({
+      id: model.id,
+      displayName: model.displayName,
+      ...(Object.keys(catalogMetadata).length > 0 ? { catalogMetadata } : {}),
+    });
     routes.set(routing.driverKind, driverModels);
   }
   return routes;
@@ -138,6 +156,7 @@ export function aixDesiredInstances(
           customModels: models.map((model) => ({
             slug: customModelSlug(driver, model.id),
             name: model.displayName,
+            ...(model.catalogMetadata ? { catalogMetadata: model.catalogMetadata } : {}),
           })),
         },
       });

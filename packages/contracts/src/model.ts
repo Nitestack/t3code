@@ -1,7 +1,7 @@
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
-import { TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { PositiveInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { ProviderDriverKind } from "./providerInstance.ts";
 
 export const ProviderOptionDescriptorType = Schema.Literals(["select", "boolean"]);
@@ -104,10 +104,39 @@ export const ModelCapabilities = Schema.Struct({
 });
 export type ModelCapabilities = typeof ModelCapabilities.Type;
 
+export const CatalogModelMetadata = Schema.Struct({
+  family: Schema.optional(TrimmedNonEmptyString),
+  contextTokens: Schema.optional(PositiveInt),
+  maxOutputTokens: Schema.optional(PositiveInt),
+  pricing: Schema.optional(
+    Schema.Struct({
+      inputPerMillionTokens: Schema.optional(Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0))),
+      outputPerMillionTokens: Schema.optional(
+        Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)),
+      ),
+      cachedInputPerMillionTokens: Schema.optional(
+        Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)),
+      ),
+    }),
+  ),
+  reasoning: Schema.optional(
+    Schema.Struct({
+      efforts: Schema.Array(
+        Schema.Literals(["none", "minimal", "low", "medium", "high", "xhigh", "max"]),
+      ),
+      defaultEffort: Schema.optional(
+        Schema.Literals(["none", "minimal", "low", "medium", "high", "xhigh", "max"]),
+      ),
+    }),
+  ),
+});
+export type CatalogModelMetadata = typeof CatalogModelMetadata.Type;
+
 export const CustomModelEntry = Schema.Struct({
   slug: TrimmedNonEmptyString,
   name: Schema.optional(TrimmedNonEmptyString),
   capabilities: Schema.optional(ModelCapabilities),
+  catalogMetadata: Schema.optional(CatalogModelMetadata),
 });
 export type CustomModelEntry = typeof CustomModelEntry.Type;
 

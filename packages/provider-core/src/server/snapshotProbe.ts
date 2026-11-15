@@ -191,11 +191,22 @@ export function providerModelsFromSettings(
   const nameOverrides = new Map(
     entries.filter((entry) => entry.name !== entry.slug).map((entry) => [entry.slug, entry.name]),
   );
+  const catalogMetadata = new Map(
+    entries.flatMap((entry) =>
+      entry.catalogMetadata ? [[entry.slug, entry.catalogMetadata] as const] : [],
+    ),
+  );
   const resolvedBuiltInModels = builtInModels.map((model) => {
     const name = nameOverrides.get(model.slug);
-    if (!name) return model;
+    const metadata = catalogMetadata.get(model.slug);
+    if (!name && (!metadata || model.catalogMetadata)) return model;
+    if (!name) return { ...model, catalogMetadata: metadata };
     const { shortName: _shortName, ...rest } = model;
-    return { ...rest, name };
+    return {
+      ...rest,
+      name,
+      ...(!model.catalogMetadata && metadata ? { catalogMetadata: metadata } : {}),
+    };
   });
   const seen = new Set(resolvedBuiltInModels.map((model) => model.slug));
   const customEntries: ServerProviderModel[] = [];
@@ -210,6 +221,7 @@ export function providerModelsFromSettings(
       name: entry.name,
       isCustom: true,
       capabilities: entry.capabilities ?? customModelCapabilities,
+      ...(entry.catalogMetadata ? { catalogMetadata: entry.catalogMetadata } : {}),
     });
   }
 

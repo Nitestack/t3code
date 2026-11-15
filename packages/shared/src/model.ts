@@ -1,5 +1,7 @@
 import {
   type CustomModelSetting,
+  type CatalogModelMetadata,
+  CatalogModelMetadata as CatalogModelMetadataSchema,
   MODEL_SLUG_ALIASES_BY_PROVIDER,
   ModelCapabilities,
   type ModelSelection,
@@ -424,9 +426,11 @@ export interface CustomModelDefinition {
   readonly slug: string;
   readonly name: string;
   readonly capabilities: ModelCapabilities | null;
+  readonly catalogMetadata?: CatalogModelMetadata;
 }
 
 const decodeCustomModelCapabilities = Schema.decodeUnknownOption(ModelCapabilities);
+const decodeCatalogModelMetadata = Schema.decodeUnknownOption(CatalogModelMetadataSchema);
 
 export function readCustomModelEntries(value: unknown): CustomModelDefinition[] {
   if (!Array.isArray(value)) return [];
@@ -437,7 +441,12 @@ export function readCustomModelEntries(value: unknown): CustomModelDefinition[] 
       typeof raw === "string"
         ? { slug: raw }
         : raw !== null && typeof raw === "object"
-          ? (raw as { slug?: unknown; name?: unknown; capabilities?: unknown })
+          ? (raw as {
+              slug?: unknown;
+              name?: unknown;
+              capabilities?: unknown;
+              catalogMetadata?: unknown;
+            })
           : null;
     if (!record) continue;
     const slug = normalizeCustomModelSlug(typeof record.slug === "string" ? record.slug : null);
@@ -449,12 +458,17 @@ export function readCustomModelEntries(value: unknown): CustomModelDefinition[] 
       record.capabilities === undefined || record.capabilities === null
         ? null
         : Option.getOrNull(decodeCustomModelCapabilities(record.capabilities));
+    const catalogMetadata =
+      record.catalogMetadata === undefined
+        ? undefined
+        : Option.getOrUndefined(decodeCatalogModelMetadata(record.catalogMetadata));
     entries.push({
       slug,
       name,
       capabilities: capabilities
         ? createModelCapabilities({ optionDescriptors: capabilities.optionDescriptors ?? [] })
         : null,
+      ...(catalogMetadata ? { catalogMetadata } : {}),
     });
   }
   return entries;
@@ -463,13 +477,14 @@ export function readCustomModelEntries(value: unknown): CustomModelDefinition[] 
 export function toCustomModelSetting(entry: CustomModelDefinition): CustomModelSetting {
   const descriptors = entry.capabilities?.optionDescriptors ?? [];
   const name = entry.name !== entry.slug ? entry.name : undefined;
-  if (!name && descriptors.length === 0) return entry.slug;
+  if (!name && descriptors.length === 0 && !entry.catalogMetadata) return entry.slug;
   return {
     slug: entry.slug,
     ...(name ? { name } : {}),
     ...(descriptors.length > 0
       ? { capabilities: createModelCapabilities({ optionDescriptors: descriptors }) }
       : {}),
+    ...(entry.catalogMetadata ? { catalogMetadata: entry.catalogMetadata } : {}),
   };
 }
 

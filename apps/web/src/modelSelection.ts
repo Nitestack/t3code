@@ -71,6 +71,7 @@ export interface AppModelOption {
   isDefault?: boolean;
   isLegacy?: boolean;
   isUnavailable?: boolean;
+  catalogMetadata?: ServerProvider["models"][number]["catalogMetadata"];
 }
 
 function appendUnavailableDynamicModelSelection(
@@ -106,6 +107,8 @@ function toAppModelOption(
   const shortName = resolveModelShortName(model, driverKind);
   if (shortName) option.shortName = shortName;
   if (model.subProvider) option.subProvider = model.subProvider;
+  else if (model.catalogMetadata?.family) option.subProvider = model.catalogMetadata.family;
+  if (model.catalogMetadata) option.catalogMetadata = model.catalogMetadata;
   if (model.aliases) option.aliases = model.aliases;
   if (model.badge) option.badge = model.badge;
   if (model.isDefault) option.isDefault = true;
@@ -193,6 +196,8 @@ function getAppModelOptions(
       slug: entry.slug,
       name: entry.name,
       isCustom: true,
+      ...(entry.catalogMetadata?.family ? { subProvider: entry.catalogMetadata.family } : {}),
+      ...(entry.catalogMetadata ? { catalogMetadata: entry.catalogMetadata } : {}),
       ...(shortName ? { shortName } : {}),
     });
   }
@@ -234,6 +239,8 @@ export function getAppModelOptionsForInstance(
       slug: custom.slug,
       name: custom.name,
       isCustom: true,
+      ...(custom.catalogMetadata?.family ? { subProvider: custom.catalogMetadata.family } : {}),
+      ...(custom.catalogMetadata ? { catalogMetadata: custom.catalogMetadata } : {}),
       ...(shortName ? { shortName } : {}),
     });
   }
