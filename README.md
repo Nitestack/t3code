@@ -13,6 +13,28 @@ A soft fork of [T3 Code](https://github.com/pingdotgg/t3code), created by pingdo
 
 T3's existing providers, threads, provider switching and handoffs, and remote access remain available. Without `T3CODE_AIX=1`, aix integration is off and normal T3 providers work as usual.
 
+## In the app
+
+Captured from the fork's web client with real model IDs, demo profiles, and a local fake API. Prices, budgets, and profile names are illustrative.
+
+### aix profiles and model details
+
+Choose a profile's model and inspect the context window, output limits, and pricing supplied by its gateway.
+
+![aix model picker showing Gemma 4 31B IT and demo gateway metadata](./.github/readme/aix/aix-model-picker.png)
+
+### Gateway budgets
+
+Usage limits show the budget reported for each profile, including a reset time when the gateway supplies one.
+
+![Demo Work Gateway and Research Lab budget windows for Codex and OpenCode](./.github/readme/aix/aix-budget-windows.png)
+
+### Work and Personal views
+
+Classify environments as Work, then switch views to filter their projects and threads. The view does not change server permissions or stop running agents.
+
+![Work and Personal switch with the environment classification menu open](./.github/readme/aix/work-personal-scope.png)
+
 ## Set up aix and run T3
 
 Install aix on the **machine running the T3 server**, configure an API-key profile for a gateway you can access, and make sure `aix` is on that server process's `PATH`. On Linux or macOS, the current aix README provides this installer:
