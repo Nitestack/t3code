@@ -7241,6 +7241,19 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       expectedCode: "subscription_sharing_usage_limit_exceeded",
       expectedMessage: "Usage settings",
     },
+    // Text from `codex exec -m <unknown model>`: the turn starts, then fails in-turn.
+    {
+      name: "unsupported-model",
+      code: "other",
+      errorInfo: null,
+      message:
+        "The 'removed-model' model is not supported when using Codex with a ChatGPT account.",
+      notification: true,
+      expectedClass: "provider_error",
+      expectedCode: null,
+      expectedMessage:
+        "The 'removed-model' model is not supported when using Codex with a ChatGPT account.",
+    },
     {
       name: "sharing-code-mention-retry",
       code: "responseStreamDisconnected",
