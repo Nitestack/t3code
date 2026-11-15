@@ -77,6 +77,7 @@ function AccountAvatar({
   readonly account: LimitAccount;
   readonly className?: string;
 }) {
+  if (account.profileName) return null;
   if (account.redeem) {
     return (
       <ProviderInstanceIcon
@@ -586,21 +587,33 @@ function PoolWindowCard({
 }
 
 function PoolSection({ pool, now }: { readonly pool: LimitPool; readonly now: number }) {
-  const color = barColor(pool.driver);
+  const color = pool.profileName ? "var(--foreground)" : barColor(pool.driver);
   const label = providerClients.get(pool.driver)?.label ?? String(pool.driver);
+  const profileEnvironment = pool.accounts[0]?.environments[0]?.label;
   const windows = displayLimitWindows(pool);
   return (
     <section className="flex flex-col gap-3">
       <h2 className="flex items-center gap-2 text-sm font-medium text-foreground">
-        <ProviderInstanceIcon
-          driverKind={pool.driver}
-          displayName={label}
-          indicatorBackground="var(--background)"
-          className="size-5"
-          iconClassName="size-4 text-foreground/80"
-        />
-        {label}
+        {pool.profileName ? (
+          <span>{pool.profileName}</span>
+        ) : (
+          <>
+            <ProviderInstanceIcon
+              driverKind={pool.driver}
+              displayName={label}
+              indicatorBackground="var(--background)"
+              className="size-5"
+              iconClassName="size-4 text-foreground/80"
+            />
+            {label}
+          </>
+        )}
       </h2>
+      {pool.profileName ? (
+        <p className="-mt-2 text-xs text-muted-foreground">
+          AIX profile{profileEnvironment ? ` · ${profileEnvironment}` : ""}
+        </p>
+      ) : null}
       {windows.map((window) => {
         const details =
           pool.driver === "cursor" ? cursorUsageWindowDetails(window.id, pool) : undefined;
@@ -640,7 +653,9 @@ export function UsageLimitsPooled({
       ) : null}
       <SegmentPopoverContext value={segmentPopover}>
         {pools.map((pool) => (
-          <Fragment key={pool.driver}>
+          <Fragment
+            key={pool.profileName ? (pool.accounts[0]?.key ?? pool.profileName) : pool.driver}
+          >
             <PoolSection pool={pool} now={now} />
           </Fragment>
         ))}

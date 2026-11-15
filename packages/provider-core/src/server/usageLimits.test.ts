@@ -89,6 +89,17 @@ describe("applyUsageLimitsUpdate", () => {
     ).toEqual({ checkedAt, windows: [weekly], unavailable: { reason: "probeFailed" } });
   });
 
+  it("preserves AIX profile identity through streamed window updates", () => {
+    const previous = { ...published, profileName: "work" };
+    expect(
+      applyUsageLimitsUpdate({
+        previous,
+        checkedAt: "2026-09-03T12:00:05.000Z",
+        update: { windows: [{ ...session, usedPercent: 55 }] },
+      })?.profileName,
+    ).toBe("work");
+  });
+
   it("preserves reset credits and a $0 cap when a streamed window update changes usage", () => {
     const resetCredits = { availableCount: 2, nextExpiresAt: "2026-10-01T00:00:00.000Z" };
     const next = applyUsageLimitsUpdate({
@@ -136,11 +147,48 @@ describe("resolveUsageLimitsAfterProbe", () => {
     expect(resolveUsageLimitsAfterProbe({ published: live, probed: newer })).toEqual(newer);
   });
 
-  it("keeps the last good windows through a failed probe but not an unsupported one", () => {
+  it("keeps last good windows through an ordinary failed probe but not an unsupported one", () => {
     const failed = { checkedAt, windows: [], unavailable: { reason: "probeFailed" as const } };
     const unsupported = { checkedAt, windows: [], unavailable: { reason: "unsupported" as const } };
     expect(resolveUsageLimitsAfterProbe({ published, probed: failed })).toBe(published);
     expect(resolveUsageLimitsAfterProbe({ published, probed: unsupported })).toBe(unsupported);
     expect(resolveUsageLimitsAfterProbe({ published: undefined, probed: failed })).toBe(failed);
+  });
+
+  it("publishes an AIX profile failure instead of retaining its older budget", () => {
+    const aixPublished = { ...published, profileName: "work" };
+    const aixFailed = {
+      checkedAt: "2026-09-03T12:00:05.000Z",
+      windows: [],
+      profileName: "work",
+      unavailable: { reason: "probeFailed" as const, message: "Gateway budget unavailable." },
+    };
+    expect(resolveUsageLimitsAfterProbe({ published: aixPublished, probed: aixFailed })).toBe(
+      aixFailed,
+    );
+  });
+
+  it("does not retain a removed AIX profile budget after a native probe failure", () => {
+    const publishedAix = { ...published, profileName: "work" };
+    const nativeFailure = {
+      checkedAt: "2026-09-03T12:00:05.000Z",
+      windows: [],
+      unavailable: { reason: "probeFailed" as const },
+    };
+    expect(resolveUsageLimitsAfterProbe({ published: publishedAix, probed: nativeFailure })).toBe(
+      nativeFailure,
+    );
+  });
+
+  it("does not graft a removed AIX profile budget onto a newer native report", () => {
+    const publishedAix = {
+      ...published,
+      checkedAt: "2026-09-03T12:00:05.000Z",
+      profileName: "work",
+    };
+    const nativeSuccess = { checkedAt: "2026-09-03T12:00:00.000Z", windows: [] };
+    expect(resolveUsageLimitsAfterProbe({ published: publishedAix, probed: nativeSuccess })).toBe(
+      nativeSuccess,
+    );
   });
 });

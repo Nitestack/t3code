@@ -31,6 +31,7 @@ import { ResetCredits } from "./UsageLimitsSection";
 import { usageProviderKind, useProviderColors } from "./usageProviders";
 
 const PACE_LABEL = { ahead: "Ahead of pace", on: "On pace", under: "Under pace" } as const;
+const PROFILE_LIMIT_COLOR = "#8e8e93";
 
 function accountName(account: LimitAccount) {
   if (account.displayName) return account.displayName;
@@ -436,14 +437,24 @@ export function UsageLimitsSection({
       {pools.map((pool) => {
         const windows = displayLimitWindows(pool);
         return (
-          <Fragment key={pool.driver}>
+          <Fragment
+            key={pool.profileName ? (pool.accounts[0]?.key ?? pool.profileName) : pool.driver}
+          >
             <View className="gap-3">
               <View className="flex-row items-center gap-2 px-1">
-                <ProviderIcon provider={pool.driver} size={18} />
+                {pool.profileName ? null : <ProviderIcon provider={pool.driver} size={18} />}
                 <Text className="text-base font-t3-medium text-foreground">
-                  {providerClients.get(pool.driver)?.label ?? pool.driver}
+                  {pool.profileName ?? providerClients.get(pool.driver)?.label ?? pool.driver}
                 </Text>
               </View>
+              {pool.profileName ? (
+                <Text className="-mt-2 px-1 text-xs text-foreground-muted">
+                  AIX profile
+                  {pool.accounts[0]?.environments[0]?.label
+                    ? ` · ${pool.accounts[0].environments[0].label}`
+                    : ""}
+                </Text>
+              ) : null}
               {windows.map((window) => {
                 const details =
                   pool.driver === "cursor" ? cursorUsageWindowDetails(window.id, pool) : undefined;
@@ -451,7 +462,11 @@ export function UsageLimitsSection({
                   <PoolWindowCard
                     key={`${window.kind}:${window.id}`}
                     pool={window}
-                    color={colors[usageProviderKind(pool.driver) ?? "codex"]}
+                    color={
+                      pool.profileName
+                        ? PROFILE_LIMIT_COLOR
+                        : colors[usageProviderKind(pool.driver) ?? "codex"]
+                    }
                     now={now}
                     environmentIds={
                       selectedEnvironmentIds === null ? null : [...selectedEnvironmentIds]
@@ -533,14 +548,18 @@ export function UsageLimitAccountScreen({ route }: AccountScreenProps) {
   const accounts = collectLimitAccounts(selected);
   const account = accounts.find((candidate) => candidate.key === accountKey);
   const pool = collectLimitPools(accounts, now)
-    .find((candidate) => candidate.driver === account?.driver)
+    .find(
+      (candidate) =>
+        candidate.driver === account?.driver &&
+        candidate.accounts.some((candidateAccount) => candidateAccount.key === accountKey),
+    )
     ?.windows.find((candidate) => candidate.id === windowId && candidate.kind === windowKind);
   const window = pool?.members.find((member) => member.account.key === accountKey)?.window;
   const evenPace = window ? paceRemainingPercent(window, now) : null;
   const reset = pool?.resets.find((candidate) => candidate.member.account.key === accountKey);
   const [revealed, setRevealed] = useState(false);
   return (
-    <SettingsScreen title="Account">
+    <SettingsScreen title={account?.profileName ?? "Account"}>
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
         contentContainerClassName="gap-5 p-5"
@@ -554,7 +573,7 @@ export function UsageLimitAccountScreen({ route }: AccountScreenProps) {
           <>
             <View className="gap-2">
               <View className="flex-row items-center gap-2">
-                <ProviderIcon provider={account.driver} size={24} />
+                {account.profileName ? null : <ProviderIcon provider={account.driver} size={24} />}
                 <Text className="flex-1 text-xl font-t3-bold text-foreground">
                   {account.displayName ??
                     providerClients.get(account.driver)?.label ??

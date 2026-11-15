@@ -213,7 +213,7 @@ export const make = Effect.fn("AixProfileBudget.make")(function* (source: AixBud
   });
   return AixProfileBudget.of({
     usageLimits: Effect.fn("AixProfileBudget.usageLimits")(function* (profileName) {
-      return yield* Cache.get(cache, profileName);
+      return { ...(yield* Cache.get(cache, profileName)), profileName };
     }),
   });
 });

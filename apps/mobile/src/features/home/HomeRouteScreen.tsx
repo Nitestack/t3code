@@ -2,11 +2,11 @@ import { uuidv4 } from "../../lib/uuid";
 import { ThreadUndoNotice } from "./ThreadUndoNotice";
 import { use } from "react";
 import { NativePrimaryColumnContext } from "../../native/v5-workspace-context";
-import * as Arr from "effect/Array";
-import * as Order from "effect/Order";
 import { useNavigation } from "@react-navigation/native";
 import { useMemo, useState } from "react";
 import { Platform } from "react-native";
+import * as Arr from "effect/Array";
+import * as Order from "effect/Order";
 
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import { pickableProjectGroups } from "@t3tools/client-runtime/state/project-grouping";
@@ -41,7 +41,7 @@ import { useSelectWorkspaceTab } from "../layout/workspace/useSelectWorkspaceTab
 import { useSelectWorkspaceDetail } from "../layout/workspace/useSelectWorkspaceDetail";
 import { WorkspaceListEmptyDetail } from "../layout/workspace/WorkspaceListEmptyDetail";
 import { WorkspaceListHeader } from "../layout/workspace/WorkspaceListHeader";
-import { buildHomeListFilterMenuItems } from "./home-list-filter-menu";
+import { buildHomeListFilterMenuItems, homeListFilterEnvironments } from "./home-list-filter-menu";
 import { EnvironmentScopeSwitcher } from "../environment-scope/EnvironmentScopeSwitcher";
 import { useMobileEnvironmentScope } from "../environment-scope/useMobileEnvironmentScope";
 
@@ -127,7 +127,7 @@ export function HomeRouteScreen() {
     })),
     Order.mapInput(Order.String, (environment: { readonly label: string }) => environment.label),
   );
-  const environments = filterScope(allEnvironments);
+  const environments = filterScope(homeListFilterEnvironments(workspaceEnvironments));
   const availableEnvironmentIds = useMemo(
     () => new Set(environments.map((environment) => environment.environmentId)),
     [environments],

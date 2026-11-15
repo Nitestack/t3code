@@ -11,6 +11,7 @@ import {
   type ServerProviderUsageWindow,
 } from "@t3tools/contracts";
 import {
+  aixProfileNameFromWindowId,
   type ResetCreditChoice,
   resetCreditChoices,
   formatResetsIn,
@@ -58,6 +59,8 @@ function WindowRow(props: {
   const timeLeft = paceRemainingPercent(window, now);
   const pace = paceOf(window, now);
   const resetsIn = formatResetsIn(window, now);
+  const profileName = aixProfileNameFromWindowId(window.id);
+  const label = profileName ? `${profileName} budget` : window.label;
   const [barWidth, setBarWidth] = useState(0);
   const tickX =
     timeLeft === null || barWidth < 6
@@ -87,7 +90,7 @@ function WindowRow(props: {
   return (
     <View className="gap-1">
       <View className="flex-row items-baseline justify-between gap-3">
-        <Text className="text-sm text-foreground">{window.label}</Text>
+        <Text className="text-sm text-foreground">{label}</Text>
         <Text className="text-sm font-t3-medium tabular-nums text-foreground">
           {remaining}% left
         </Text>

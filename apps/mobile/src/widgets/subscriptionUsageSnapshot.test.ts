@@ -64,6 +64,43 @@ describe("subscription widget snapshots", () => {
     expect(snapshot.url).toBe(deepLink);
     expect(JSON.stringify(snapshot)).not.toContain("private@example.com");
   });
+  it("keeps AIX profile budgets out of the Codex subscription widget", () => {
+    const profile = (name: string) =>
+      provider({
+        instanceId: ProviderInstanceId.make(`aix-codex-${name}`),
+        displayName: `${name} · Codex`,
+        usageLimits: {
+          checkedAt: new Date(now - 10 * 60_000).toISOString(),
+          profileName: name,
+          windows: [
+            {
+              id: `aix-budget:${name}`,
+              kind: "other",
+              label: "Gateway budget",
+              usedPercent: 95,
+              resetsAt: window.resetsAt,
+            },
+          ],
+        },
+      });
+    const nativeAccounts = ["one", "two"].map((name) =>
+      provider({
+        instanceId: ProviderInstanceId.make(`codex-${name}`),
+        auth: { status: "authenticated", email: `${name}@example.com` },
+      }),
+    );
+    const snapshot = buildSubscriptionUsageSnapshot(
+      presentations([profile("work"), profile("home"), ...nativeAccounts]),
+      deepLink,
+    );
+
+    expect(snapshot.checkedAt).toBe(now);
+    expect(snapshot.providers[0]).toMatchObject({
+      name: "Codex",
+      detail: "2 accounts · pooled",
+      windows: [{ label: "5 hours", remaining: 60 }],
+    });
+  });
   it("uses upstream deduplication for a native account also present in a proxy hub", () => {
     const input = new Map([
       [

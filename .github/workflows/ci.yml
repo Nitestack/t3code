@@ -678,10 +678,14 @@ jobs:
         run: vp run --filter @t3tools/contracts test
 
   fork_web:
-    name: Fork Web
+    name: Fork Web Shard ${{ matrix.shard }}
     if: github.repository != 'pingdotgg/t3code'
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     steps:
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
@@ -719,7 +723,7 @@ jobs:
           fi
 
           set +e
-          vp run --filter @t3tools/web test
+          vp run --filter @t3tools/web test --shard ${{ matrix.shard }}/${{ strategy.job-total }}
           test_status=$?
           set -e
 
@@ -735,6 +739,21 @@ jobs:
           fi
 
           exit "$test_status"
+
+  fork_web_aggregate:
+    name: Fork Web
+    needs: fork_web
+    if: always() && github.repository != 'pingdotgg/t3code'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require web shards to pass
+        env:
+          SHARD_RESULT: ${{ needs.fork_web.result }}
+        run: |
+          if [[ "$SHARD_RESULT" != "success" ]]; then
+            echo "Fork Web shards completed with result: $SHARD_RESULT"
+            exit 1
+          fi
 
   fork_desktop:
     name: Fork Desktop Build
