@@ -2,7 +2,9 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import { ProviderInstanceId } from "@t3tools/contracts";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
@@ -10,6 +12,7 @@ import * as Scope from "effect/Scope";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import { ChildProcessSpawner } from "effect/process";
 import * as Option from "effect/Option";
+import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
@@ -219,14 +222,20 @@ it.effect("publishes aix catalog status transitions without refreshing OpenCode"
 it.effect("stops forwarding profile signals once the instance stream ends", () =>
   run(
     Effect.gen(function* () {
-      const { aixInstance, aixSync } = yield* signalledInstance(Stream.empty);
+      const baseChanges = yield* PubSub.unbounded<never>();
+      const { aixInstance, aixSync } = yield* signalledInstance(Stream.fromPubSub(baseChanges));
+      const subscribed = yield* Deferred.make<void>();
 
-      const output = yield* aixInstance.snapshot.streamChanges.pipe(
+      const consumer = yield* aixInstance.snapshot.streamChanges.pipe(
         Stream.provideService(AixProviderInstanceSync, aixSync),
+        Stream.onStart(Deferred.succeed(subscribed, undefined)),
         Stream.runCollect,
+        Effect.forkChild,
       );
+      yield* Deferred.await(subscribed);
+      yield* PubSub.shutdown(baseChanges);
 
-      expect(Array.from(output)).toEqual([]);
+      expect(Array.from(yield* Fiber.join(consumer))).toEqual([]);
     }),
     unusedRuntime,
   ),

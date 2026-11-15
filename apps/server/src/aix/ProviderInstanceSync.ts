@@ -314,7 +314,6 @@ export const syncAixProviderInstances = Effect.fn("AixProviderInstanceSync.sync"
         const unavailableProfiles = new Set<string>();
         const observedProfiles: Array<AixObservedProfile> = [];
 
-        const previousStaleByProfile = yield* Ref.get(cache.staleByProfile);
         if (input.enabled) {
           const listing = yield* cache.profiles
             .read("profiles", input.source.listProfiles, { force, failureCode })
@@ -398,22 +397,20 @@ export const syncAixProviderInstances = Effect.fn("AixProviderInstanceSync.sync"
               routes: routes.success.value,
             });
           }
-          yield* Ref.set(cache.staleByProfile, staleByProfile);
-        }
-
-        if (input.onStatusChange !== undefined) {
-          const currentStaleByProfile = yield* Ref.get(cache.staleByProfile);
-          const profiles = new Set([
-            ...previousStaleByProfile.keys(),
-            ...currentStaleByProfile.keys(),
-          ]);
-          for (const profile of profiles) {
-            const before = previousStaleByProfile.get(profile);
-            const after = currentStaleByProfile.get(profile);
-            if (before?.since !== after?.since || before?.code !== after?.code) {
-              yield* input.onStatusChange(profile);
-            }
-          }
+          // Commit and publish together: an interrupt between them would hide the change from later diffs.
+          yield* Effect.uninterruptible(
+            Effect.gen(function* () {
+              const previous = yield* Ref.getAndSet(cache.staleByProfile, staleByProfile);
+              if (input.onStatusChange === undefined) return;
+              for (const profile of new Set([...previous.keys(), ...staleByProfile.keys()])) {
+                const before = previous.get(profile);
+                const after = staleByProfile.get(profile);
+                if (before?.since !== after?.since || before?.code !== after?.code) {
+                  yield* input.onStatusChange(profile);
+                }
+              }
+            }),
+          );
         }
 
         // Read after the slow aix and catalog calls, so a manual instance that appeared meanwhile is seen.
@@ -462,7 +459,11 @@ export const syncAixFromEnvironment = Effect.fn("AixProviderInstanceSync.syncFro
   function* (
     environment: Readonly<Record<string, string | undefined>>,
     source: AixSyncSource,
-    options: { readonly cache?: AixSyncCache; readonly force?: boolean } = {},
+    options: {
+      readonly cache?: AixSyncCache;
+      readonly force?: boolean;
+      readonly onStatusChange?: (profile: string) => Effect.Effect<void>;
+    } = {},
   ) {
     yield* syncAixProviderInstances({
       enabled: environment[AIX_ENABLED_ENVIRONMENT_VARIABLE] === "1",
@@ -542,12 +543,11 @@ const make = Effect.gen(function* () {
   const refresh = Effect.fn("AixProviderInstanceSync.refresh")(function* (input: {
     readonly force: boolean;
   }) {
-    yield* syncAixProviderInstances({
-      enabled: environment[AIX_ENABLED_ENVIRONMENT_VARIABLE] === "1",
-      source,
+    yield* syncAixFromEnvironment(environment, source, {
       cache,
       force: input.force,
-      onStatusChange: (profile) => PubSub.publish(profileStatusChanges, profile),
+      onStatusChange: (profile) =>
+        PubSub.publish(profileStatusChanges, profile).pipe(Effect.asVoid),
     }).pipe(
       Effect.provideService(Digest.Digest, digest),
       Effect.catchCause((cause) => Effect.logError("aix provider instance sync failed", cause)),
