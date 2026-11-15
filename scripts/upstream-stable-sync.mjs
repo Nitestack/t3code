@@ -207,12 +207,17 @@ export function mergeStableRelease({ targetTag, mainRef, branch, tagRef, cwd = p
   }
 }
 
-function run(command, args, { githubOperation, cwd = process.cwd(), allowFailure = false } = {}) {
+function run(
+  command,
+  args,
+  { githubOperation, cwd = process.cwd(), allowFailure = false, env } = {},
+) {
   try {
     return NodeChildProcess.execFileSync(command, args, {
       cwd,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
+      env: env ? { ...process.env, ...env } : undefined,
     }).trim();
   } catch (error) {
     if (allowFailure) return undefined;
@@ -249,12 +254,20 @@ function getRemoteBranchCommit(branch) {
   return commit;
 }
 
-function validateSyncBranch({ branch, branchCommit, mainRef, targetTag, targetCommit }) {
+export function validateSyncBranch({
+  branch,
+  branchCommit,
+  mainRef,
+  targetTag,
+  targetCommit,
+  cwd = process.cwd(),
+}) {
+  const runGit = (args, options) => git(args, { ...options, cwd });
   const expectedMarker = `${JSON.stringify({ tag: targetTag, commit: targetCommit }, null, 2)}\n`;
   const marker = `${branchCommit}:${MARKER_PATH}`;
   let actualMarker;
   try {
-    actualMarker = git(["show", marker]);
+    actualMarker = runGit(["show", marker]);
   } catch {
     throw new Error(`Existing update branch ${branch} is missing its upstream marker.`);
   }
@@ -262,26 +275,26 @@ function validateSyncBranch({ branch, branchCommit, mainRef, targetTag, targetCo
     throw new Error(`Existing update branch ${branch} has an unexpected upstream marker.`);
   }
 
-  const mergeParents = git(["show", "-s", "--format=%P", branchCommit]).split(" ");
+  const mergeParents = runGit(["show", "-s", "--format=%P", branchCommit]).split(" ");
   if (mergeParents.length !== 2 || mergeParents[1] !== targetCommit) {
     throw new Error(
       `Existing update branch ${branch} contains unexpected commits or does not merge the expected upstream tag.`,
     );
   }
-  if (!isAncestor(mergeParents[0], mainRef)) {
+  if (!isAncestor(mergeParents[0], mainRef, cwd)) {
     throw new Error(
       `Existing update branch ${branch} is not based on the current fork main history.`,
     );
   }
   let expectedMergeTree;
   try {
-    expectedMergeTree = git(["merge-tree", "--write-tree", mergeParents[0], targetCommit])
+    expectedMergeTree = runGit(["merge-tree", "--write-tree", mergeParents[0], targetCommit])
       .split("\n")[0]
       .trim();
   } catch {
     throw new Error(`Existing update branch ${branch} contains an unresolved upstream merge.`);
   }
-  const mergeChanges = git(["diff", "--name-only", expectedMergeTree, branchCommit])
+  const mergeChanges = runGit(["diff", "--name-only", expectedMergeTree, branchCommit])
     .split("\n")
     .filter(Boolean);
   if (mergeChanges.length !== 1 || mergeChanges[0] !== MARKER_PATH) {
@@ -376,7 +389,7 @@ function createSyncPullRequest(branch, targetTag, bodyPath) {
       )
     ) {
       throw new Error(
-        `GitHub blocked automated pull-request creation. Configure FORK_SYNC_APP_ID and FORK_SYNC_APP_PRIVATE_KEY for an installed fork App with contents:write and pull_requests:write. The update branch ${branch} is preserved for retry.`,
+        `GitHub blocked automated pull-request creation. Configure FORK_SYNC_APP_ID and FORK_SYNC_APP_PRIVATE_KEY for an installed fork App with administration:read, contents:write, and pull_requests:write. The update branch ${branch} is preserved for retry.`,
         { cause: error },
       );
     }
@@ -394,9 +407,10 @@ function resolveTagCommit(tag) {
   return commit;
 }
 
-function isAncestor(commit, ref) {
+function isAncestor(commit, ref, cwd = process.cwd()) {
   try {
     NodeChildProcess.execFileSync("git", ["merge-base", "--is-ancestor", commit, ref], {
+      cwd,
       stdio: "ignore",
     });
     return true;
@@ -570,23 +584,34 @@ function getSyncPullRequest(branch, state = "all") {
   return matches[0];
 }
 
+function runProtectionGitHub(args, githubOperation) {
+  const token = process.env.PROTECTION_GH_TOKEN;
+  if (!token) {
+    throw new Error(
+      "The sync App token is required to read main protection and repository rulesets.",
+    );
+  }
+  return run("gh", args, { githubOperation, env: { GH_TOKEN: token } });
+}
+
 function getMainProtection() {
   let protection;
   let repository;
   let rulesets;
   try {
     protection = JSON.parse(
-      run("gh", ["api", `repos/${FORK_REPOSITORY}/branches/main/protection`], {
-        githubOperation: "branchProtection",
-      }),
+      runProtectionGitHub(
+        ["api", `repos/${FORK_REPOSITORY}/branches/main/protection`],
+        "branchProtection",
+      ),
     );
     repository = JSON.parse(
-      run("gh", ["api", `repos/${FORK_REPOSITORY}`, "--jq", "{allow_merge_commit}"], {
-        githubOperation: "repositorySettings",
-      }),
+      runProtectionGitHub(
+        ["api", `repos/${FORK_REPOSITORY}`, "--jq", "{allow_merge_commit}"],
+        "repositorySettings",
+      ),
     );
-    rulesets = run(
-      "gh",
+    rulesets = runProtectionGitHub(
       [
         "api",
         "--paginate",
@@ -594,7 +619,7 @@ function getMainProtection() {
         ".[] | {name, bypass_actors}",
         `repos/${FORK_REPOSITORY}/rulesets?includes_parents=true&per_page=100`,
       ],
-      { githubOperation: "repositoryRulesets" },
+      "repositoryRulesets",
     )
       .split("\n")
       .filter(Boolean)
@@ -615,14 +640,19 @@ function getMainProtection() {
   }
 }
 
-function queueForkRelease({ version, sourceSha, sourceBranch }) {
-  const publish = process.env.FORK_AUTO_PUBLISH_STABLE_RELEASES === "true";
+export function queueForkRelease({
+  version,
+  sourceSha,
+  sourceBranch,
+  runCommand = run,
+  publish = process.env.FORK_AUTO_PUBLISH_STABLE_RELEASES === "true",
+}) {
   const mode = publish ? "publish" : "build-only";
   const displayTitle = `Fork ${mode} stable ${version} source ${sourceSha}`;
   let runs;
   try {
     runs = JSON.parse(
-      run(
+      runCommand(
         "gh",
         [
           "run",
@@ -652,7 +682,7 @@ function queueForkRelease({ version, sourceSha, sourceBranch }) {
     return false;
   }
   try {
-    run(
+    runCommand(
       "gh",
       [
         "api",
@@ -978,7 +1008,6 @@ async function main() {
   const branch = `${BRANCH_PREFIX}${targetTag}-${targetCommit.slice(0, 8)}`;
 
   if (preflight) {
-    if (!dryRun) getMainProtection();
     if (dryRun) {
       const message = `Dry run only; upstream stable ${targetTag} needs a sync pull request.`;
       console.log(message);

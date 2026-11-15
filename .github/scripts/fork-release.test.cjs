@@ -107,7 +107,7 @@ test("manual publication promotes only a selected tested build-only run", () => 
 });
 
 test("publication accepts only a successful matching build-only run and artifact", () => {
-  const artifactName = `t3-code-nitestack-installers-0.1.9-${sha.slice(0, 12)}`;
+  const artifactName = `t3-code-nitestack-installers-0.1.9-${sha.slice(0, 12)}-attempt-1`;
   const run = {
     id: 12345,
     path: ".github/workflows/release.yml",
@@ -135,6 +135,30 @@ test("publication accepts only a successful matching build-only run and artifact
       sha,
     }),
     { artifactName, runId: 12345 },
+  );
+  const rerunArtifactName = `t3-code-nitestack-installers-0.1.9-${sha.slice(0, 12)}-attempt-2`;
+  assert.deepEqual(
+    validateForkBuildOnlyRun({
+      run: { ...run, run_attempt: 2 },
+      jobs,
+      artifacts: [{ name: rerunArtifactName, expired: false, size_in_bytes: 100 }],
+      expectedRunId: "12345",
+      version: "0.1.9",
+      sha,
+    }),
+    { artifactName: rerunArtifactName, runId: 12345 },
+  );
+  assert.throws(
+    () =>
+      validateForkBuildOnlyRun({
+        run: { ...run, run_attempt: 2 },
+        jobs,
+        artifacts,
+        expectedRunId: "12345",
+        version: "0.1.9",
+        sha,
+      }),
+    /missing, expired, or incomplete/,
   );
   assert.deepEqual(
     validateForkBuildOnlyRun({
@@ -201,20 +225,25 @@ test("sync releases bind their branch to the exact source and upstream version",
   assert.equal(resolveForkRelease({ ...dispatch, sourceBranch: "main" }).tag, "v0.1.9");
   const syncRelease = {
     ...dispatch,
-    sourceBranch: "automation/upstream-stable-v0.1.9-466b0b09",
+    sourceBranch: "automation/upstream-stable-v0.1.9-c2e54e3a",
   };
   assert.equal(resolveForkRelease(syncRelease).tag, "v0.1.9");
+  assert.equal(syncRelease.sha.startsWith(syncRelease.sourceBranch.slice(-8)), false);
   assert.throws(
     () =>
       resolveForkRelease({
         ...syncRelease,
-        sourceBranch: "automation/upstream-stable-v0.1.10-466b0b09",
+        sourceBranch: "automation/upstream-stable-v0.1.10-c2e54e3a",
       }),
-    /does not identify this version and source commit/,
+    /does not identify this version and upstream base commit/,
   );
   assert.throws(
-    () => resolveForkRelease({ ...syncRelease, sha: "0".repeat(39) + "1" }),
-    /does not identify this version and source commit/,
+    () =>
+      resolveForkRelease({
+        ...syncRelease,
+        sourceBranch: "automation/upstream-stable-v0.1.9-466b0b09",
+      }),
+    /does not identify this version and upstream base commit/,
   );
 });
 
@@ -370,7 +399,7 @@ test("existing release assets must have matching source metadata and file checks
         version: "0.1.9",
         sha,
         upstreamBase: "c2e54e3ac9",
-        sourceBranch: "automation/upstream-stable-v0.1.9-466b0b09",
+        sourceBranch: "automation/upstream-stable-v0.1.9-c2e54e3a",
         buildRunId: "12345",
       }),
       /source identity/,

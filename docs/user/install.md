@@ -162,7 +162,7 @@ desktop app; neither replaces the original `t3` or `t3code-desktop` commands.
 Before a public fork release is authorized, collaborators can get installable test builds from the
 fork's GitHub Actions. Open **Actions → Release**, run it from `main` with channel `stable`, and
 leave **publish** unchecked. Download the combined artifact named
-`t3-code-nitestack-installers-<version>-<12-character-commit>` from that run. It contains the
+`t3-code-nitestack-installers-<version>-<12-character-commit>-attempt-<run-attempt>` from that run. It contains the
 Windows x64 `.exe`, the signed Android `.apk`, SHA-256 files, and metadata. Check the matching
 checksum before installing. `windows-metadata.json` reports whether the Windows installer has an
 Authenticode signature; current fork builds are expected to be unsigned. After an authorized public

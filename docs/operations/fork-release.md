@@ -21,7 +21,7 @@ Android APK, a Windows installer, source, or the pinned Nix flake, as the
    workflow builds the signed Android APK, Windows x64 installer, and Nix package from the exact
    source commit, verifies their version and source metadata, and uploads one build-only artifact.
    This run creates no tag or release, including a draft release.
-7. Download `t3-code-nitestack-installers-<version>-<12-char-source-sha>` from that Actions run.
+7. Download `t3-code-nitestack-installers-<version>-<12-char-source-sha>-attempt-<run-attempt>` from that Actions run.
    It contains `t3-code-nitestack-<version>-windows-x64.exe`,
    `t3-code-nitestack-<version>.apk`, their `.sha256` files, platform metadata, `nix-build.json`,
    and `BUILD-INFO.md`. The Windows runner records its Authenticode status; without fork Windows
@@ -73,11 +73,11 @@ for a maintainer to repair. The automated job does not request an administrative
 
 After a verified merge, the handler queues the existing `Release` workflow for that exact fork
 commit and upstream version. Its default is build-only: Windows, signed Android, and Nix must all
-build before the combined Actions artifact is available. Automatic publication remains off unless
-the `FORK_AUTO_PUBLISH_STABLE_RELEASES` repository variable is explicitly set to `true`; setting it
-authorizes future automatic tag and release publication for every eligible sync. Otherwise each
-public release needs a separate authorized stable dispatch with `publish` checked and the exact
-locally accepted build-only run ID.
+build before the combined Actions artifact is available. Automatic publication is off by default.
+Setting the `FORK_AUTO_PUBLISH_STABLE_RELEASES` repository variable to `true` is the user's explicit
+standing authorization for every eligible sync to publish; unset it to revoke that authorization.
+No workflow sets this variable. With it unset, each public release needs a separate authorized
+stable dispatch with `publish` checked and the exact locally accepted build-only run ID.
 
 ## Automation prerequisites
 
@@ -93,16 +93,18 @@ this implementation does not change repository settings:
   (`actor_type: "OrganizationAdmin"`). Do not add an integration, team, user, or other bypass
   actor. A ruleset alone does not satisfy the workflow's required-check preflight.
 - Add Actions secrets `FORK_SYNC_APP_ID` and `FORK_SYNC_APP_PRIVATE_KEY` for a GitHub App installed
-  only on `Nitestack/t3code`, with `contents:write` and `pull_requests:write`. This App pushes the
-  sync branch and opens the PR so its push CI run starts normally. The App must not have repository
-  administrator access and must not be a ruleset bypass actor.
+  only on `Nitestack/t3code`, with exactly `administration:read`, `contents:write`, and
+  `pull_requests:write`. It uses the administration read permission to inspect branch protection
+  and rulesets, and it pushes the sync branch and opens the PR so its push CI run starts normally.
+  The App must not have repository administrator access and must not be a ruleset bypass actor.
 - Keep organization policy from blocking job-level `GITHUB_TOKEN` write permissions. The merge job
-  requests only `actions:write`, `contents:write`, `pull-requests:write`, and
-  `administration:read`; the release publisher requests `contents:write`. The repository's
-  read-only default can remain in place because each job declares its own scoped permissions. The
-  workflow does not approve pull requests or use GitHub's auto-merge setting.
+  requests only `actions:write`, `contents:write`, and `pull-requests:write`; the release publisher
+  requests `contents:write`. The repository's read-only default can remain in place because each
+  job declares its own scoped permissions. The workflow does not approve pull requests or use
+  GitHub's auto-merge setting.
 - Keep `FORK_AUTO_PUBLISH_STABLE_RELEASES` unset until ongoing automatic publication is explicitly
-  authorized. The default workflow and build-only path do not create tags or draft releases.
+  authorized. Setting it to `true` is that standing authorization. The default workflow and
+  build-only path do not create tags or draft releases.
 
 With no newer stable release, the daily no-op does not require the App credentials or merge
 protection setup. A manual dry run is useful before enabling write automation.

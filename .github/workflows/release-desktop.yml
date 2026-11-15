@@ -688,13 +688,25 @@ jobs:
         run: |
           set -euo pipefail
           temp_dir="$(cygpath -u "$(node -p 'require("node:os").tmpdir()')")"
-          unpacked="$(find "$temp_dir" -path '*/app/dist/win-unpacked' -type d -print -quit)"
-          if [[ -z "$unpacked" ]]; then
+          stage_root=""
+          for candidate in "$temp_dir"/t3code-desktop-win-stage-*; do
+            [[ -d "$candidate/app/dist/win-unpacked" ]] || continue
+            if [[ -n "$stage_root" ]]; then
+              echo "::error::Found more than one staged Windows app; refusing ambiguous cleanup."
+              exit 1
+            fi
+            stage_root="$candidate"
+          done
+          if [[ -z "$stage_root" ]]; then
             echo "::error::The native Windows build did not preserve its unpacked app for verification."
             exit 1
           fi
-          stage_root="$(dirname "$(dirname "$(dirname "$unpacked")")")"
-          trap 'rm -rf "$stage_root"' EXIT
+          unpacked="$stage_root/app/dist/win-unpacked"
+          case "$stage_root" in
+            "$temp_dir"/t3code-desktop-win-stage-*) ;;
+            *) echo "::error::Refusing to clean an unknown desktop stage path."; exit 1 ;;
+          esac
+          trap 'rm -rf -- "$stage_root"' EXIT
           node scripts/verify-windows-desktop-artifact.ts \
             --app-dir "$unpacked" --arch "${{ inputs.arch }}" \
             --build-version "${{ inputs.version }}" --verbose
@@ -837,6 +849,26 @@ jobs:
             done
           done
 
+          if [[ "${{ inputs.platform }}" == "mac" && "${{ inputs.arch }}" != "arm64" ]]; then
+            shopt -s nullglob
+            for manifest in release-publish/*-mac.yml; do
+              mv "$manifest" "${manifest%.yml}-${{ inputs.arch }}.yml"
+            done
+          fi
+
+          # Windows updater metadata is channel-specific (for example
+          # "latest.yml" or "nightly.yml") and carries no arch, so the x64 and
+          # arm64 jobs would upload the same name. Suffix each per-arch copy;
+          # the release job merges them back into one manifest per channel.
+          # builder-debug.yml is electron-builder's config dump, not a feed.
+          if [[ "${{ inputs.platform }}" == "win" ]]; then
+            shopt -s nullglob
+            for manifest in release-publish/*.yml; do
+              [[ "$manifest" == */builder-debug.yml ]] && continue
+              mv "$manifest" "${manifest%.yml}-win-${{ inputs.arch }}.yml"
+            done
+          fi
+
       - name: Inspect Windows installer signature
         id: windows_signature
         if: github.repository == 'Nitestack/t3code' && inputs.fork_build_only && inputs.platform == 'win' && startsWith(inputs.runner, 'windows-')
@@ -887,25 +919,6 @@ jobs:
           };
           fs.writeFileSync("release-publish/windows-metadata.json", `${JSON.stringify(metadata, null, 2)}\n`);
           NODE
-
-          if [[ "${{ inputs.platform }}" == "mac" && "${{ inputs.arch }}" != "arm64" ]]; then
-            shopt -s nullglob
-            for manifest in release-publish/*-mac.yml; do
-              mv "$manifest" "${manifest%.yml}-${{ inputs.arch }}.yml"
-            done
-          fi
-
-          # Windows updater metadata is channel-specific (for example
-          # "latest.yml" or "nightly.yml") and carries no arch, so the x64 and
-          # arm64 jobs would upload the same name. Suffix each per-arch copy;
-          # the release job merges them back into one manifest per channel.
-          # builder-debug.yml is electron-builder's config dump, not a feed.
-          if [[ "${{ inputs.platform }}" == "win" ]]; then
-            for manifest in release-publish/*.yml; do
-              [[ "$manifest" == */builder-debug.yml ]] && continue
-              mv "$manifest" "${manifest%.yml}-win-${{ inputs.arch }}.yml"
-            done
-          fi
 
       - name: Collect resource monitor
         shell: bash

@@ -5,6 +5,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeTest from "node:test";
 import * as NodeURL from "node:url";
+import ForkCiChecks from "../.github/scripts/fork-ci-checks.cjs";
 
 import {
   classifyGitHubFailure,
@@ -12,10 +13,13 @@ import {
   isStableRelease,
   mergeStableRelease,
   parseStableVersion,
+  queueForkRelease,
+  validateSyncBranch,
   validateForkMergeProtection,
 } from "./upstream-stable-sync.mjs";
 
 const syncScript = NodeURL.fileURLToPath(new URL("./upstream-stable-sync.mjs", import.meta.url));
+const { REQUIRED_FORK_CHECKS } = ForkCiChecks;
 
 async function createSyncFixture({
   releases = ["v0.1.9", "v0.1.10"],
@@ -97,6 +101,7 @@ if (args[0] === "remote" && args[1] === "get-url" && args[2] === "origin") {
 `;
   await NodeFSP.writeFile(NodePath.join(bin, "git"), fakeGit, { mode: 0o755 });
   const fakeGh = `#!/usr/bin/env node
+import * as childProcess from "node:child_process";
 import * as fs from "node:fs";
 const statePath = process.env.T17_GH_STATE;
 const callsPath = process.env.T17_GH_CALLS;
@@ -105,6 +110,14 @@ const state = JSON.parse(fs.readFileSync(statePath, "utf8"));
 fs.appendFileSync(callsPath, JSON.stringify(args) + "\\n");
 const output = (value) => process.stdout.write(JSON.stringify(value));
 const fail = (message) => { process.stderr.write(message + "\\n"); process.exit(1); };
+const requireProtectionAppToken = (path) => {
+  if (process.env.GH_TOKEN !== "fixture-sync-app-token") {
+    fail("main protection reads require the sync App administration:read token");
+  }
+  state.protectionApiCalls ??= [];
+  state.protectionApiCalls.push(path);
+  fs.writeFileSync(statePath, JSON.stringify(state));
+};
 if (args[0] === "api" && args.some((arg) => arg.includes("/releases?"))) {
   if (state.releaseApiError) fail(state.releaseApiError);
   const projectionIndex = args.indexOf("--jq");
@@ -132,21 +145,57 @@ if (args[0] === "api" && args.some((arg) => arg.includes("/releases?"))) {
     output(state.releasePages);
   }
 } else if (args[0] === "api" && args[1] === "repos/Nitestack/t3code/branches/main/protection") {
+  requireProtectionAppToken(args[1]);
   output(state.branchProtection);
 } else if (args[0] === "api" && args.some((arg) => arg.includes("/rulesets?"))) {
+  requireProtectionAppToken(args.find((arg) => arg.includes("/rulesets?")));
   const rulesets = state.rulesets ?? [];
   process.stdout.write(rulesets.map((ruleset) => JSON.stringify(ruleset)).join("\\n") + (rulesets.length ? "\\n" : ""));
 } else if (args[0] === "api" && args[1] === "repos/Nitestack/t3code") {
+  requireProtectionAppToken(args[1]);
   output(state.repositorySettings);
+} else if (args[0] === "api" && args[1] === "repos/Nitestack/t3code/actions/runs/" + state.ciRunId) {
+  output(state.workflowRun);
+} else if (args[0] === "api" && args.some((arg) => arg.includes("/actions/runs/" + state.ciRunId + "/attempts/"))) {
+  const pages = state.workflowJobPages ?? [state.workflowJobs ?? []];
+  process.stdout.write(pages.map((page) => JSON.stringify(page)).join("\\n") + "\\n");
+} else if (args[0] === "api" && args.includes("--method") && args.includes("PUT")) {
+  state.mergeCalls = (state.mergeCalls ?? 0) + 1;
+  const pullRequest = state.pullRequests.find((candidate) => candidate.number === 17);
+  if (pullRequest) {
+    pullRequest.state = "CLOSED";
+    pullRequest.mergedAt = "2026-11-15T12:00:00Z";
+  }
+  fs.writeFileSync(statePath, JSON.stringify(state));
+  output({ merged: true });
 } else if (args[0] === "api" && args.includes("--method") && args.includes("POST")) {
   if (state.dispatchError) fail(state.dispatchError);
   const ref = args.find((arg) => arg.startsWith("ref="))?.slice(4);
-  state.runs.push({ databaseId: state.runs.length + 1, event: "workflow_dispatch", branch: ref, status: "queued" });
+  const version = args.find((arg) => arg.startsWith("inputs[version]="))?.split("=")[1];
+  const sourceSha = args.find((arg) => arg.startsWith("inputs[source_commit]="))?.split("=")[1];
+  const sourceBranch = args.find((arg) => arg.startsWith("inputs[source_branch]="))?.split("=")[1];
+  const publish = args.find((arg) => arg.startsWith("inputs[publish]="))?.split("=")[1] === "true";
+  state.runs.push({
+    databaseId: state.runs.length + 1,
+    event: "workflow_dispatch",
+    branch: ref,
+    status: "queued",
+    conclusion: null,
+    displayTitle: "Fork " + (publish ? "publish" : "build-only") + " stable " + version + " source " + sourceSha,
+    sourceBranch,
+  });
   fs.writeFileSync(statePath, JSON.stringify(state));
 } else if (args[0] === "pr" && args[1] === "list") {
   if (state.pullRequestApiError) fail(state.pullRequestApiError);
   const fields = args[args.indexOf("--json") + 1].split(",");
-  output(state.pullRequests.map((pr) => Object.fromEntries(fields.map((field) => [field, pr[field]]))));
+  const pullRequests = state.pullRequests.map((pr) => Object.fromEntries(fields.map((field) => [field, pr[field]])));
+  if (state.advanceBranchOnPullRequestLookup) {
+    const { worktree, branch } = state.advanceBranchOnPullRequestLookup;
+    childProcess.execFileSync("git", ["-C", worktree, "push", "origin", "HEAD:refs/heads/" + branch], { stdio: "ignore" });
+    delete state.advanceBranchOnPullRequestLookup;
+    fs.writeFileSync(statePath, JSON.stringify(state));
+  }
+  output(pullRequests);
 } else if (args[0] === "pr" && args[1] === "create") {
   if (state.prCreateError) fail(state.prCreateError);
   const head = args[args.indexOf("--head") + 1].split(":").at(-1);
@@ -155,7 +204,12 @@ if (args[0] === "api" && args.some((arg) => arg.includes("/releases?"))) {
   process.stdout.write("https://github.com/Nitestack/t3code/pull/17\\n");
 } else if (args[0] === "run" && args[1] === "list") {
   const branch = args[args.indexOf("--branch") + 1];
-  output(state.runs.filter((run) => run.branch === branch && run.event === "workflow_dispatch"));
+  const workflow = args[args.indexOf("--workflow") + 1];
+  if (workflow === "ci.yml") {
+    output((state.ciRuns ?? []).filter((run) => run.headBranch === branch));
+  } else {
+    output(state.runs.filter((run) => run.branch === branch && run.event === "workflow_dispatch"));
+  }
 } else {
   fail("unexpected gh invocation: " + JSON.stringify(args));
 }
@@ -175,6 +229,9 @@ if (args[0] === "api" && args.some((arg) => arg.includes("/releases?"))) {
       releasePages: pages,
       pullRequests: [],
       runs: [],
+      ciRuns: [],
+      protectionApiCalls: [],
+      mergeCalls: 0,
       branchProtection: {
         required_status_checks: {
           strict: true,
@@ -185,7 +242,7 @@ if (args[0] === "api" && args.some((arg) => arg.includes("/releases?"))) {
             { context: "Fork Mobile Type and Unit", app_id: 15368 },
           ],
         },
-        enforce_admins: { enabled: true },
+        enforce_admins: { enabled: false },
         required_linear_history: { enabled: false },
       },
       repositorySettings: { allow_merge_commit: true },
@@ -196,7 +253,7 @@ if (args[0] === "api" && args.some((arg) => arg.includes("/releases?"))) {
       dispatchError,
     }),
   );
-  const runSync = ({ dryRun: runDryRun = dryRun } = {}) => {
+  const runSync = ({ dryRun: runDryRun = dryRun, env = {} } = {}) => {
     try {
       return {
         status: 0,
@@ -208,8 +265,11 @@ if (args[0] === "api" && args.some((arg) => arg.includes("/releases?"))) {
             PATH: `${bin}:${NodePath.dirname(process.execPath)}:${process.env.PATH}`,
             GITHUB_REPOSITORY: "Nitestack/t3code",
             DRY_RUN: runDryRun ? "true" : "false",
+            GH_TOKEN: "fixture-github-token",
+            PROTECTION_GH_TOKEN: "fixture-sync-app-token",
             T17_GH_STATE: statePath,
             T17_GH_CALLS: callsPath,
+            ...env,
           },
           stdio: ["ignore", "pipe", "pipe"],
         }),
@@ -228,6 +288,63 @@ if (args[0] === "api" && args.some((arg) => arg.includes("/releases?"))) {
       .map((line) => JSON.parse(line));
   };
   return { root, fork, checkout, statePath, runSync, readState, writeState, readCalls, git };
+}
+
+async function prepareSuccessfulCiEvent(fixture) {
+  const sync = fixture.runSync();
+  NodeAssert.equal(sync.status, 0, sync.output);
+  const state = await fixture.readState();
+  const pullRequest = state.pullRequests[0];
+  const branch = pullRequest.headRefName;
+  const headSha = fixture.git(fixture.fork, ["rev-parse", `refs/heads/${branch}`]);
+  const baseSha = fixture.git(fixture.checkout, ["rev-parse", "refs/remotes/origin/main"]);
+  const runId = 79001;
+  Object.assign(pullRequest, {
+    number: 17,
+    headRefOid: headSha,
+    headRepository: { nameWithOwner: "Nitestack/t3code" },
+    baseRefName: "main",
+    baseRefOid: baseSha,
+    isDraft: false,
+    state: "OPEN",
+    mergedAt: null,
+  });
+  state.ciRunId = runId;
+  state.ciRuns = [
+    {
+      databaseId: runId,
+      event: "push",
+      headBranch: branch,
+      headSha,
+      status: "completed",
+      conclusion: "success",
+    },
+  ];
+  state.workflowRun = {
+    id: runId,
+    path: ".github/workflows/ci.yml",
+    event: "push",
+    status: "completed",
+    conclusion: "success",
+    run_attempt: 1,
+    head_repository: { full_name: "Nitestack/t3code" },
+    head_branch: branch,
+    head_sha: headSha,
+  };
+  state.workflowJobs = REQUIRED_FORK_CHECKS.map((name) => ({ name, conclusion: "success" }));
+  await fixture.writeState(state);
+  return {
+    branch,
+    headSha,
+    env: {
+      UPSTREAM_SYNC_MODE: "merge-on-ci",
+      WORKFLOW_RUN_ID: String(runId),
+      WORKFLOW_RUN_BRANCH: branch,
+      WORKFLOW_RUN_ATTEMPT: "1",
+      WORKFLOW_RUN_CONCLUSION: "success",
+      WORKFLOW_RUN_SHA: headSha,
+    },
+  };
 }
 
 const releases = [
@@ -282,6 +399,58 @@ NodeTest.test("an empty stable release list is a successful no-op", () => {
     /Target tag is not a published stable SemVer release/,
   );
 });
+
+NodeTest.test(
+  "release queueing deduplicates queued and already successful exact-source runs",
+  () => {
+    const sourceSha = "a".repeat(40);
+    const displayTitle = `Fork build-only stable 0.1.10 source ${sourceSha}`;
+    for (const previous of [
+      { displayTitle, status: "queued", conclusion: null },
+      { displayTitle, status: "completed", conclusion: "success" },
+    ]) {
+      const calls = [];
+      const runCommand = (_command, args) => {
+        calls.push(args);
+        return args[0] === "run" ? JSON.stringify([previous]) : "";
+      };
+      NodeAssert.equal(
+        queueForkRelease({
+          version: "0.1.10",
+          sourceSha,
+          sourceBranch: "automation/upstream-stable-v0.1.10-c2e54e3a",
+          runCommand,
+          publish: false,
+        }),
+        false,
+      );
+      NodeAssert.equal(calls.length, 1);
+    }
+
+    const retryCalls = [];
+    const retryRun = (_command, args) => {
+      retryCalls.push(args);
+      return args[0] === "run"
+        ? JSON.stringify([{ displayTitle, status: "completed", conclusion: "failure" }])
+        : "";
+    };
+    NodeAssert.equal(
+      queueForkRelease({
+        version: "0.1.10",
+        sourceSha,
+        sourceBranch: "automation/upstream-stable-v0.1.10-c2e54e3a",
+        runCommand: retryRun,
+        publish: false,
+      }),
+      true,
+    );
+    NodeAssert.equal(retryCalls.length, 2);
+    NodeAssert.ok(retryCalls[1].includes(`inputs[source_commit]=${sourceSha}`));
+    NodeAssert.ok(
+      retryCalls[1].includes("inputs[source_branch]=automation/upstream-stable-v0.1.10-c2e54e3a"),
+    );
+  },
+);
 
 NodeTest.test("automatic merge requires strict fork checks while exempting admins", () => {
   const protection = {
@@ -589,7 +758,10 @@ NodeTest.test(
     try {
       const failed = fixture.runSync();
       NodeAssert.equal(failed.status, 1);
-      NodeAssert.match(failed.output, /FORK_SYNC_APP_ID.*contents:write and pull_requests:write/i);
+      NodeAssert.match(
+        failed.output,
+        /FORK_SYNC_APP_ID.*administration:read.*contents:write.*pull_requests:write/i,
+      );
       const pushedBranch = fixture
         .git(fixture.fork, ["for-each-ref", "--format=%(refname:short)", "refs/heads/automation"])
         .split("\n")
@@ -811,6 +983,119 @@ NodeTest.test(
     }
   },
 );
+
+NodeTest.test(
+  "main protection reads use the sync App token and accept admin-only ruleset bypass",
+  async () => {
+    const fixture = await createSyncFixture();
+    try {
+      const state = await fixture.readState();
+      state.branchProtection.enforce_admins = { enabled: false };
+      state.rulesets = [
+        {
+          name: "main",
+          bypass_actors: [{ actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always" }],
+        },
+      ];
+      await fixture.writeState(state);
+
+      const result = fixture.runSync();
+      NodeAssert.equal(result.status, 0, result.output);
+      NodeAssert.deepEqual((await fixture.readState()).protectionApiCalls, [
+        "repos/Nitestack/t3code/branches/main/protection",
+        "repos/Nitestack/t3code",
+        "repos/Nitestack/t3code/rulesets?includes_parents=true&per_page=100",
+      ]);
+    } finally {
+      await NodeFSP.rm(fixture.root, { recursive: true, force: true });
+    }
+  },
+);
+
+NodeTest.test(
+  "validateSyncBranch accepts only the marked upstream merge based on fork main",
+  async () => {
+    const fixture = await createSyncFixture();
+    try {
+      const sync = fixture.runSync();
+      NodeAssert.equal(sync.status, 0, sync.output);
+      const state = await fixture.readState();
+      const branch = state.pullRequests[0].headRefName;
+      const branchCommit = fixture.git(fixture.fork, ["rev-parse", `refs/heads/${branch}`]);
+      const targetCommit = fixture.git(fixture.checkout, [
+        "rev-parse",
+        "refs/tags/upstream/v0.1.10^{commit}",
+      ]);
+      const args = {
+        branch,
+        branchCommit,
+        mainRef: "refs/remotes/origin/main",
+        targetTag: "v0.1.10",
+        targetCommit,
+        cwd: fixture.checkout,
+      };
+      NodeAssert.doesNotThrow(() => validateSyncBranch(args));
+      NodeAssert.throws(
+        () => validateSyncBranch({ ...args, targetCommit: "0".repeat(40) }),
+        /unexpected upstream marker/,
+      );
+    } finally {
+      await NodeFSP.rm(fixture.root, { recursive: true, force: true });
+    }
+  },
+);
+
+NodeTest.test(
+  "merge handler checks exact CI, merges by head SHA, and queues one release",
+  async () => {
+    const fixture = await createSyncFixture();
+    try {
+      const event = await prepareSuccessfulCiEvent(fixture);
+      const result = fixture.runSync({ env: event.env });
+      NodeAssert.equal(result.status, 0, result.output);
+      NodeAssert.match(result.output, /queued the fork release for exact source/);
+      const state = await fixture.readState();
+      NodeAssert.equal(state.mergeCalls, 1);
+      NodeAssert.equal(state.runs.length, 1);
+      NodeAssert.equal(
+        state.runs[0].displayTitle,
+        `Fork build-only stable 0.1.10 source ${event.headSha}`,
+      );
+      const mergeCall = (await fixture.readCalls()).find(
+        (args) => args.includes("--method") && args.includes("PUT"),
+      );
+      NodeAssert.ok(mergeCall.includes(`sha=${event.headSha}`));
+    } finally {
+      await NodeFSP.rm(fixture.root, { recursive: true, force: true });
+    }
+  },
+);
+
+NodeTest.test("merge handler rejects a PR head race after the successful CI event", async () => {
+  const fixture = await createSyncFixture();
+  try {
+    const event = await prepareSuccessfulCiEvent(fixture);
+    const branchWorktree = NodePath.join(fixture.root, "advanced-sync-branch");
+    fixture.git(fixture.root, ["clone", "--branch", event.branch, fixture.fork, branchWorktree]);
+    fixture.git(branchWorktree, ["config", "user.name", "T17 fixture"]);
+    fixture.git(branchWorktree, ["config", "user.email", "t17-fixture@example.invalid"]);
+    await NodeFSP.writeFile(NodePath.join(branchWorktree, "raced.txt"), "advanced after CI\n");
+    fixture.git(branchWorktree, ["add", "raced.txt"]);
+    fixture.git(branchWorktree, ["commit", "-m", "advance sync branch after CI"]);
+
+    const state = await fixture.readState();
+    state.advanceBranchOnPullRequestLookup = { worktree: branchWorktree, branch: event.branch };
+    await fixture.writeState(state);
+    const result = fixture.runSync({ env: event.env });
+    NodeAssert.equal(result.status, 1, result.output);
+    NodeAssert.match(result.output, /head changed while its CI results were being checked/);
+    const finalState = await fixture.readState();
+    NodeAssert.equal(finalState.mergeCalls, 0);
+    NodeAssert.equal(finalState.runs.length, 0);
+  } finally {
+    await NodeFSP.rm(fixture.root, { recursive: true, force: true });
+  }
+});
 
 NodeTest.test("stops on unexpected changes in an existing update branch", async () => {
   const fixture = await createSyncFixture();

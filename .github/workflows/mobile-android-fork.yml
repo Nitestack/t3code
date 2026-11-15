@@ -163,7 +163,7 @@ jobs:
           test -s "$apk"
           build_tools="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d -print | sort -V | tail -n 1)"
           "$build_tools/apksigner" verify --verbose "$apk"
-          expected_cert_sha256="$(keytool -exportcert -keystore "$T3_ANDROID_KEYSTORE_PATH" -alias "$T3_ANDROID_KEY_ALIAS" -storepass "$T3_ANDROID_KEYSTORE_PASSWORD" | sha256sum | cut -d' ' -f1)"
+          expected_cert_sha256="$(keytool -exportcert -keystore "$T3_ANDROID_KEYSTORE_PATH" -alias "$T3_ANDROID_KEY_ALIAS" -storepass:env T3_ANDROID_KEYSTORE_PASSWORD | sha256sum | cut -d' ' -f1)"
           apk_certs="$("$build_tools/apksigner" verify --print-certs "$apk" 2>&1)"
           apk_cert_sha256="$(printf '%s\n' "$apk_certs" | sed -nE 's/^.*[Ss]igner.*certificate SHA-256 digest: *([0-9A-Fa-f:]+).*$/\1/p' | head -n 1 | tr -d ':' | tr '[:upper:]' '[:lower:]')"
           if [ -z "$apk_cert_sha256" ] || [ "$apk_cert_sha256" != "$expected_cert_sha256" ]; then

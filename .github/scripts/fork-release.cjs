@@ -50,7 +50,7 @@ function validateForkPublicationMode({ publish, artifactRunId = "", autoPublishA
 
 function validateForkBuildOnlyRun({ run, jobs, artifacts, expectedRunId, version, sha }) {
   const runId = Number(expectedRunId);
-  const artifactName = `t3-code-nitestack-installers-${version}-${sha.slice(0, 12)}`;
+  const artifactName = `t3-code-nitestack-installers-${version}-${sha.slice(0, 12)}-attempt-${run?.run_attempt}`;
   if (
     !STABLE_VERSION.test(version) ||
     !COMMIT_SHA.test(sha) ||
@@ -301,8 +301,16 @@ function resolveForkRelease({
       /^automation\/upstream-stable-(v?(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))-([0-9a-f]{8})$/.exec(
         sourceBranch,
       );
-    if (!match || match[1].replace(/^v/, "") !== version || !sha.startsWith(match[2])) {
-      throw new Error("Release source branch does not identify this version and source commit.");
+    if (
+      !match ||
+      match[1].replace(/^v/, "") !== version ||
+      typeof upstreamBase !== "string" ||
+      !/^[0-9a-f]{8,64}$/i.test(upstreamBase) ||
+      !upstreamBase.toLowerCase().startsWith(match[2])
+    ) {
+      throw new Error(
+        "Release source branch does not identify this version and upstream base commit.",
+      );
     }
   }
   if (existingTagSha && existingTagSha !== sha) {
