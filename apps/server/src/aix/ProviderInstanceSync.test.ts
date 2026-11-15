@@ -12,14 +12,17 @@ import {
 } from "@t3tools/contracts";
 import { providerModelsFromSettings } from "@t3tools/provider-core/server/snapshotProbe";
 import { it as effectIt } from "@effect/vitest";
+import * as Cause from "effect/Cause";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Logger from "effect/Logger";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Digest from "effect/crypto/Digest";
+import * as NodeUtil from "node:util";
 import * as TestClock from "effect/testing/TestClock";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -1060,6 +1063,67 @@ describe("syncAixProviderInstances", () => {
         expect((yield* Ref.get(cache.staleByProfile)).get("work")?.code).toBe("request-503");
       }).pipe(Effect.provide(aixTestLayer)),
     );
+
+    effectIt.effect("keeps the resolved key out of logs when refreshes fail or go stale", () => {
+      const lines: Array<string> = [];
+      const logger = Logger.make(({ message, cause }) => {
+        lines.push(NodeUtil.inspect(message, { depth: 10 }), Cause.pretty(cause));
+      });
+      // The tagged errors have no field for text, so a leaked key would arrive as their cause.
+      const carryingKey = <E extends Error>(error: E): E =>
+        Object.assign(error, { cause: new Error(`aix stderr: OPENAI_API_KEY=${SENTINEL_KEY}`) });
+      return Effect.gen(function* () {
+        const { counted } = yield* countingSettings;
+        const cache = yield* makeAixSyncCache;
+        let failing = false;
+        let listingFails = true;
+        const base = sourceFor();
+        const source = sourceFor({
+          listProfiles: Effect.suspend(() =>
+            failing && listingFails
+              ? Effect.fail(carryingKey(new AixDiscoveryError({ reason: "command-failed" })))
+              : base.listProfiles,
+          ),
+          listModels: (profileName) =>
+            failing
+              ? Effect.fail(carryingKey(new AixDiscoveryError({ reason: "gateway-unavailable" })))
+              : base.listModels(profileName),
+          fetchLiteLlmCatalog: (input) =>
+            failing
+              ? Effect.fail(
+                  carryingKey(
+                    new ModelCatalogFetchError({ stage: "models", reason: "request", status: 401 }),
+                  ),
+                )
+              : base.fetchLiteLlmCatalog(input),
+        });
+
+        yield* refreshWith(counted, source, cache);
+        failing = true;
+        yield* refreshWith(counted, source, cache, true);
+        listingFails = false;
+        yield* refreshWith(counted, source, yield* makeAixSyncCache, true);
+        yield* refreshWith(
+          counted,
+          sourceFor({
+            listProfiles: Effect.fail(carryingKey(new AixDiscoveryError({ reason: "timeout" }))),
+          }),
+          yield* makeAixSyncCache,
+          true,
+        );
+
+        const logged = lines.join("\n");
+        expect(logged).toContain("catalog stale");
+        expect(logged).toContain("listing stale");
+        expect(logged).toContain("unavailable");
+        expect(logged).toContain("listing failed");
+        expect(logged).not.toContain(SENTINEL_KEY);
+      }).pipe(
+        Effect.provide(
+          Layer.merge(aixTestLayer, Logger.layer([logger], { mergeWithExisting: false })),
+        ),
+      );
+    });
   });
 
   describe("ownership across settings persistence", () => {

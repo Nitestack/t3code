@@ -30,3 +30,18 @@ The workflow checks that all four secrets exist before installing dependencies, 
 Back up the original keystore and passwords separately from GitHub. For sideloaded installs, replacing the signing key means Android will reject an in-place update signed by the new key. Coordinate rotation as a new install: users must remove the prior app and install the new APK. Keep the old key available for releases intended to update existing installations.
 
 This standalone build disables Expo Updates and does not require EAS, Clerk, Firebase, or Play credentials. Any sign-in, push, or Google OAuth flow that requires upstream Clerk/Firebase application credentials is unavailable until the fork supplies compatible configuration. Android HTTPS app-link verification also depends on a matching `assetlinks.json` for the fork package, so the app's dedicated `t3code-aix` scheme is the portable deep-link path.
+
+## Update and rollback
+
+Install a newer release APK over the existing app. Android keeps its data when the package name and signing certificate match and the `versionCode` is higher. Before installing, compare the APK's SHA-256 with the `.sha256` file from the same release.
+
+Android refuses to install a lower `versionCode` over a newer one. To roll back, publish the known-good source as a new, higher patch version, for example `t3-android-v1.2.4` built from the commit behind `1.2.2`. Uninstalling and reinstalling an older APK also works, but it deletes the app's saved environments and settings. Don't delete or reuse a published tag. Release a fixed version instead.
+
+## Troubleshooting
+
+- **The build stops before installing dependencies.** One of the four signing secrets is missing or empty. Check the secret names, not their values.
+- **"APK signature does not match the configured upload keystore".** The `ANDROID_KEY_ALIAS` or a password belongs to a different key than `ANDROID_KEYSTORE_BASE64`. The log prints both certificate digests. Compare them with `keytool -list -v` on the backed-up keystore.
+- **Generating the Android project fails on the version.** The tag or `version` input is not plain `MAJOR.MINOR.PATCH`, or a component is above 999. Push a corrected tag.
+- **"APK version does not match".** The built APK's version name or code differs from the Expo configuration. Check that no config plugin or Gradle setting overrides them.
+- **Android reports "App not installed" or a package conflict.** The installed app has a different signing certificate or a higher `versionCode`. See [Update and rollback](#update-and-rollback) and [Key rotation](#key-rotation-and-integrations).
+- **The workflow never starts.** See the Actions known issue in the [fork release runbook](./fork-release.md#known-issues).

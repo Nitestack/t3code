@@ -177,9 +177,9 @@ inherit `XDG_CONFIG_HOME` too, so configure any provider that uses it for config
 discovery in the fork's separate configuration directory.
 
 Nix only installs the pinned application build. It does not configure aix,
-resolve profiles, or place endpoints or API keys in the store. aix profile
-support is available only when the server-side integration is implemented and
-configured separately.
+resolve profiles, or place endpoints or API keys in the store. To use aix
+profiles, add `T3CODE_AIX=1` to the fork command's environment as described in
+the [fork guide](./nitestack-fork.md#aix-profiles).
 
 ### The `t3` command
 
