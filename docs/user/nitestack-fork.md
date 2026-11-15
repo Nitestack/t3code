@@ -1,58 +1,99 @@
 # Nitestack/t3code fork
 
 Nitestack/t3code is a soft fork of [T3 Code](https://github.com/pingdotgg/t3code), created by
-pingdotgg and distributed under the MIT License. It preserves T3's supported providers, threads,
-and remote access while developing runtime support for [aix](https://github.com/Nitestack/aix)
-API-key profiles and client-side Work/Personal views of connected environments.
+pingdotgg and distributed under the MIT License. It keeps T3's providers, threads, and remote access,
+and adds runtime support for [aix](https://github.com/Nitestack/aix) API-key profiles and a
+client-side Work/Personal view of connected environments.
 
-## aix profiles and native compatibility
+## aix profiles
 
-Use the [aix setup and profile guide](https://github.com/Nitestack/aix/blob/main/README.md) to
-configure aix itself. This fork does not yet provide a supported T3 control to activate aix
-profiles or select their models. Installing aix alone does not make its profiles available in T3.
+Configure aix itself with the [aix setup and profile guide](https://github.com/Nitestack/aix/blob/main/README.md).
+To use its profiles in T3, start the fork's server with `aix` on its `PATH` and `T3CODE_AIX=1` in
+its environment. Without that variable the server behaves like upstream T3, and instances it created
+for aix earlier are disabled. Your own Codex, Claude, and other provider sign-ins are not changed.
 
-Partial aix development work exists, but there is no end-user setup flow. The source supports
-launching an explicitly selected Claude aix profile through Claude Code's Messages interface:
-direct Anthropic endpoints use API-key authentication, and other configured endpoints use Bearer
-authentication by default. This launch support does not establish compatibility for every gateway,
-model, or tool route. T3-managed OpenCode instances now route supported LiteLLM chat profiles. A
-corrected minimal-config native Codex probe completed a tool round trip and final response for
-`gpt-6.1-sol`; it does not establish T3 integration or profile switching. The
-[native compatibility report](../fork/t01-native-agent-spike.md) records the tested combinations
-and evidence limits.
+T3 reads the profile list from aix and asks aix for each profile's endpoint and key inside the server
+process. Keys are never written to T3 settings or sent to clients. ChatGPT sign-in profiles are not
+supported; keep using the regular Codex provider for a ChatGPT subscription.
 
-The direct Anthropic Claude probe completed a tool call and final response for the requested model.
-No live gateway E2E has verified the Bearer launch path or arbitrary model aliases. T3 credential
-fixtures are offline tests, not proof of a live aix profile flow. API keys remain in aix's credential
-handling and should not be added to T3 settings or Nix configuration.
-If a source launch reports conflicting Claude authentication settings, remove the credential
-variables from Claude's settings and keep the selected key in aix. Managed policies still apply.
+Each usable profile appears in the model picker as one or more provider instances named after the
+profile, such as `Work · Codex` or `Work · OpenCode`. A model's details show its family, context
+window, maximum output, input and output prices per million tokens, and reasoning levels. Values the
+gateway does not report show as Unknown. The model ID sent to the gateway is the original ID.
 
-There is no user-facing aix picker, manual catalog refresh, or stale-catalog behavior. T3's existing
-[portable handoffs](./portable-handoffs.md) continue to work for supported provider switches, but
-aix profile switching and its context handoff have not been verified.
+Only models that can run are offered:
 
-## Work/Personal and mobile
+- A direct Anthropic API profile offers Claude models only.
+- Native Codex and Claude Code are used only for model and endpoint combinations that were verified
+  with a real tool-using turn. Today that is `gpt-6.1-sol` on a LiteLLM Responses route for Codex and
+  `claude-opus-5-5` on the Anthropic API for Claude Code.
+- Other chat models from a LiteLLM gateway run in OpenCode, which T3 configures for that profile. You
+  do not need to install a provider login or write an OpenCode config for it.
+- Embedding, image, and generic wildcard routes are not listed.
 
-The web, desktop, and Android-fork source includes a Work/Personal view that filters connected
-environments using locally stored classifications. On Android, this is enabled only in the fork
-variant; it does not change the official Android or iOS apps. The Android implementation is a
-source preview and has not had a two-environment device smoke. The full real-client pass, including
-search routes, active-task behavior, and notifications, remains open. The view is only a client-side
-filter. It does not provide access control or isolate server data. For actual server separation, run
-separate T3 data directories using `T3CODE_HOME` as described in the
-[isolated Nix launch guide](./install.md#t3-code-fork-nix).
+If a selected model or profile stops working, the turn fails with an error. T3 never switches to a
+different model or agent for you.
 
-An Android variant and build workflow are in the source, but there is no verified signed APK or
-published fork download. See the
-[Android build guide](../operations/android-fork-apk.md) for build status; upstream Android
-downloads are not fork builds. The official Android and iOS apps are unchanged upstream clients.
-A source-level check decoded this fork's provider lists, aix model choices, refresh replies,
-settings, and thread commands with the client schemas of upstream commit `449deb635e`: aix models
-use the standard instance and model fields, and those clients ignore the extra optional metadata.
-No official app has been run against a fork server on a device, and later app releases may accept
-different data. The official iOS app has no fork-specific Work/Personal switch; use its existing
-environment selection instead.
+### Refresh and key rotation
+
+Profiles and model catalogs are loaded when the server starts and reloaded at most once a day.
+Use the refresh button next to an aix profile in the model picker to reload immediately, for
+example after adding a profile or model in aix. If a reload fails, the picker keeps the last catalog and marks it stale. A
+profile deleted in aix disables its instances; an instance you turn off yourself stays off when its
+profile returns.
+
+A rotated key is picked up the next time T3 starts an agent process for that profile. A running turn
+keeps the process it started with.
+
+### Switching profiles and models in a thread
+
+Pick another aix model in a thread's model picker to change model or profile. T3 uses its existing
+provider switch and [portable handoff](./portable-handoffs.md), so the next agent receives the
+conversation as context; it does not continue the same native session. A selection made while a turn
+is running applies from your next message; the running turn is not stopped. New threads start with
+the project's last selection, like other providers.
+
+## Work/Personal view
+
+Web, desktop, and the fork's Android app have a Work/Personal switch. Use **Classify environments**
+next to it to mark each connected environment as Work. Environments you have not classified count
+as Personal. The switch filters the sidebar, project and thread
+pickers, search, and the command palette, and new threads are created in the active view. Switching
+never stops running turns or queued work, and notifications are not filtered by view. The switch
+is saved per client. Shared preferences such as theme and shortcuts stay shared, and
+environment and project settings keep their usual scope.
+
+The view is only a client-side filter. It does not provide access control or isolate server data.
+For real separation, run separate T3 servers with their own data directories using `T3CODE_HOME` as
+described in the [isolated Nix launch guide](./install.md#t3-code-fork-nix). One client can connect
+to both an original T3 server and a fork server.
+
+## Mobile apps
+
+The fork's Android app uses its own package name and link scheme, so it is meant to install next to
+the official app. Its signed APK comes from the fork's build workflow; there is no store listing, and
+installing it on a device has not been verified yet. See the
+[Android build guide](../operations/android-fork-apk.md).
+
+The official Android and iOS apps are unchanged upstream clients. aix profiles reach them as regular
+provider instances with standard model choices, and the upstream web client was verified against a
+fork server. The official phone apps have not yet been run against a fork server. They do not show the
+Work/Personal switch or the extra model details; use their existing environment selection instead.
+There is no fork iOS app.
+
+## What this fork changes
+
+Compared with upstream T3 Code at
+[`daed91f264`](https://github.com/pingdotgg/t3code/commit/daed91f26464a280796e38911b7b97455226ef9e):
+
+- aix API-key profiles as provider instances for Codex, Claude Code, and a T3-managed OpenCode,
+  enabled with `T3CODE_AIX=1`.
+- Model details for aix models: family, context window, prices, reasoning levels, refresh, and a
+  stale-catalog warning.
+- A client-side Work/Personal view on web, desktop, and the fork's Android app.
+- A separately signed Android APK with its own package name, and no fork iOS build.
+- A pinned Nix flake with `t3code-fork` commands that install next to the original T3 Code.
+- Upstream sync limited to stable releases and proposed as reviewable pull requests.
 
 ## Run the source checkout
 
@@ -83,13 +124,10 @@ did not configure or test an aix profile.
 
 ## Updates
 
-The source includes a guarded workflow for checking stable upstream releases. It runs daily, and
-manual dispatch defaults to a dry run that creates no PR. A
-[manual dry run](https://github.com/Nitestack/t3code/actions/runs/43554789828) completed an
-up-to-date check successfully. A non-dry-run is intended to propose a PR when a new stable release
-is found; automatic PR creation remains unverified and is currently blocked by the repository's
-Actions policy. The workflow does not auto-merge or publish a fork release. See the
-[workflow source](../../.github/workflows/upstream-stable-sync.yml).
+The fork follows stable upstream releases only. A daily workflow checks for a new stable T3 release
+and proposes it as a pull request for review; it never merges on its own and ignores drafts and
+prereleases. Fork changes reach `main` only after review, so update from `main`, not from upstream.
+See the [fork release runbook](../operations/fork-release.md) for the current status.
 
 To update a clean source checkout to the fork's current `main`:
 

@@ -129,8 +129,9 @@ publishing, or iOS builds:
 | Desktop | Linux desktop pipeline build and preload verification   | `vp run --filter @t3tools/desktop ensure:electron`, then `vp run build:desktop`        |
 | Mobile  | Typecheck and unit/React test projects; no native build | `vp run --filter @t3tools/mobile typecheck` and `vp run --filter @t3tools/mobile test` |
 
-The mobile test task runs the unit and React projects. Android APK production is deferred to T16;
-this fork does not build iOS. Local mobile development may still use an existing development client
+The mobile test task runs the unit and React projects. The signed Android APK has its own workflow,
+described in the [Android APK guide](../operations/android-fork-apk.md); this fork does not build iOS.
+Releases follow the [fork release runbook](../operations/fork-release.md). Local mobile development may still use an existing development client
 and Metro as described in [the mobile guide](../../apps/mobile/README.md).
 
 The fork's `CI` workflow keeps its upstream jobs behind `github.repository == 'pingdotgg/t3code'`.

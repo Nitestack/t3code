@@ -12,10 +12,12 @@ import {
 } from "@t3tools/contracts";
 import { providerModelsFromSettings } from "@t3tools/provider-core/server/snapshotProbe";
 import { it as effectIt } from "@effect/vitest";
+import * as Cause from "effect/Cause";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Logger from "effect/Logger";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
@@ -1060,6 +1062,50 @@ describe("syncAixProviderInstances", () => {
         expect((yield* Ref.get(cache.staleByProfile)).get("work")?.code).toBe("request-503");
       }).pipe(Effect.provide(aixTestLayer)),
     );
+
+    effectIt.effect("keeps the resolved key out of logs when refreshes fail or go stale", () => {
+      const lines: Array<string> = [];
+      const logger = Logger.make(({ message, cause }) => {
+        lines.push(JSON.stringify(message), Cause.pretty(cause));
+      });
+      return Effect.gen(function* () {
+        const { counted } = yield* countingSettings;
+        const cache = yield* makeAixSyncCache;
+        let failing = false;
+        const base = sourceFor();
+        const source = sourceFor({
+          listProfiles: Effect.suspend(() =>
+            failing
+              ? Effect.fail(new AixDiscoveryError({ reason: "command-failed" }))
+              : base.listProfiles,
+          ),
+          fetchLiteLlmCatalog: () =>
+            failing
+              ? Effect.fail(
+                  new ModelCatalogFetchError({ stage: "models", reason: "request", status: 401 }),
+                )
+              : Effect.succeed({ models: LITELLM_MODELS }),
+        });
+
+        yield* refreshWith(counted, source, cache);
+        failing = true;
+        yield* refreshWith(counted, source, cache, true);
+        yield* refreshWith(
+          counted,
+          sourceFor({ listProfiles: Effect.fail(new AixDiscoveryError({ reason: "timeout" })) }),
+          yield* makeAixSyncCache,
+          true,
+        );
+
+        expect(lines.join("\n")).toContain("stale");
+        expect(lines.join("\n")).toContain("listing failed");
+        expect(lines.join("\n")).not.toContain(SENTINEL_KEY);
+      }).pipe(
+        Effect.provide(
+          Layer.merge(aixTestLayer, Logger.layer([logger], { mergeWithExisting: false })),
+        ),
+      );
+    });
   });
 
   describe("ownership across settings persistence", () => {
