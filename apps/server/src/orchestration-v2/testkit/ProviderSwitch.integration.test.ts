@@ -32,6 +32,7 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
+import * as Result from "effect/Result";
 import * as Stream from "effect/Stream";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -1152,9 +1153,7 @@ describe("orchestration v2 provider switching", () => {
           : scenario.name === "aix Claude to OpenCode"
             ? ProviderDriverKind.make("opencode")
             : CODEX_DRIVER;
-      const sourceCapabilities = codex
-        ? CodexProviderCapabilitiesV2
-        : ClaudeProviderCapabilitiesV2;
+      const sourceCapabilities = codex ? CodexProviderCapabilitiesV2 : ClaudeProviderCapabilitiesV2;
       const targetCapabilities =
         targetDriver === CODEX_DRIVER
           ? CodexProviderCapabilitiesV2
@@ -1209,24 +1208,31 @@ describe("orchestration v2 provider switching", () => {
         });
         yield* dispatch(1, source);
         yield* Deferred.await(firstTurnStarted);
-        yield* orchestrator.dispatch(
-          scenario.name === "aix Claude to OpenCode"
-            ? {
-                type: "provider.switch",
-                commandId: CommandId.make(`command:aix-switch:${scenario.name}:select`),
-                threadId,
-                modelSelection: target,
-              }
-            : {
-                type: "thread.model-selection.set",
-                commandId: CommandId.make(`command:aix-switch:${scenario.name}:select`),
-                threadId,
-                modelSelection: target,
-              },
+        const selectionResult = yield* orchestrator
+          .dispatch(
+            scenario.name === "aix Claude to OpenCode"
+              ? {
+                  type: "provider.switch",
+                  commandId: CommandId.make(`command:aix-switch:${scenario.name}:select`),
+                  threadId,
+                  modelSelection: target,
+                }
+              : {
+                  type: "thread.model-selection.set",
+                  commandId: CommandId.make(`command:aix-switch:${scenario.name}:select`),
+                  threadId,
+                  modelSelection: target,
+                },
+          )
+          .pipe(Effect.result);
+        assert.ok(Result.isFailure(selectionResult));
+        assert.instanceOf(
+          selectionResult.failure,
+          Orchestrator.OrchestratorProviderSelectionBusyError,
         );
         const whileRunning = yield* orchestrator.getThreadProjection(threadId);
         assert.equal(whileRunning.runs[0]?.status, "running");
-        assert.deepEqual(whileRunning.thread.modelSelection, target);
+        assert.deepEqual(whileRunning.thread.modelSelection, source);
         assert.lengthOf(whileRunning.runs, 1);
         yield* Deferred.succeed(releaseFirstTurn, undefined);
         yield* waitForRun(1);
@@ -1262,7 +1268,10 @@ describe("orchestration v2 provider switching", () => {
           projection.messages.map((message) => message.text),
           "Keep this constraint: retain the existing API",
         );
-        assert.include(projection.messages.map((message) => message.text), "Continue");
+        assert.include(
+          projection.messages.map((message) => message.text),
+          "Continue",
+        );
       }).pipe(
         Effect.provide(
           ProviderReplayHarness.layerWithRegistry(
