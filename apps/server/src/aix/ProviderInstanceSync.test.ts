@@ -5,6 +5,7 @@ import {
   ProviderInstanceId,
   type ProviderInstanceConfig,
   ProviderInstanceConfigMap,
+  type ProviderInstanceMutation,
 } from "@t3tools/contracts";
 import { it as effectIt } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
@@ -448,13 +449,23 @@ describe("syncAixProviderInstances", () => {
     const payloads = yield* Ref.make<ReadonlyArray<string>>([]);
     const counted = {
       ...base,
-      updateProviderInstance: (...args: Parameters<typeof base.updateProviderInstance>) =>
-        Ref.update(writes, (previous) => [...previous, args[0].instanceId]).pipe(
-          Effect.andThen(
-            Ref.update(payloads, (previous) => [...previous, JSON.stringify(args[0])]),
-          ),
-          Effect.andThen(base.updateProviderInstance(...args)),
-        ),
+      updateProviderInstances: (plan: Parameters<typeof base.updateProviderInstances>[0]) =>
+        Effect.gen(function* () {
+          let planned: ReadonlyArray<ProviderInstanceMutation> = [];
+          const result = yield* base.updateProviderInstances((current) => {
+            planned = plan(current);
+            return planned;
+          });
+          yield* Ref.update(writes, (previous) => [
+            ...previous,
+            ...planned.map((mutation) => mutation.instanceId),
+          ]);
+          yield* Ref.update(payloads, (previous) => [
+            ...previous,
+            ...planned.map((mutation) => JSON.stringify(mutation)),
+          ]);
+          return result;
+        }),
     } satisfies ServerSettingsService["Service"];
     return { counted, writes, payloads };
   });
@@ -808,6 +819,40 @@ describe("syncAixProviderInstances", () => {
         expect(settings.providerInstances[ProviderInstanceId.make("aix-codex-work")]?.enabled).toBe(
           false,
         );
+      }).pipe(Effect.provide(aixTestLayer)),
+    );
+
+    effectIt.effect("a user disable racing the sync write survives the profile returning", () =>
+      Effect.gen(function* () {
+        const base = yield* ServerSettingsService;
+        const codexId = ProviderInstanceId.make("aix-codex-work");
+        const cache = yield* makeAixSyncCache;
+        yield* refreshWith(base, sourceFor(), cache);
+
+        // The user's disable lands after the sync read settings but before its write.
+        const userDisable = yield* Effect.cached(
+          base.updateProviderInstance({
+            operation: "upsert",
+            instanceId: codexId,
+            instance: { ...codexInstance("work"), enabled: false },
+          }),
+        );
+        const racing = {
+          ...base,
+          updateProviderInstance: (...args: Parameters<typeof base.updateProviderInstance>) =>
+            userDisable.pipe(Effect.andThen(base.updateProviderInstance(...args))),
+          updateProviderInstances: (...args: Parameters<typeof base.updateProviderInstances>) =>
+            userDisable.pipe(Effect.andThen(base.updateProviderInstances(...args))),
+        } satisfies ServerSettingsService["Service"];
+        yield* refreshWith(
+          racing,
+          sourceFor({ listProfiles: Effect.succeed([{ name: "claude", label: "Claude" }]) }),
+          cache,
+          true,
+        );
+        yield* refreshWith(base, sourceFor(), cache, true);
+
+        expect((yield* base.getSettings).providerInstances[codexId]?.enabled).toBe(false);
       }).pipe(Effect.provide(aixTestLayer)),
     );
 

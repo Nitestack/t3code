@@ -442,22 +442,19 @@ export const syncAixProviderInstances = Effect.fn("AixProviderInstanceSync.sync"
           );
         }
 
-        // Read after the slow aix and catalog calls, so a manual instance that appeared meanwhile is seen.
-        const current = (yield* settings.getSettings).providerInstances;
-        const mutations = planAixInstanceSync({
-          current,
-          desired: aixDesiredInstances(observedProfiles),
-          unavailableProfiles,
-        });
-        for (const mutation of mutations) {
-          yield* settings
-            .updateProviderInstance(mutation)
-            .pipe(
-              Effect.catchCause((cause) =>
-                Effect.logWarning(`aix provider instance ${mutation.instanceId} not saved`, cause),
-              ),
-            );
-        }
+        const desired = aixDesiredInstances(observedProfiles);
+        const plan = (current: ProviderInstanceConfigMap) =>
+          planAixInstanceSync({ current, desired, unavailableProfiles });
+        // The snapshot only skips a no-op write; the plan reruns under the settings lock so a
+        // concurrent user toggle is never overwritten.
+        if (plan((yield* settings.getSettings).providerInstances).length === 0) return;
+        yield* settings
+          .updateProviderInstances(plan)
+          .pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("aix provider instances not saved", cause),
+            ),
+          );
       }),
     );
   },
