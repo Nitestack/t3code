@@ -82,6 +82,7 @@ import * as TextGeneration from "./textGeneration/TextGeneration.ts";
 import * as SecretCheck from "./secrets/SecretCheck.ts";
 import * as SecretResolver from "./secrets/SecretResolver.ts";
 import * as AixProviderInstanceSync from "./aix/ProviderInstanceSync.ts";
+import * as AixProfileBudget from "./aix/ProfileBudget.ts";
 import * as ProviderInstanceRegistryHydration from "./provider/ProviderInstanceRegistryHydration.ts";
 import * as ProjectSettingsOverrideSweep from "./provider/ProjectSettingsOverrideSweep.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
@@ -738,7 +739,7 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   Layer.provideMerge(
     ProviderInstanceRegistryHydration.layer.pipe(Layer.provide(SqlitePersistence.layerConfig)),
   ),
-  Layer.provideMerge(AixProviderInstanceSync.layer),
+  Layer.provideMerge(Layer.mergeAll(AixProviderInstanceSync.layer, AixProfileBudget.layer)),
   // One gate for the server, below hydration so the Claude adapter sees it: layers memoize by
   // reference, so the runtime layer shares it.
   Layer.provideMerge(ProviderInstallationGate.layer),

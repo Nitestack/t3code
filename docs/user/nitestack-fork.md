@@ -34,6 +34,10 @@ Only models that can run are offered:
 If a selected model or profile stops working, the turn fails with an error. T3 never switches to a
 different model or agent for you.
 
+When a profile's LiteLLM key has a budget, the usage limits panel shows it as a Gateway budget bar
+for each of that profile's instances, with its reset time when the gateway reports one. A key
+without a budget, or a direct Anthropic profile, shows no bar.
+
 ### Refresh and key rotation
 
 Profiles and model catalogs are loaded when the server starts and reloaded at most once a day.
@@ -90,6 +94,7 @@ Compared with upstream T3 Code at
   enabled with `T3CODE_AIX=1`.
 - Model details for aix models: family, context window, prices, reasoning levels, refresh, and a
   stale-catalog warning.
+- An aix profile's LiteLLM key budget in the usage limits panel.
 - A client-side Work/Personal view on web, desktop, and the fork's Android app.
 - A separately signed Android APK with its own package name, and no fork iOS build.
 - A pinned Nix flake with `t3code-fork` commands that install next to the original T3 Code.
