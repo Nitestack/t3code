@@ -1089,6 +1089,225 @@ describe("orchestration v2 provider switching", () => {
       );
     }),
   );
+
+  it.live.each([
+    {
+      name: "aix Codex profile to another profile",
+      source: {
+        instanceId: ProviderInstanceId.make("aix-codex-work"),
+        model: "gpt-6-codex",
+      },
+      target: {
+        instanceId: ProviderInstanceId.make("aix-codex-personal"),
+        model: "gpt-6-codex",
+      },
+    },
+    {
+      name: "aix Codex to Claude",
+      source: {
+        instanceId: ProviderInstanceId.make("aix-codex-work-cross"),
+        model: "gpt-6-codex",
+      },
+      target: {
+        instanceId: ProviderInstanceId.make("aix-claude-personal-cross"),
+        model: "claude-sonnet",
+      },
+    },
+    {
+      name: "aix Claude to OpenCode",
+      source: {
+        instanceId: ProviderInstanceId.make("aix-claude-work-cross"),
+        model: "claude-sonnet",
+      },
+      target: {
+        instanceId: ProviderInstanceId.make("aix-opencode-personal-cross"),
+        model: "openai/gpt-5.4-mini",
+      },
+    },
+    {
+      name: "aix Codex profile rejects an unavailable model",
+      source: {
+        instanceId: ProviderInstanceId.make("aix-codex-work-reject"),
+        model: "gpt-6-codex",
+      },
+      target: {
+        instanceId: ProviderInstanceId.make("aix-codex-personal-reject"),
+        model: "removed-model",
+      },
+    },
+  ] as const)("switches profiles and handles model selection for $name", (scenario) =>
+    Effect.gen(function* () {
+      const cwd = yield* checkpointWorkspace(`aix-switch-${scenario.name}`);
+      const capturedTurns = yield* Ref.make<ReadonlyArray<CapturedTurn>>([]);
+      const firstTurnStarted = yield* Deferred.make<void>();
+      const releaseFirstTurn = yield* Deferred.make<void>();
+      const rejectTargetStart = yield* Ref.make(
+        scenario.name.includes("unavailable model") ? 1 : 0,
+      );
+      const codex = scenario.name.includes("Codex");
+      const sourceDriver = codex ? CODEX_DRIVER : CLAUDE_DRIVER;
+      const targetDriver =
+        scenario.name === "aix Codex to Claude"
+          ? CLAUDE_DRIVER
+          : scenario.name === "aix Claude to OpenCode"
+            ? ProviderDriverKind.make("opencode")
+            : CODEX_DRIVER;
+      const sourceCapabilities = codex
+        ? CodexProviderCapabilitiesV2
+        : ClaudeProviderCapabilitiesV2;
+      const targetCapabilities =
+        targetDriver === CODEX_DRIVER
+          ? CodexProviderCapabilitiesV2
+          : targetDriver === CLAUDE_DRIVER
+            ? ClaudeProviderCapabilitiesV2
+            : AcpProviderCapabilitiesV2;
+      const source: ModelSelection = scenario.source;
+      const target: ModelSelection = scenario.target;
+      const threadId = ThreadId.make(`thread:aix-switch:${scenario.name}`);
+
+      yield* Effect.gen(function* () {
+        const orchestrator = yield* Orchestrator.OrchestratorV2;
+        const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+        const dispatch = (ordinal: number, modelSelection: ModelSelection) =>
+          orchestrator.dispatch({
+            type: "message.dispatch",
+            commandId: CommandId.make(`command:aix-switch:${scenario.name}:${ordinal}`),
+            threadId,
+            messageId: MessageId.make(`message:aix-switch:${scenario.name}:${ordinal}`),
+            createdBy: "user",
+            creationSource: "web",
+            text: ordinal === 1 ? "Keep this constraint: retain the existing API" : "Continue",
+            attachments: [],
+            modelSelection,
+            dispatchMode: { type: "start_immediately" },
+          });
+        const waitForRun = (ordinal: number) =>
+          orchestrator.streamStoredEvents.pipe(
+            Stream.filter(
+              ({ event }) =>
+                event.type === "run.updated" &&
+                event.payload.ordinal === ordinal &&
+                (event.payload.status === "completed" || event.payload.status === "failed"),
+            ),
+            Stream.runHead,
+            Effect.andThen(worker.drain()),
+          );
+
+        yield* orchestrator.dispatch({
+          type: "thread.create",
+          commandId: CommandId.make(`command:aix-switch:${scenario.name}:create`),
+          threadId,
+          projectId: ProjectId.make(`project:aix-switch:${scenario.name}`),
+          createdBy: "user",
+          creationSource: "web",
+          title: scenario.name,
+          modelSelection: source,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: cwd,
+        });
+        yield* dispatch(1, source);
+        yield* Deferred.await(firstTurnStarted);
+        yield* orchestrator.dispatch(
+          scenario.name === "aix Claude to OpenCode"
+            ? {
+                type: "provider.switch",
+                commandId: CommandId.make(`command:aix-switch:${scenario.name}:select`),
+                threadId,
+                modelSelection: target,
+              }
+            : {
+                type: "thread.model-selection.set",
+                commandId: CommandId.make(`command:aix-switch:${scenario.name}:select`),
+                threadId,
+                modelSelection: target,
+              },
+        );
+        const whileRunning = yield* orchestrator.getThreadProjection(threadId);
+        assert.equal(whileRunning.runs[0]?.status, "running");
+        assert.deepEqual(whileRunning.thread.modelSelection, target);
+        assert.lengthOf(whileRunning.runs, 1);
+        yield* Deferred.succeed(releaseFirstTurn, undefined);
+        yield* waitForRun(1);
+        yield* dispatch(2, target);
+        yield* waitForRun(2);
+
+        const projection = yield* orchestrator.getThreadProjection(threadId);
+        const turns = yield* Ref.get(capturedTurns);
+        assert.deepEqual(
+          projection.runs.map((run) => [run.providerInstanceId, run.status]),
+          [
+            [source.instanceId, "completed"],
+            [
+              target.instanceId,
+              scenario.name.includes("unavailable model") ? "failed" : "completed",
+            ],
+          ],
+        );
+        assert.equal(turns[0]?.driver, sourceDriver);
+        if (scenario.name.includes("unavailable model")) {
+          assert.lengthOf(turns, 1);
+          assert.equal(projection.runs[1]?.modelSelection.model, "removed-model");
+          assert.isTrue(projection.turnItems.some((item) => item.type === "error"));
+        } else {
+          assert.equal(turns[1]?.driver, targetDriver);
+          assert.deepEqual(turns[1]?.modelSelection, target);
+          assert.lengthOf(projection.contextHandoffs, 1);
+          assert.include(turns[1]?.text ?? "", "Keep this constraint: retain the existing API");
+          assert.equal(projection.contextHandoffs[0]?.targetRunId, projection.runs[1]?.id);
+        }
+        assert.deepEqual(projection.thread.modelSelection, target);
+        assert.include(
+          projection.messages.map((message) => message.text),
+          "Keep this constraint: retain the existing API",
+        );
+        assert.include(projection.messages.map((message) => message.text), "Continue");
+      }).pipe(
+        Effect.provide(
+          ProviderReplayHarness.layerWithRegistry(
+            {
+              name: `aix-switch-${scenario.name}`,
+              runtimePolicyOverride: {
+                cwd,
+                approvalPolicy: "never",
+                sandboxPolicy: {
+                  type: "readOnly",
+                  access: { type: "fullAccess" },
+                  networkAccess: false,
+                },
+              },
+            },
+            ProviderAdapterRegistry.layerFromAdapters([
+              makeTestAdapter({
+                instanceId: source.instanceId,
+                driver: sourceDriver,
+                capabilities: sourceCapabilities,
+                modelSelection: source,
+                responseByRunOrdinal: { 1: "Preserve the existing API" },
+                capturedTurns,
+                holdFirstTurn: firstTurnStarted,
+                releaseFirstTurn,
+                heldRunningToolCall: {
+                  id: TurnItemId.make(`turn-item:aix-switch:${scenario.name}:active-tool`),
+                  toolName: "test_running_tool",
+                },
+              }),
+              makeTestAdapter({
+                instanceId: target.instanceId,
+                driver: targetDriver,
+                capabilities: targetCapabilities,
+                modelSelection: target,
+                responseByRunOrdinal: { 2: "Continuing with the constraint" },
+                capturedTurns,
+                refuseStarts: rejectTargetStart,
+              }),
+            ]),
+          ),
+        ),
+      );
+    }),
+  );
   it.live.each([
     "turn-start",
     "injection",
