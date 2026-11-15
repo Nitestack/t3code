@@ -179,4 +179,16 @@ describe("resolveUsageLimitsAfterProbe", () => {
       nativeFailure,
     );
   });
+
+  it("does not graft a removed AIX profile budget onto a newer native report", () => {
+    const publishedAix = {
+      ...published,
+      checkedAt: "2026-09-03T12:00:05.000Z",
+      profileName: "work",
+    };
+    const nativeSuccess = { checkedAt: "2026-09-03T12:00:00.000Z", windows: [] };
+    expect(resolveUsageLimitsAfterProbe({ published: publishedAix, probed: nativeSuccess })).toBe(
+      nativeSuccess,
+    );
+  });
 });

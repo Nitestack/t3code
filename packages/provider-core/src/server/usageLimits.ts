@@ -130,6 +130,7 @@ export function resolveUsageLimitsAfterProbe(input: {
     probed &&
     !published.unavailable &&
     !probed.unavailable &&
+    published.profileName === probed.profileName &&
     Date.parse(published.checkedAt) > Date.parse(probed.checkedAt)
   ) {
     return { ...probed, checkedAt: published.checkedAt, windows: published.windows };
