@@ -4,9 +4,13 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   type ProviderInstanceConfig,
+  ModelSelection,
   ProviderInstanceConfigMap,
   type ProviderInstanceMutation,
+  ServerConfigStreamProviderStatusesEvent,
+  ServerProvider,
 } from "@t3tools/contracts";
+import { providerModelsFromSettings } from "@t3tools/provider-core/server/snapshotProbe";
 import { it as effectIt } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -44,6 +48,11 @@ const SENTINEL_KEY = "sk-aix-sentinel-do-not-persist";
 const decodeCodexSettings = Schema.decodeUnknownSync(CodexSettings);
 const decodeClaudeSettings = Schema.decodeUnknownSync(ClaudeSettings);
 const decodeOpenCodeSettings = Schema.decodeUnknownSync(OpenCodeSettings);
+const decodeServerProvider = Schema.decodeSync(ServerProvider);
+const ProviderStatusesJson = Schema.toCodecJson(ServerConfigStreamProviderStatusesEvent);
+const encodeProviderStatuses = Schema.encodeSync(ProviderStatusesJson);
+const decodeProviderStatuses = Schema.decodeUnknownSync(ProviderStatusesJson);
+const encodeModelSelection = Schema.encodeSync(Schema.toCodecJson(ModelSelection));
 const OPENCODE_INSTANCE = ProviderInstanceId.make("aix-opencode-work");
 const aixTestLayer = Layer.mergeAll(ServerSettingsService.layerTest(), Digest.layerWebCrypto);
 
@@ -197,6 +206,72 @@ describe("aixDesiredInstances", () => {
         ],
       },
     });
+  });
+
+  it("offers every routed model as a standard provider model chosen by instanceId and model", () => {
+    const desired = aixDesiredInstances([
+      {
+        name: "work",
+        label: "Work",
+        routes: routeAixModels(
+          "litellm",
+          LITELLM_MODELS.map((model) => ({ ...model, contextTokens: 128_000 })),
+        ),
+      },
+      {
+        name: "claude",
+        label: "Claude",
+        routes: routeAixModels("anthropic", [{ id: "claude-opus-5-5", displayName: "Opus" }]),
+      },
+    ]);
+    const decodeDriverSettings = {
+      [CODEX]: decodeCodexSettings,
+      [CLAUDE_CODE]: decodeClaudeSettings,
+      [OPENCODE]: decodeOpenCodeSettings,
+    };
+    const providers = [...desired].map(([instanceId, instance]) =>
+      decodeServerProvider({
+        instanceId,
+        driver: instance.driver,
+        displayName: instance.displayName,
+        enabled: true,
+        installed: true,
+        version: "1.0.0",
+        status: "ready",
+        auth: { status: "authenticated" },
+        checkedAt: "2026-11-15T00:00:00.000Z",
+        models: providerModelsFromSettings(
+          [],
+          must(decodeDriverSettings[instance.driver])(instance.config).customModels,
+          null,
+        ),
+      }),
+    );
+    const wire = JSON.parse(
+      JSON.stringify(
+        encodeProviderStatuses({ version: 1, type: "providerStatuses", payload: { providers } }),
+      ),
+    ) as { payload: { providers: Array<{ models: Array<Record<string, unknown>> }> } };
+    const choices = (payload: unknown) =>
+      decodeProviderStatuses(payload).payload.providers.flatMap((provider) =>
+        provider.models.map((model) => ({ instanceId: provider.instanceId, model: model.slug })),
+      );
+    expect(wire.payload.providers[0]?.models[0]).toHaveProperty("catalogMetadata");
+    const withMetadata = choices(wire);
+    for (const provider of wire.payload.providers) {
+      for (const model of provider.models) delete model.catalogMetadata;
+    }
+
+    expect(choices(wire)).toEqual(withMetadata);
+    expect(withMetadata).toEqual([
+      { instanceId: "aix-codex-work", model: "gpt-6.1-sol" },
+      { instanceId: "aix-opencode-work", model: "t3_aix/gpt-oss-120b" },
+      { instanceId: "aix-opencode-work", model: "t3_aix/google/gemma-4-31b-it" },
+      { instanceId: "aix-claudeAgent-claude", model: "claude-opus-5-5" },
+    ]);
+    for (const choice of withMetadata) {
+      expect(encodeModelSelection(choice)).toStrictEqual(choice);
+    }
   });
 
   it("skips a profile name that cannot form a valid instance id", () => {

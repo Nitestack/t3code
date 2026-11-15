@@ -162,6 +162,25 @@ describe("server config forward compatibility", () => {
     expect(parsed).toEqual([decodedBase]);
   });
 
+  it("ignores provider and model fields this build does not know", () => {
+    const model = { slug: "gpt", name: "GPT", isCustom: true, capabilities: null };
+    const codec = Schema.toCodecJson(ServerConfigStreamProviderStatusesEvent);
+    const decode = (provider: unknown) =>
+      Schema.decodeUnknownSync(codec)({
+        version: 1,
+        type: "providerStatuses",
+        payload: { providers: [provider] },
+      });
+
+    expect(
+      decode({
+        ...baseProviderSnapshot,
+        futureProviderField: { nested: true },
+        models: [{ ...model, futureModelField: "x" }],
+      }),
+    ).toEqual(decode({ ...baseProviderSnapshot, models: [model] }));
+  });
+
   it("drops usage windows this build cannot decode instead of failing the provider", () => {
     const parsed = decodeServerProvider({
       ...baseProviderSnapshot,

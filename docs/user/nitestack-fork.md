@@ -46,9 +46,13 @@ separate T3 data directories using `T3CODE_HOME` as described in the
 An Android variant and build workflow are in the source, but there is no verified signed APK or
 published fork download. See the
 [Android build guide](../operations/android-fork-apk.md) for build status; upstream Android
-downloads are not fork builds. The official Android and iOS apps are unchanged upstream clients,
-and their compatibility with a fork server has not been established. The official iOS app has no
-fork-specific Work/Personal switch.
+downloads are not fork builds. The official Android and iOS apps are unchanged upstream clients.
+A source-level check decoded this fork's provider lists, aix model choices, refresh replies,
+settings, and thread commands with the client schemas of upstream commit `449deb635e`: aix models
+use the standard instance and model fields, and those clients ignore the extra optional metadata.
+No official app has been run against a fork server on a device, and later app releases may accept
+different data. The official iOS app has no fork-specific Work/Personal switch; use its existing
+environment selection instead.
 
 ## Run the source checkout
 
