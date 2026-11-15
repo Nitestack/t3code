@@ -72,6 +72,13 @@ export function keyInfoUsageLimits(input: {
       message: "This aix profile's key has a $0 budget.",
     });
   }
+  if (spend == null) {
+    return makeUnavailableUsageLimits({
+      checkedAt: input.checkedAt,
+      reason: "probeFailed",
+      message: "The aix gateway returned an unrecognized budget.",
+    });
+  }
   const resetsAt = isoTime(budget_reset_at);
   const windowDurationMins = durationMinutes(budget_duration);
   return makeUsageLimits({
@@ -81,7 +88,7 @@ export function keyInfoUsageLimits(input: {
         id: budgetWindowId(input.profileName),
         kind: "other",
         label: "Gateway budget",
-        usedPercent: clampPercent(((spend ?? 0) / maxBudget) * 100),
+        usedPercent: clampPercent((spend / maxBudget) * 100),
         ...(resetsAt === undefined ? {} : { resetsAt }),
         ...(windowDurationMins === undefined ? {} : { windowDurationMins }),
       },
@@ -89,8 +96,11 @@ export function keyInfoUsageLimits(input: {
   });
 }
 
-const keyInfoUrl = (endpoint: string) =>
-  `${endpoint.replace(/\/+$/u, "").replace(/\/v1$/u, "")}/key/info`;
+const keyInfoUrl = (endpoint: string) => {
+  const url = new URL(endpoint);
+  url.pathname = `${url.pathname.replace(/\/+$/u, "").replace(/\/v1$/u, "")}/key/info`;
+  return url.href;
+};
 
 const REQUEST_TIMEOUT = Duration.seconds(10);
 
@@ -123,6 +133,8 @@ const readKeyInfo = Effect.fn("AixProfileBudget.readKeyInfo")(function* (
     HttpClientRequest.setHeader("accept", "application/json"),
   );
   const body = yield* client.execute(request).pipe(
+    // Endpoint queries may carry credentials; keep HTTP URL attributes out of traces.
+    Effect.withTracerEnabled(false),
     Effect.mapError((): BudgetFailure => ({ _tag: "request" })),
     Effect.flatMap((response) =>
       response.status < 200 || response.status >= 300

@@ -6,8 +6,9 @@ import * as Fiber from "effect/Fiber";
 import * as Logger from "effect/Logger";
 import * as Option from "effect/Option";
 import * as TestClock from "effect/testing/TestClock";
+import * as Tracer from "effect/Tracer";
 import { HttpClient, HttpClientError, HttpClientResponse } from "effect/http";
-import type * as HttpClientRequest from "effect/http/HttpClientRequest";
+import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import * as NodeUtil from "node:util";
 
 import { AixDiscoveryError, type ResolvedEnvironment } from "../provider/AixDiscovery.ts";
@@ -86,7 +87,6 @@ it.each([
     info: { spend: "123.81", max_budget: "150.0000000000" },
     usedPercent: (123.81 / 150) * 100,
   },
-  { name: "missing spend as nothing spent", info: { max_budget: 50 }, usedPercent: 0 },
   { name: "overspend as a full bar", info: { spend: 210, max_budget: 200 }, usedPercent: 100 },
   {
     name: "a reported budget window and reset",
@@ -156,18 +156,27 @@ it.each([
   });
 });
 
-it.effect("reads key info from the gateway root with the profile key", () =>
+it.effect.each([
+  { endpoint: "https://gateway.test/v1/", expected: "https://gateway.test/key/info" },
+  { endpoint: "https://gateway.test?tenant=x", expected: "https://gateway.test/key/info?tenant=x" },
+  {
+    endpoint: "https://gateway.test/proxy/v1/?tenant=x",
+    expected: "https://gateway.test/proxy/key/info?tenant=x",
+  },
+])("reads key info from $endpoint with the profile key", ({ endpoint, expected }) =>
   Effect.gen(function* () {
     const http = fakeHttp(() => Response.json({ info: { spend: "25", max_budget: "50" } }));
     const { service } = yield* budgetFor(http, (profileName) =>
-      Effect.succeed(litellm(profileName, "https://gateway.test/v1/")),
+      Effect.succeed(litellm(profileName, endpoint)),
     );
     const limits = yield* service.usageLimits("p");
 
     expect(limits.windows.map(({ id, usedPercent }) => [id, usedPercent])).toEqual([
       ["aix-budget:p", 50],
     ]);
-    expect(http.requests.map((request) => request.url)).toEqual(["https://gateway.test/key/info"]);
+    expect(
+      http.requests.map((request) => Option.getOrThrow(HttpClientRequest.toUrl(request)).href),
+    ).toEqual([expected]);
     expect(http.requests[0]?.headers.authorization).toBe(`Bearer ${SENTINEL_KEY}`);
   }),
 );
@@ -193,6 +202,14 @@ it.effect("reads each profile once for all of its instances until the TTL passes
 );
 
 it.effect.each([
+  ...[undefined, null].map((spend) => ({
+    name: `${spend} spend with a positive cap`,
+    respond: () => Response.json({ info: { spend, max_budget: 50 } }),
+    unavailable: {
+      reason: "probeFailed",
+      message: "The aix gateway returned an unrecognized budget.",
+    },
+  })),
   {
     name: "a rejected key",
     respond: () => new Response(`{"error":"invalid key ${SENTINEL_KEY}"}`, { status: 401 }),
@@ -284,6 +301,15 @@ it.effect("does not query a direct Anthropic profile or one aix cannot resolve",
 
 it.effect("keeps the profile key out of usage limits and logs on every path", () => {
   const lines: Array<string> = [];
+  const spans: Array<Tracer.NativeSpan> = [];
+  const tracer = Tracer.make({
+    span: (options) => {
+      const span = new Tracer.NativeSpan(options);
+      spans.push(span);
+      return span;
+    },
+  });
+  const querySentinel = "aix-budget-query-sentinel-do-not-leak";
   const logger = Logger.make(({ message, cause }) => {
     lines.push(NodeUtil.inspect(message, { depth: 10 }), Cause.pretty(cause));
   });
@@ -299,7 +325,9 @@ it.effect("keeps the profile key out of usage limits and logs on every path", ()
       return (responses[profile] ?? responses.ok!)();
     });
     const { service } = yield* budgetFor(http, (profileName) =>
-      Effect.succeed(litellm(profileName, `https://${profileName}.gateway.test`)),
+      Effect.succeed(
+        litellm(profileName, `https://${profileName}.gateway.test?credential=${querySentinel}`),
+      ),
     );
     const results = yield* Effect.forEach(Object.keys(responses), service.usageLimits);
 
@@ -311,7 +339,23 @@ it.effect("keeps the profile key out of usage limits and logs on every path", ()
     ]);
     expect(JSON.stringify(results)).not.toContain(SENTINEL_KEY);
     expect(lines.join("\n")).not.toContain(SENTINEL_KEY);
-  }).pipe(Effect.provide(Logger.layer([logger], { mergeWithExisting: false })));
+    expect(spans.length).toBeGreaterThan(0);
+    const traceData = JSON.stringify(
+      spans.map((span) => ({
+        name: span.name,
+        attributes: Object.fromEntries(span.attributes),
+        events: span.events,
+      })),
+    );
+    expect(traceData).not.toContain(SENTINEL_KEY);
+    expect(traceData).not.toContain(querySentinel);
+    expect(JSON.stringify(results)).not.toContain(querySentinel);
+    expect(lines.join("\n")).not.toContain(querySentinel);
+  }).pipe(
+    Effect.withTracer(tracer),
+    Effect.withTracerEnabled(true),
+    Effect.provide(Logger.layer([logger], { mergeWithExisting: false })),
+  );
 });
 
 const provider = (overrides: Partial<ServerProvider> = {}): ServerProvider =>
