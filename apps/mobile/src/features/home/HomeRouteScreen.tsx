@@ -5,6 +5,8 @@ import { NativePrimaryColumnContext } from "../../native/v5-workspace-context";
 import { useNavigation } from "@react-navigation/native";
 import { useMemo, useState } from "react";
 import { Platform } from "react-native";
+import * as Arr from "effect/Array";
+import * as Order from "effect/Order";
 
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import { pickableProjectGroups } from "@t3tools/client-runtime/state/project-grouping";
@@ -117,13 +119,14 @@ export function HomeRouteScreen() {
       (environment) => [environment.environmentId, environment.connectionState] as const,
     ),
   );
-  const allEnvironments = Object.values(savedConnectionsById)
-    .map((connection) => ({
+  const allEnvironments = Arr.sort(
+    Object.values(savedConnectionsById).map((connection) => ({
       environmentId: connection.environmentId,
       label: connection.environmentLabel,
       connectionState: connectionStateByEnvironmentId.get(connection.environmentId) ?? "available",
-    }))
-    .sort((left, right) => left.label.localeCompare(right.label));
+    })),
+    Order.mapInput(Order.String, (environment: { readonly label: string }) => environment.label),
+  );
   const environments = filterScope(homeListFilterEnvironments(workspaceEnvironments));
   const availableEnvironmentIds = useMemo(
     () => new Set(environments.map((environment) => environment.environmentId)),

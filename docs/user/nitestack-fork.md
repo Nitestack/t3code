@@ -60,7 +60,7 @@ the project's last selection, like other providers.
 ## Work/Personal view
 
 Web, desktop, and the fork's Android app have a Work/Personal switch. Use **Classify environments**
-next to it to mark each connected environment as Work. Environments you have not classified count
+next to it to mark each environment as Work. Environments you have not classified count
 as Personal. The switch filters the sidebar, project and thread
 pickers, search, and the command palette, and new threads are created in the active view. Switching
 never stops running turns or queued work, and notifications are not filtered by view. The switch
