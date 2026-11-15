@@ -259,7 +259,14 @@ describe("planAixInstanceSync", () => {
       {
         operation: "upsert",
         instanceId: ProviderInstanceId.make("aix-codex-old"),
-        instance: { ...codexInstance("old"), enabled: false },
+        instance: {
+          ...codexInstance("old"),
+          enabled: false,
+          config: {
+            ...(codexInstance("old").config as Record<string, unknown>),
+            aixDisabledBySync: true,
+          },
+        },
       },
     ]);
   });
@@ -294,14 +301,28 @@ describe("planAixInstanceSync", () => {
       {
         operation: "upsert",
         instanceId: ProviderInstanceId.make("aix-codex-work"),
-        instance: { ...codexInstance("work"), enabled: false },
+        instance: {
+          ...codexInstance("work"),
+          enabled: false,
+          config: {
+            ...(codexInstance("work").config as Record<string, unknown>),
+            aixDisabledBySync: true,
+          },
+        },
       },
     ]);
   });
 
   it("re-enables a disabled managed instance when its profile returns", () => {
     const current = {
-      [ProviderInstanceId.make("aix-codex-work")]: { ...codexInstance("work"), enabled: false },
+      [ProviderInstanceId.make("aix-codex-work")]: {
+        ...codexInstance("work"),
+        enabled: false,
+        config: {
+          ...(codexInstance("work").config as Record<string, unknown>),
+          aixDisabledBySync: true,
+        },
+      },
     } as ProviderInstanceConfigMap;
 
     expect(planAixInstanceSync({ current, desired: work, unavailableProfiles: new Set() })).toEqual(
@@ -318,6 +339,78 @@ describe("planAixInstanceSync", () => {
         },
       ],
     );
+  });
+
+  it("keeps a user-disabled managed instance disabled when its profile returns", () => {
+    const codexId = ProviderInstanceId.make("aix-codex-work");
+    const current = {
+      [codexId]: { ...codexInstance("work"), enabled: false },
+    } as ProviderInstanceConfigMap;
+
+    expect(planAixInstanceSync({ current, desired: work, unavailableProfiles: new Set() })).toEqual(
+      [
+        {
+          operation: "create",
+          instanceId: OPENCODE_INSTANCE,
+          instance: must(work.get(OPENCODE_INSTANCE)),
+        },
+      ],
+    );
+  });
+
+  it("preserves a user-disabled instance when an available profile changes its models", () => {
+    const current = {
+      [ProviderInstanceId.make("aix-codex-work")]: {
+        ...codexInstance("work"),
+        enabled: false,
+      },
+    } as ProviderInstanceConfigMap;
+    const codexId = ProviderInstanceId.make("aix-codex-work");
+    const codexWant = codexInstance("work");
+    const codexConfig = codexWant.config as {
+      readonly customModels: ReadonlyArray<unknown>;
+    };
+    const changedCodex = {
+      ...codexWant,
+      config: {
+        ...codexConfig,
+        customModels: [...codexConfig.customModels, { slug: "gpt-6.2-sol", name: "GPT-6.2 Sol" }],
+      },
+    };
+    const changed = new Map(work).set(codexId, changedCodex);
+
+    expect(
+      planAixInstanceSync({ current, desired: changed, unavailableProfiles: new Set() }),
+    ).toEqual([
+      { operation: "upsert", instanceId: codexId, instance: { ...changedCodex, enabled: false } },
+      {
+        operation: "create",
+        instanceId: OPENCODE_INSTANCE,
+        instance: must(work.get(OPENCODE_INSTANCE)),
+      },
+    ]);
+  });
+
+  it("creates a new managed instance enabled", () => {
+    const codexOnly = new Map([
+      [
+        ProviderInstanceId.make("aix-codex-work"),
+        must(work.get(ProviderInstanceId.make("aix-codex-work"))),
+      ],
+    ]);
+    expect(
+      planAixInstanceSync({
+        current: {} as ProviderInstanceConfigMap,
+        desired: codexOnly,
+        unavailableProfiles: new Set(),
+      }),
+    ).toEqual([
+      {
+        operation: "create",
+        instanceId: ProviderInstanceId.make("aix-codex-work"),
+        instance: { ...must(work.get(ProviderInstanceId.make("aix-codex-work"))), enabled: true },
+      },
+    ]);
   });
 });
 
@@ -836,7 +929,14 @@ describe("syncAixProviderInstances", () => {
         {
           operation: "upsert",
           instanceId: ProviderInstanceId.make("aix-codex-work"),
-          instance: { ...codexInstance("work"), enabled: false },
+          instance: {
+            ...codexInstance("work"),
+            enabled: false,
+            config: {
+              ...(codexInstance("work").config as Record<string, unknown>),
+              aixDisabledBySync: true,
+            },
+          },
         },
       ]);
     });

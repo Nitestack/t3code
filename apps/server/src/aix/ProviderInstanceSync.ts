@@ -109,6 +109,22 @@ const decodeOwnerMarker = Schema.decodeUnknownOption(OwnerMarker);
 const ownerProfile = (instance: ProviderInstanceConfig): string | undefined =>
   Option.getOrUndefined(decodeOwnerMarker(instance.config))?.aixProfile;
 
+const wasDisabledBySync = (instance: ProviderInstanceConfig): boolean => {
+  const config = instance.config;
+  return (
+    config !== null &&
+    typeof config === "object" &&
+    !Array.isArray(config) &&
+    (config as { readonly aixDisabledBySync?: unknown }).aixDisabledBySync === true
+  );
+};
+
+const withoutSyncDisabledMarker = (config: unknown): unknown => {
+  if (config === null || typeof config !== "object" || Array.isArray(config)) return config;
+  const { aixDisabledBySync: _marker, ...rest } = config as Record<string, unknown>;
+  return rest;
+};
+
 const driverLabel = (driver: ProviderDriverKind) => {
   if (driver === CODEX) return "Codex";
   if (driver === OPENCODE) return "OpenCode";
@@ -151,14 +167,12 @@ const sameOwnedFields = (left: ProviderInstanceConfig, right: ProviderInstanceCo
     {
       driver: left.driver,
       displayName: left.displayName,
-      enabled: left.enabled,
       environment: left.environment,
       config: left.config,
     },
     {
       driver: right.driver,
       displayName: right.displayName,
-      enabled: right.enabled,
       environment: right.environment,
       config: right.config,
     },
@@ -180,7 +194,15 @@ export function planAixInstanceSync(input: {
     const owner = ownerProfile(existing);
     if (owner === undefined || input.desired.has(instanceId)) continue;
     if (input.unavailableProfiles.has(owner) || existing.enabled === false) continue;
-    mutations.push({ operation: "upsert", instanceId, instance: { ...existing, enabled: false } });
+    mutations.push({
+      operation: "upsert",
+      instanceId,
+      instance: {
+        ...existing,
+        enabled: false,
+        config: { ...(existing.config as Record<string, unknown>), aixDisabledBySync: true },
+      },
+    });
   }
 
   for (const [instanceId, want] of input.desired) {
@@ -190,8 +212,15 @@ export function planAixInstanceSync(input: {
       continue;
     }
     // A manual instance with the same id belongs to the user; leave it alone.
-    if (ownerProfile(existing) !== ownerProfile(want) || sameOwnedFields(existing, want)) continue;
-    mutations.push({ operation: "upsert", instanceId, instance: want });
+    if (ownerProfile(existing) !== ownerProfile(want)) continue;
+    const nextEnabled = wasDisabledBySync(existing) ? want.enabled : existing.enabled;
+    const next = {
+      ...want,
+      ...(nextEnabled === undefined ? {} : { enabled: nextEnabled }),
+      config: withoutSyncDisabledMarker(want.config),
+    };
+    if (sameOwnedFields(existing, next) && !wasDisabledBySync(existing)) continue;
+    mutations.push({ operation: "upsert", instanceId, instance: next });
   }
 
   return mutations;
