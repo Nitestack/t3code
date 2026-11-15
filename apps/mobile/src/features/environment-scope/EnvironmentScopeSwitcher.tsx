@@ -35,12 +35,12 @@ export function EnvironmentScopeSwitcher(props: {
         id: `environment:${index}`,
         title: environment.label,
         subactions: [
-          { id: workId, title: "Work", attributes: { disabled: currentScope === "work" } },
           {
             id: personalId,
             title: "Personal",
             attributes: { disabled: currentScope === "personal" },
           },
+          { id: workId, title: "Work", attributes: { disabled: currentScope === "work" } },
         ],
       };
     });
@@ -56,8 +56,8 @@ export function EnvironmentScopeSwitcher(props: {
         role="button"
         selected={activeScope}
         options={[
-          { value: "work", label: "Work" },
           { value: "personal", label: "Personal" },
+          { value: "work", label: "Work" },
         ]}
         onSelect={(scope) => {
           if (scope === activeScope) return;

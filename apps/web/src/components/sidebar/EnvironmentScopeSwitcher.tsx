@@ -27,7 +27,7 @@ export function EnvironmentScopeSwitcher() {
     <div className="flex min-w-0 items-center gap-1">
       <ToggleGroup
         aria-label="Environment scope"
-        className="min-w-0 flex-1"
+        className="min-w-0 flex-1 *:flex-1"
         value={[activeScope]}
         onValueChange={(value) => {
           const nextScope = value[0];
@@ -36,12 +36,8 @@ export function EnvironmentScopeSwitcher() {
           }
         }}
       >
-        <Toggle className="flex-1" value="personal">
-          Personal
-        </Toggle>
-        <Toggle className="flex-1" value="work">
-          Work
-        </Toggle>
+        <Toggle value="personal">Personal</Toggle>
+        <Toggle value="work">Work</Toggle>
       </ToggleGroup>
       <DropdownMenu>
         <DropdownMenuTrigger
