@@ -8456,7 +8456,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             ),
           ),
           resumeTurn: (input) => runtime.startTurn(ProviderAdapter.resumeTurnInput(input)),
-          startTurn: (turnInput) => {
+          startTurn: Effect.fn("CodexAdapterV2.startTurn")(function* (turnInput) {
             const continuation =
               turnInput.restartContinuationOfRunId !== undefined || turnInput.resume === true;
             const goalCommand = !continuation ? parseGoalCommand(turnInput.message) : null;
@@ -8492,7 +8492,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                       !continuation ? yield* toCodexInput(turnInput) : [],
                     );
                   }).pipe(Effect.mapError(turnStartError));
-            return activeAixLaunch === undefined
+            return yield* activeAixLaunch === undefined
               ? start
               : aixRotationPermit.withPermit(
                   rotateAixClientForTurn(turnInput).pipe(
@@ -8500,7 +8500,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                     Effect.andThen(start),
                   ),
                 );
-          },
+          }),
           steerTurn: Effect.fn("CodexAdapterV2.steerTurn")(
             function* (turnInput) {
               const threadId = yield* getNativeThreadId(turnInput.providerThread);
