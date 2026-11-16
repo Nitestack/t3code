@@ -1280,10 +1280,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     toggleProjectGroupPin,
   } = useProjectPin();
   const handleProjectSettings = useStableCallback(
-    (
-      event: ReactMouseEvent<HTMLElement> | ReactKeyboardEvent<HTMLInputElement>,
-      projectGroup: SidebarProjectSnapshot,
-    ) => {
+    (event: ReactMouseEvent<HTMLElement>, projectGroup: SidebarProjectSnapshot) => {
       event.preventDefault();
       event.stopPropagation();
       suppressNextScopeChangeRef.current = true;
@@ -1331,6 +1328,25 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             return;
         }
       })();
+    },
+  );
+  const handleProjectScopeRowContextMenu = useStableCallback(
+    (
+      event: ReactMouseEvent<HTMLElement> | ReactKeyboardEvent<HTMLInputElement>,
+      projectGroup: SidebarProjectSnapshot,
+    ) => {
+      event.preventDefault();
+      event.stopPropagation();
+      suppressNextScopeChangeRef.current = true;
+      const position =
+        "clientX" in event
+          ? { x: event.clientX, y: event.clientY }
+          : (() => {
+              const rect = event.currentTarget.getBoundingClientRect();
+              return { x: rect.left, y: rect.bottom };
+            })();
+      dispatchProjectScopeMenu({ type: "project-settings-opened" });
+      handleProjectContextMenu(projectGroup, position);
     },
   );
 
@@ -3135,7 +3151,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                         ) {
                           return;
                         }
-                        if (project) handleProjectSettings(event, project);
+                        if (project) handleProjectScopeRowContextMenu(event, project);
                       }}
                       onChange={(event) =>
                         dispatchProjectScopeMenu({
@@ -3160,13 +3176,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                             // The icon badge marks selection; Base UI's single value would shade one row.
                             data-selected={undefined}
                             onContextMenu={(event) => {
-                              if (!project) return;
-                              event.preventDefault();
-                              event.stopPropagation();
-                              handleProjectContextMenu(project, {
-                                x: event.clientX,
-                                y: event.clientY,
-                              });
+                              if (project) handleProjectScopeRowContextMenu(event, project);
                             }}
                           >
                             <ProjectScopeRowIcon isSelected={isSelected}>

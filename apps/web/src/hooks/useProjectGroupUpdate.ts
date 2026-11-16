@@ -106,6 +106,9 @@ export function useProjectGroupUpdate() {
   return { updateProjectGroup, canOrganizeProjectGroup, canSetProjectScope };
 }
 
+// Only the latest move may be undone; an older Undo would revert a later deliberate move.
+let latestMoveToastId: ReturnType<typeof toastManager.add> | undefined;
+
 /** Pin state for a project group, shared by every list that can pin or unpin a project. */
 export function useProjectPin() {
   const { updateProjectGroup, canOrganizeProjectGroup, canSetProjectScope } =
@@ -139,6 +142,7 @@ export function useProjectPin() {
       "Failed to move project",
     );
     if (result._tag !== "Success") return;
+    if (latestMoveToastId !== undefined) toastManager.close(latestMoveToastId);
     const toastId = toastManager.add(
       stackedThreadToast({
         type: "success",
@@ -162,6 +166,7 @@ export function useProjectPin() {
         },
       }),
     );
+    latestMoveToastId = toastId;
   };
   const setProjectGroupPinned = (group: PinnableGroup, pinned: boolean) => {
     void updateProjectGroup(
