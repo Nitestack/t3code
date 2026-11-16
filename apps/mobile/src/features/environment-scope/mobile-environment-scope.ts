@@ -1,8 +1,10 @@
 import {
-  filterByEnvironmentScope,
-  getEnvironmentScope,
+  filterByProjectScope,
+  filterProjectsByScope,
+  resolveProjectScope,
   type EnvironmentScope,
-  type EnvironmentScopeAssignments,
+  type ScopedProject,
+  type ScopedProjectThread,
 } from "@t3tools/client-runtime/environment";
 import type { EnvironmentId } from "@t3tools/contracts";
 
@@ -13,23 +15,29 @@ export function isAndroidForkEnvironmentScopeEnabled(input: {
   return input.platformOS === "android" && input.appVariant === "android-fork";
 }
 
-export function filterMobileEnvironmentScope<T extends { readonly environmentId: EnvironmentId }>(
-  values: ReadonlyArray<T>,
+export function filterMobileProjectScope<T extends ScopedProject>(
+  projects: ReadonlyArray<T>,
   enabled: boolean,
   scope: EnvironmentScope,
-  assignments: EnvironmentScopeAssignments,
 ): ReadonlyArray<T> {
-  return enabled ? filterByEnvironmentScope(values, scope, assignments) : values;
+  return enabled ? filterProjectsByScope(projects, scope) : projects;
+}
+
+export function filterMobileThreadScope<T extends ScopedProjectThread>(
+  threads: ReadonlyArray<T>,
+  enabled: boolean,
+  scope: EnvironmentScope,
+  projects: ReadonlyArray<ScopedProject>,
+): ReadonlyArray<T> {
+  return enabled ? filterByProjectScope(threads, scope, projects) : threads;
 }
 
 export function routeEnvironmentScope(input: {
   readonly enabled: boolean;
-  readonly environmentId: EnvironmentId | null;
-  readonly assignments: EnvironmentScopeAssignments;
+  readonly projectScope: unknown;
 }): EnvironmentScope | null {
-  return input.enabled && input.environmentId !== null
-    ? getEnvironmentScope(input.assignments, input.environmentId)
-    : null;
+  if (!input.enabled || input.projectScope === null) return null;
+  return resolveProjectScope(input.projectScope);
 }
 
 export function mobileScopeSearchEnvironmentIds(input: {
@@ -38,16 +46,8 @@ export function mobileScopeSearchEnvironmentIds(input: {
     readonly connectionState: string;
   }>;
   readonly selectedEnvironmentId: EnvironmentId | null;
-  readonly enabled: boolean;
-  readonly scope: EnvironmentScope;
-  readonly assignments: EnvironmentScopeAssignments;
 }): ReadonlyArray<EnvironmentId> {
-  return filterMobileEnvironmentScope(
-    input.environments,
-    input.enabled,
-    input.scope,
-    input.assignments,
-  )
+  return input.environments
     .filter(
       (environment) =>
         environment.connectionState === "connected" &&

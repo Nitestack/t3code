@@ -3,7 +3,8 @@ import { AppText as Text, AppTextInput } from "../../components/ui/AppText";
 import { Button } from "../../components/ui/Button";
 import { ProjectFavicon } from "../../components/ProjectFavicon";
 import * as Dialog from "../../components/ui/Dialog";
-import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
+import { AuthOrchestrationOperateScope, type ProjectScope } from "@t3tools/contracts";
+import { projectScopeInput, supportsProjectScope } from "@t3tools/client-runtime/environment";
 import { planProjectRemoval } from "@t3tools/client-runtime/state/projects";
 import {
   isAtomCommandInterrupted,
@@ -44,6 +45,7 @@ import { leaveSettingsPage } from "./settings-navigation";
 import { workspaceHasColumns } from "../layout/workspace/workspace-selection-store";
 import { DEFAULT_SETTINGS_PAGE } from "../layout/workspace/workspace-tab-navigation";
 import { readUnloadedThreadCount } from "../../state/olderSettledShelf";
+import { useMobileEnvironmentScope } from "../environment-scope/useMobileEnvironmentScope";
 
 export function SettingsProjectOverviewRouteScreen() {
   const environmentMenu = useSettingsEnvironmentMenu();
@@ -137,6 +139,7 @@ function ProjectOverviewContent(props: {
   readonly onProjectRemoved: (projectKey: string | null) => void;
 }) {
   const { isRemoving, setIsRemoving, startRemoval, finishRemoval } = props;
+  const { enabled: environmentScopeEnabled } = useMobileEnvironmentScope();
   const representative = props.members[0]!;
   const displayName = deriveProjectGroupLabel({
     groupKey: props.group.key,
@@ -165,6 +168,16 @@ function ProjectOverviewContent(props: {
     props.connectedTargets.find((entry) => entry.environmentId === member.environmentId),
   );
   const offline = memberTargets.some((target) => target === undefined);
+  const canMoveProjectScope =
+    environmentScopeEnabled &&
+    allMembers.every(
+      (member, index) =>
+        memberTargets[index] === undefined || removableEnvironments.has(member.environmentId),
+    ) &&
+    memberTargets.every(
+      (target) =>
+        target === undefined || supportsProjectScope(target.serverConfig.environment.capabilities),
+    );
   // Older servers drop pin and archive, so their projects do not offer them.
   // Offline members are checked when the write runs, so their reason can show.
   const canOrganize =
@@ -178,16 +191,30 @@ function ProjectOverviewContent(props: {
         target.serverConfig.environment.capabilities.projectOrganization === true,
     );
   // One machine at a time, stopping at the first failure, as web does.
-  const organize = async (input: { readonly pinned?: boolean; readonly archived?: boolean }) => {
+  const organize = async (input: {
+    readonly pinned?: boolean;
+    readonly archived?: boolean;
+    readonly scope?: ProjectScope;
+  }) => {
     setIsOrganizing(true);
     for (const member of allMembers) {
       if (!readEnvironmentScope(member.environmentId, AuthOrchestrationOperateScope)) {
         Dialog.alert("Failed to update project", "This connection can no longer change it.");
         break;
       }
+      const target = props.connectedTargets.find(
+        (candidate) => candidate.environmentId === member.environmentId,
+      );
+      const { scope, ...organization } = input;
       const result = await organizeProject({
         environmentId: member.environmentId,
-        input: { projectId: member.id, ...input },
+        input: {
+          projectId: member.id,
+          ...organization,
+          ...(scope === undefined || !environmentScopeEnabled
+            ? {}
+            : projectScopeInput(target?.serverConfig.environment.capabilities, scope)),
+        },
       });
       if (result._tag === "Failure") {
         if (!isAtomCommandInterrupted(result)) {
@@ -346,6 +373,22 @@ function ProjectOverviewContent(props: {
             ) : null}
           </View>
         </View>
+        {canMoveProjectScope ? (
+          <SettingsActionRow
+            icon="arrow.left.arrow.right"
+            label={representative.scope === "work" ? "Move to Personal" : "Move to Work"}
+            description={
+              offline
+                ? "Connect every machine with this project to change its scope."
+                : "Moves every checkout of this project between Personal and Work."
+            }
+            disabled={isOrganizing || offline}
+            loading={isOrganizing}
+            onPress={() =>
+              void organize({ scope: representative.scope === "work" ? "personal" : "work" })
+            }
+          />
+        ) : null}
       </SettingsSection>
 
       {canOrganize ? (

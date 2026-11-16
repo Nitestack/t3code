@@ -16,7 +16,9 @@ import {
   type PlanId,
   type ProjectId,
   type ProjectIconOverride,
+  type ProjectMutation,
   type ProjectScript,
+  type ProjectScope,
   type ProviderApprovalDecision,
   type ProviderInteractionMode,
   type ProviderUserInputAnswers,
@@ -59,11 +61,13 @@ export interface CreateProjectInput extends CommandMetadata {
   readonly createWorkspaceRootIfMissing?: boolean;
   readonly defaultModelSelection?: ModelSelection | null;
   readonly scripts?: ReadonlyArray<ProjectScript>;
+  readonly scope?: ProjectScope;
 }
 
 export interface UpdateProjectInput extends CommandMetadata {
   readonly projectId: ProjectId;
   readonly title?: string;
+  readonly scope?: ProjectScope;
   readonly workspaceRoot?: string;
   readonly defaultModelSelection?: ModelSelection | null;
   readonly autoPull?: boolean;
@@ -382,25 +386,8 @@ const persistAttachments = Effect.fn("EnvironmentCommands.persistAttachments")(f
 
 const mutateProject = Effect.fn("EnvironmentCommands.mutateProject")(function* (
   mutation:
-    | {
-        readonly type: "project.create";
-        readonly commandId: CommandId;
-        readonly projectId: ProjectId;
-        readonly title: string;
-        readonly workspaceRoot: string;
-        readonly createWorkspaceRootIfMissing?: boolean;
-        readonly defaultModelSelection?: ModelSelection | null;
-        readonly scripts?: ReadonlyArray<ProjectScript>;
-      }
-    | {
-        readonly type: "project.update";
-        readonly commandId: CommandId;
-        readonly projectId: ProjectId;
-        readonly title?: string;
-        readonly workspaceRoot?: string;
-        readonly defaultModelSelection?: ModelSelection | null;
-        readonly scripts?: ReadonlyArray<ProjectScript>;
-      }
+    | Extract<ProjectMutation, { readonly type: "project.create" }>
+    | Extract<ProjectMutation, { readonly type: "project.update" }>
     | {
         readonly type: "project.delete";
         readonly commandId: CommandId;
@@ -420,6 +407,7 @@ export const createProject = Effect.fn("EnvironmentCommands.createProject")(func
     projectId: input.projectId,
     title: input.title,
     workspaceRoot: input.workspaceRoot,
+    ...(input.scope === undefined ? {} : { scope: input.scope }),
     ...(input.createWorkspaceRootIfMissing === undefined
       ? {}
       : { createWorkspaceRootIfMissing: input.createWorkspaceRootIfMissing }),
@@ -437,6 +425,7 @@ export const updateProject = Effect.fn("EnvironmentCommands.updateProject")(func
     type: "project.update",
     commandId: yield* allocateCommandId(input),
     projectId: input.projectId,
+    ...(input.scope === undefined ? {} : { scope: input.scope }),
     ...(input.title === undefined ? {} : { title: input.title }),
     ...(input.workspaceRoot === undefined ? {} : { workspaceRoot: input.workspaceRoot }),
     ...(input.defaultModelSelection === undefined

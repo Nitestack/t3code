@@ -1,4 +1,8 @@
-import { AuthOrchestrationOperateScope, type ProjectIconOverride } from "@t3tools/contracts";
+import {
+  AuthOrchestrationOperateScope,
+  type ProjectIconOverride,
+  type ProjectScope,
+} from "@t3tools/contracts";
 import {
   isAtomCommandInterrupted,
   mapAtomCommandResult,
@@ -15,6 +19,7 @@ import { readEnvironment } from "../state/environments";
 import { projectEnvironment } from "../state/projects";
 import { readEnvironmentScope, useEnvironmentsWithScope } from "../state/session";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
+import { supportsProjectScope } from "@t3tools/client-runtime/environment";
 
 export type ProjectGroupUpdate = Partial<{
   title: string;
@@ -22,6 +27,7 @@ export type ProjectGroupUpdate = Partial<{
   projectIcon: ProjectIconOverride | null;
   pinned: boolean;
   archived: boolean;
+  scope: ProjectScope;
 }>;
 
 type ProjectGroupMember = Pick<
@@ -91,12 +97,18 @@ export function useProjectGroupUpdate() {
         true,
     );
 
-  return { updateProjectGroup, canOrganizeProjectGroup };
+  const canSetProjectScope = (members: ReadonlyArray<ProjectGroupMember>) =>
+    members.every((member) =>
+      supportsProjectScope(serverConfigs.get(member.environmentId)?.environment.capabilities),
+    );
+
+  return { updateProjectGroup, canOrganizeProjectGroup, canSetProjectScope };
 }
 
 /** Pin state for a project group, shared by every list that can pin or unpin a project. */
 export function useProjectPin() {
-  const { updateProjectGroup, canOrganizeProjectGroup } = useProjectGroupUpdate();
+  const { updateProjectGroup, canOrganizeProjectGroup, canSetProjectScope } =
+    useProjectGroupUpdate();
   const environments = [...new Set(useProjects().map((project) => project.environmentId))].map(
     (environmentId) => ({ environmentId }),
   );
@@ -111,6 +123,9 @@ export function useProjectPin() {
   const canPinProjectGroup = (group: PinnableGroup) =>
     canOrganizeProjectGroup(group.memberProjects) &&
     group.memberProjects.every((member) => operableEnvironmentIds.has(member.environmentId));
+  const canMoveProjectGroupScope = (group: PinnableGroup) =>
+    canSetProjectScope(group.memberProjects) &&
+    group.memberProjects.every((member) => operableEnvironmentIds.has(member.environmentId));
   const setProjectGroupPinned = (group: PinnableGroup, pinned: boolean) => {
     void updateProjectGroup(
       group.memberProjects,
@@ -120,6 +135,7 @@ export function useProjectPin() {
   };
   return {
     canPinProjectGroup,
+    canMoveProjectGroupScope,
     setProjectGroupPinned,
     toggleProjectGroupPin: (group: PinnableGroup) => setProjectGroupPinned(group, !group.pinned),
   };

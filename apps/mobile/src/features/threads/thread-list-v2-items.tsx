@@ -11,6 +11,7 @@ import {
 import { RowPressable } from "../../components/ui/RowPressable";
 import { CustomSnoozeSheet } from "./CustomSnoozeSheet";
 import { appAtomRegistry } from "../../state/atom-registry";
+import { environmentServerConfigsAtom } from "../../state/server";
 import { threadArrangementOpenAtom } from "../../state/thread-order";
 import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -21,6 +22,7 @@ import type {
   EnvironmentThreadShell,
 } from "@t3tools/client-runtime/state/shell";
 import type { EnvironmentThreadSearchMatch } from "@t3tools/client-runtime/state/thread-search";
+import { supportsProjectScope } from "@t3tools/client-runtime/environment";
 import {
   formatWorkingDurationLabel,
   resolveThreadWorkingStartedAt,
@@ -35,6 +37,7 @@ import type { SnoozePresetSetting } from "@t3tools/contracts/settings";
 import { canSnooze } from "@t3tools/client-runtime/state/thread-settled";
 import { threadChipCopyTarget } from "@t3tools/client-runtime/thread-reference";
 import type { MenuAction } from "@react-native-menu/menu";
+import Constants from "expo-constants";
 import { memo, useCallback, useMemo, useState, type ComponentProps } from "react";
 import { Platform, Pressable, Text as RNText, useWindowDimensions, View } from "react-native";
 import type { SwipeableMethods } from "react-native-gesture-handler/ReanimatedSwipeable";
@@ -72,6 +75,7 @@ import { useSwipeRowDormant } from "../home/swipe-row-activation";
 import { ThreadSwipeable } from "../home/thread-swipe-actions";
 import { buildThreadTitleRegenerationMenuItems } from "./thread-title-regeneration-menu";
 import { canTurnThreadIntoProject, turnThreadIntoProject } from "./turnThreadIntoProject";
+import { isAndroidForkEnvironmentScopeEnabled } from "../environment-scope/mobile-environment-scope";
 import { threadCanArchive } from "../home/threadArchive";
 import {
   THREAD_LIST_V2_SETTLED_PAGE_COUNT,
@@ -660,6 +664,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   readonly timeLabel: string;
   readonly snoozePresetMinute: string;
   readonly project: EnvironmentProject | null;
+  readonly activeScope: "personal" | "work";
   readonly providers: ReadonlyArray<ThreadListProvider> | undefined;
   readonly providerInstance: ThreadRowProviderInstance | null;
   readonly environmentLabel: string | null;
@@ -718,6 +723,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     Platform.OS === "android" ? androidTitleLineHeight : titleTypography.lineHeight * fontScale;
   const {
     thread,
+    activeScope,
     variant,
     onSelectThread,
     onOpenThreadPullRequests,
@@ -1058,7 +1064,20 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       if (nativeEvent.event === "archive") handleArchive();
       if (nativeEvent.event === "rename") handleRename();
       if (nativeEvent.event === "regenerate-title") handleRegenerateTitle();
-      if (nativeEvent.event === "turn-into-project") void turnThreadIntoProject(thread);
+      if (nativeEvent.event === "turn-into-project")
+        void turnThreadIntoProject(
+          thread,
+          isAndroidForkEnvironmentScopeEnabled({
+            platformOS: Platform.OS,
+            appVariant: Constants.expoConfig?.extra?.appVariant,
+          }) &&
+            supportsProjectScope(
+              appAtomRegistry.get(environmentServerConfigsAtom).get(thread.environmentId)
+                ?.environment.capabilities,
+            )
+            ? activeScope
+            : undefined,
+        );
       if (nativeEvent.event === "copy-thread") {
         const target = threadChipCopyTarget(
           { environmentId: thread.environmentId, threadId: thread.id },
@@ -1094,6 +1113,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     [
       onNewThreadOnBranch,
       thread,
+      activeScope,
       handleArchive,
       handleDelete,
       handleRegenerateTitle,

@@ -1,11 +1,10 @@
 import appCss from "../../index.css?inline";
-import { DEFAULT_CLIENT_SETTINGS, EnvironmentId } from "@t3tools/contracts";
+import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
-import { page, userEvent } from "vite-plus/test/browser";
+import { userEvent } from "vite-plus/test/browser";
 
 import { render } from "../../../test/render";
 import { __setClientSettingsForTests, getClientSettings } from "../../hooks/useSettings";
-import { useEnvironmentIdentities } from "../../state/environments";
 import { EnvironmentScopeSwitcher } from "./EnvironmentScopeSwitcher";
 
 void appCss;
@@ -18,22 +17,14 @@ vi.mock("../../hooks/useSettings", async (importOriginal) => {
       actual.persistClientSettingsPatch(patch, async () => {}),
   };
 });
-vi.mock("../../state/environments", { spy: true });
-
 describe("EnvironmentScopeSwitcher", () => {
-  it("switches scope by keyboard and classifies an environment without overflowing a narrow sidebar", async () => {
+  it("switches scope by keyboard without overflowing a narrow sidebar", async () => {
     using stack = new DisposableStack();
     const previousSettings = getClientSettings();
     stack.defer(() => __setClientSettingsForTests(previousSettings));
     __setClientSettingsForTests({
       ...DEFAULT_CLIENT_SETTINGS,
-      environmentScopeAssignments: {},
     });
-    const environmentId = EnvironmentId.make("work-server");
-    vi.mocked(useEnvironmentIdentities).mockReturnValue([
-      { environmentId, label: "Work server" },
-    ] as never);
-
     const container = document.createElement("div");
     container.style.width = "216px";
     // This control only updates local preferences and performs no navigation.
@@ -51,8 +42,6 @@ describe("EnvironmentScopeSwitcher", () => {
     expect(toggleGroup).not.toBeNull();
     expect(toggleGroup!.scrollWidth).toBeLessThanOrEqual(toggleGroup!.clientWidth);
 
-    await userEvent.click(screen.getByRole("button", { name: "Classify environments" }));
-    await userEvent.click(page.getByRole("menuitemcheckbox", { name: "Work server" }));
-    expect(getClientSettings().environmentScopeAssignments[environmentId]).toBe("work");
+    expect(getClientSettings().activeEnvironmentScope).toBe("work");
   });
 });

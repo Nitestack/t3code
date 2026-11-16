@@ -2,6 +2,7 @@ import {
   CommandId,
   type OrchestrationV2ThreadShell,
   ProjectId,
+  type ProjectScope,
   type ThreadId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -40,6 +41,7 @@ export class ScratchThreadPromotion extends Context.Service<
      */
     readonly promote: (input: {
       readonly threadId: ThreadId;
+      readonly scope?: ProjectScope | undefined;
     }) => Effect.Effect<{ readonly projectId: ProjectId }, ScratchThreadPromotionError>;
   }
 >()("t3/project/ScratchThreadPromotion") {}
@@ -112,7 +114,7 @@ const make = Effect.gen(function* () {
 
     return yield* Effect.uninterruptible(
       Effect.gen(function* () {
-        const projectId = yield* createProject(thread.title, folder);
+        const projectId = yield* createProject(thread.title, folder, input.scope);
         yield* scheduledTasks
           .moveThreadTasks({ threadIds: [...moveSet.keys()], projectId })
           .pipe(Effect.mapError(fail("Could not move the thread's scheduled tasks.")));
@@ -138,6 +140,7 @@ const make = Effect.gen(function* () {
   const createProject = Effect.fn("ScratchThreadPromotion.createProject")(function* (
     title: string,
     workspaceRoot: string,
+    scope: ProjectScope | undefined,
   ) {
     const id = yield* randomId;
     return yield* projects
@@ -146,6 +149,7 @@ const make = Effect.gen(function* () {
         projectId: ProjectId.make(id),
         title,
         workspaceRoot,
+        ...(scope === undefined ? {} : { scope }),
       })
       .pipe(
         Effect.map(({ project }) => project.id),

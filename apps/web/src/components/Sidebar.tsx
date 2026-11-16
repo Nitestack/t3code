@@ -124,7 +124,7 @@ import {
 } from "../hooks/useThreadActions";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useOrderWhileOpen } from "../hooks/useOrderWhileOpen";
-import { useProjectPin } from "../hooks/useProjectGroupUpdate";
+import { useProjectGroupUpdate, useProjectPin } from "../hooks/useProjectGroupUpdate";
 import { useSidebarProjectGroups } from "../hooks/useSidebarProjectGroups";
 import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
 import { registerSettleAndAdvance } from "../settleAndAdvance";
@@ -239,12 +239,12 @@ import { threadChipCopyTarget } from "@t3tools/client-runtime/thread-reference";
 import { Button } from "./ui/button";
 import { isProjectPinShortcut, ProjectPinButton } from "./ProjectPinButton";
 import { EnvironmentScopeSwitcher } from "./sidebar/EnvironmentScopeSwitcher";
-import { filterByEnvironmentScope, getEnvironmentScope } from "@t3tools/client-runtime/environment";
 import {
-  filterEnvironmentIdsByScope,
-  filterThreadKeysByEnvironmentScope,
-  useClientEnvironmentScope,
-} from "../environmentScope";
+  filterByProjectScope,
+  filterProjectsByScope,
+  resolveProjectScope,
+} from "@t3tools/client-runtime/environment";
+import { useClientEnvironmentScope } from "../environmentScope";
 import {
   Combobox,
   ComboboxEmpty,
@@ -724,7 +724,7 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
   };
 }
 
-/** The sidebar's scope per environment: the scoped projects there, or every project. */
+/** Builds older-settled query scopes from selected projects, grouped by environment. */
 function olderSettledScopes(
   environmentIds: ReadonlyArray<EnvironmentId>,
   scopedProjectKeys: ReadonlySet<string> | null,
@@ -815,8 +815,8 @@ function isOptimisticDropReleased(input: {
 // Build maps in a hook so the compiler can prove they are frozen and cache them.
 function useSidebarLookups() {
   const allProjects = useProjects();
-  const { activeScope, assignments } = useClientEnvironmentScope();
-  const projects = filterByEnvironmentScope(allProjects, activeScope, assignments);
+  const { activeScope } = useClientEnvironmentScope();
+  const projects = filterProjectsByScope(allProjects, activeScope);
   const environments = useEnvironmentIdentities();
   const serverConfigs = useServerConfigs();
   const providerEntriesByEnvironment = useAtomValue(sidebarProviderEntriesAtom);
@@ -924,7 +924,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   } = useSidebarLookups();
   const delegatedUnderParent = useDelegatedUnderParent();
   const router = useRouter();
-  const { activeScope, assignments } = useClientEnvironmentScope();
+  const { activeScope } = useClientEnvironmentScope();
+  const allProjects = useProjects();
   const { isMobile, setOpenMobile } = useSidebar();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
@@ -1025,16 +1026,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const threadSearchInputRef = useRef<HTMLInputElement>(null);
   const [threadSearchQuery, setThreadSearchQuery] = useState("");
   const [searchHighlightKey, setSearchHighlightKey] = useState<string | null>(null);
-  const connectedEnvironmentIds = filterEnvironmentIdsByScope(
-    useConnectedEnvironmentIds(),
-    activeScope,
-    assignments,
-  );
-  const scopedEnvironmentIds = filterEnvironmentIdsByScope(
-    [...serverConfigs.keys()],
-    activeScope,
-    assignments,
-  );
+  const connectedEnvironmentIds = useConnectedEnvironmentIds();
+  const scopedEnvironmentIds = [...serverConfigs.keys()];
   const queuePendingFileDrop = useSidebarPendingFileDropStore((s) => s.queuePendingFileDrop);
   const clearPendingFileDrop = useSidebarPendingFileDropStore((s) => s.clearPendingFileDrop);
   const [renamingThreadRef, setRenamingThreadRef] = useState<ScopedThreadRef | null>(null);
@@ -1087,8 +1080,17 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     (routeTarget?.kind === "draft" ? routeDraftThread?.environmentId : null);
   const routeSyncKey =
     routeThreadKey ?? (routeTarget?.kind === "draft" ? routeTarget.draftId : null);
-  const routeScope =
-    routeEnvironmentId == null ? null : getEnvironmentScope(assignments, routeEnvironmentId);
+  const routeProjectId = routeThreadRef
+    ? readThreadShell(routeThreadRef)?.projectId
+    : routeDraftThread?.projectId;
+  const routeProject =
+    routeEnvironmentId === null || routeProjectId === undefined
+      ? undefined
+      : allProjects.find(
+          (project) =>
+            project.environmentId === routeEnvironmentId && project.id === routeProjectId,
+        );
+  const routeScope = routeProject === undefined ? null : resolveProjectScope(routeProject.scope);
   // Route changes from links and notifications select the environment's local view.
   // Scope changes themselves do not trigger this effect, so users can browse away from the open thread.
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- route navigation synchronizes the local view with the route's environment
@@ -1132,7 +1134,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             ),
           ),
         );
-  const threads = filterByEnvironmentScope(useQuietThreadShells(), activeScope, assignments);
+  const threads = filterByProjectScope(useQuietThreadShells(), activeScope, allProjects);
   const promotingDraftThreadKeys = usePromotingDraftThreadKeys();
   const listedThreads =
     promotingDraftThreadKeys.length === 0
@@ -1270,9 +1272,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   );
   const {
     canPinProjectGroup: canPinProject,
+    canMoveProjectGroupScope,
     setProjectGroupPinned,
     toggleProjectGroupPin,
   } = useProjectPin();
+  const { updateProjectGroup } = useProjectGroupUpdate();
   const handleProjectSettings = useStableCallback(
     (
       event: ReactMouseEvent<HTMLElement> | ReactKeyboardEvent<HTMLInputElement>,
@@ -1299,6 +1303,14 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             [
               { id: "new-thread", label: "New thread" },
               { id: "copy-path", label: "Copy path" },
+              ...(canMoveProjectGroupScope(group)
+                ? [
+                    {
+                      id: "change-scope",
+                      label: group.scope === "work" ? "Move to Personal" : "Move to Work",
+                    },
+                  ]
+                : []),
               ...(canPinProject(group)
                 ? [
                     group.pinned
@@ -1318,6 +1330,14 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             return;
           case "copy-path":
             copyPathToClipboard(group.workspaceRoot, { path: group.workspaceRoot });
+            return;
+          case "change-scope":
+            if (!canMoveProjectGroupScope(group)) return;
+            void updateProjectGroup(
+              group.memberProjects,
+              { scope: group.scope === "work" ? "personal" : "work" },
+              "Move project",
+            );
             return;
           case "pin":
           case "unpin":
@@ -1786,11 +1806,18 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     const selected = useThreadSelectionStore.getState().selectedThreadKeys;
     const keys = selected.has(key) ? [...selected] : [key];
     const settings = getClientSettings();
-    return filterThreadKeysByEnvironmentScope(
-      keys,
-      settings.activeEnvironmentScope,
-      settings.environmentScopeAssignments,
-    );
+    return keys.flatMap((threadKey) => {
+      const threadRef = parseScopedThreadKey(threadKey);
+      if (threadRef === null) return [];
+      const thread = readThreadShell(threadRef);
+      const project = allProjects.find(
+        (candidate) =>
+          candidate.environmentId === threadRef.environmentId && candidate.id === thread?.projectId,
+      );
+      return project && resolveProjectScope(project.scope) === settings.activeEnvironmentScope
+        ? [threadRef]
+        : [];
+    });
   };
   const pointerOutsideThreadList = (point: { x: number; y: number }) => {
     // Search results replace the thread list, so only one of them is mounted.

@@ -409,9 +409,6 @@ export const ClientSettingsSchema = Schema.Struct({
   activeEnvironmentScope: ClientEnvironmentScope.pipe(
     Schema.withDecodingDefault(Effect.succeed("personal" as const)),
   ),
-  environmentScopeAssignments: Schema.Record(Schema.String, ClientEnvironmentScope).pipe(
-    Schema.withDecodingDefault(Effect.succeed({})),
-  ),
   notificationMode: NotificationMode.pipe(
     Schema.withDecodingDefault(Effect.succeed("off" as const)),
   ),
@@ -2048,9 +2045,6 @@ export function requiredScopesForProjectMutation(
 
 export const ClientSettingsPatch = Schema.Struct({
   activeEnvironmentScope: Schema.optionalKey(ClientEnvironmentScope),
-  environmentScopeAssignments: Schema.optionalKey(
-    Schema.Record(Schema.String, ClientEnvironmentScope),
-  ),
   notificationMode: Schema.optionalKey(NotificationMode),
   inAppNotificationsEnabled: Schema.optionalKey(Schema.Boolean),
   diffColorScheme: Schema.optionalKey(DiffColorScheme),

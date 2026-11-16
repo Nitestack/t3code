@@ -2,7 +2,7 @@ import type { EnvironmentConnectionPhase } from "@t3tools/client-runtime/connect
 import { EnvironmentId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { resolveAddProjectEnvironment } from "./AddProjectScreen.logic";
+import { mobileProjectScopeInput, resolveAddProjectEnvironment } from "./AddProjectScreen.logic";
 
 const ENVIRONMENT_A = EnvironmentId.make("environment-a");
 const ENVIRONMENT_B = EnvironmentId.make("environment-b");
@@ -19,5 +19,18 @@ describe("resolveAddProjectEnvironment", () => {
         ENVIRONMENT_A,
       ),
     ).toBeNull();
+  });
+});
+
+describe("mobileProjectScopeInput", () => {
+  it("omits project scope unless both the platform and server support it", () => {
+    expect(mobileProjectScopeInput(true, { projectOrganization: true }, "work")).toEqual({});
+    expect(mobileProjectScopeInput(false, { projectScope: true }, "work")).toEqual({});
+  });
+
+  it("includes scope when the platform and server both support it", () => {
+    expect(mobileProjectScopeInput(true, { projectScope: true }, "work")).toEqual({
+      scope: "work",
+    });
   });
 });

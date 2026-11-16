@@ -5,7 +5,7 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 
 import { ProjectNotEmptyError } from "./ProjectService.ts";
-import { mutateProjectWithClone } from "./ProjectMutation.ts";
+import { mutateProjectWithClone, projectMutationOperation } from "./ProjectMutation.ts";
 
 const projectId = ProjectId.make("project-1");
 const deletedProject: Project = {
@@ -23,6 +23,33 @@ const deletedProject: Project = {
   updatedAt: "2026-01-01T00:00:00.000Z",
   deletedAt: "2026-01-01T00:00:00.000Z",
 };
+
+describe("projectMutationOperation", () => {
+  it.effect("forwards a scope update to the project service", () =>
+    Effect.gen(function* () {
+      let updatedScope: string | undefined;
+      yield* projectMutationOperation(
+        {
+          create: () => Effect.die("unused"),
+          update: (input) =>
+            Effect.sync(() => {
+              updatedScope = input.scope;
+              return deletedProject;
+            }),
+          delete: () => Effect.die("unused"),
+        },
+        {
+          type: "project.update",
+          commandId: CommandId.make("move-project-to-work"),
+          projectId,
+          scope: "work",
+        },
+      );
+
+      expect(updatedScope).toBe("work");
+    }),
+  );
+});
 
 describe("mutateProjectWithClone", () => {
   it.effect("keeps the clone when deletion is rejected", () =>

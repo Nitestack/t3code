@@ -1,4 +1,5 @@
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import { projectScopeInput } from "@t3tools/client-runtime/environment";
 import {
   findProjectByPath,
   inferProjectTitleFromPath,
@@ -7,7 +8,8 @@ import type { DesktopAppActivationRequest } from "@t3tools/contracts";
 
 import { handleDesktopAppActivationRequest } from "../desktopAppActivation";
 import { newProjectId } from "../lib/utils";
-import { readProjects, waitForProject } from "../state/entities";
+import { useClientEnvironmentScope } from "../environmentScope";
+import { readProjects, useServerConfigs, waitForProject } from "../state/entities";
 import { usePrimaryEnvironment } from "../state/environments";
 import { projectEnvironment } from "../state/projects";
 import { useEnvironmentShellHasSnapshot } from "../state/shell";
@@ -23,7 +25,9 @@ import { useNewThreadHandler } from "./useHandleNewThread";
  * primary environment's projects have loaded, so a known folder is not added twice.
  */
 export function useOpenLocalWorkspace() {
+  const { activeScope } = useClientEnvironmentScope();
   const primaryEnvironment = usePrimaryEnvironment();
+  const serverConfigs = useServerConfigs();
   const createProject = useAtomCommand(projectEnvironment.create, { reportFailure: false });
   const updateProject = useOrchestrationCommand(projectEnvironment.update, {
     label: "project unarchive",
@@ -64,6 +68,10 @@ export function useOpenLocalWorkspace() {
             projectId,
             title: inferProjectTitleFromPath(workspaceRoot),
             workspaceRoot,
+            ...projectScopeInput(
+              serverConfigs.get(environmentId)?.environment.capabilities,
+              activeScope,
+            ),
             createWorkspaceRootIfMissing: false,
             defaultModelSelection: null,
           },

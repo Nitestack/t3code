@@ -5,19 +5,15 @@ import { useCallback } from "react";
 import { Platform } from "react-native";
 
 import {
-  assignEnvironmentScope,
   resolveActiveEnvironmentScope,
   type EnvironmentScope,
-  type EnvironmentScopeAssignments,
 } from "@t3tools/client-runtime/environment";
-import type { EnvironmentId } from "@t3tools/contracts";
 import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
 import {
-  filterMobileEnvironmentScope,
+  filterMobileProjectScope,
+  filterMobileThreadScope,
   isAndroidForkEnvironmentScopeEnabled,
 } from "./mobile-environment-scope";
-
-const EMPTY_ASSIGNMENTS: EnvironmentScopeAssignments = {};
 
 export function useMobileEnvironmentScope() {
   const preferencesResult = useAtomValue(mobilePreferencesAtom);
@@ -28,9 +24,6 @@ export function useMobileEnvironmentScope() {
     appVariant: Constants.expoConfig?.extra?.appVariant,
   });
   const activeScope = resolveActiveEnvironmentScope(preferences.activeEnvironmentScope);
-  const assignments =
-    (preferences.environmentScopeAssignments as EnvironmentScopeAssignments | undefined) ??
-    EMPTY_ASSIGNMENTS;
 
   const setActiveScope = useCallback(
     (scope: EnvironmentScope) => {
@@ -38,32 +31,37 @@ export function useMobileEnvironmentScope() {
     },
     [enabled, savePreferences],
   );
-  const setEnvironmentScope = useCallback(
-    (environmentId: EnvironmentId, scope: EnvironmentScope) => {
-      if (!enabled) return;
-      savePreferences({
-        transform: (current) => ({
-          environmentScopeAssignments: assignEnvironmentScope(
-            current.environmentScopeAssignments ?? {},
-            environmentId,
-            scope,
-          ),
-        }),
-      });
-    },
-    [enabled, savePreferences],
-  );
-
   return {
     enabled,
     activeScope,
-    assignments,
     setActiveScope,
-    setEnvironmentScope,
     filter: useCallback(
-      <T extends { readonly environmentId: EnvironmentId }>(values: ReadonlyArray<T>) =>
-        filterMobileEnvironmentScope(values, enabled, activeScope, assignments),
-      [activeScope, assignments, enabled],
+      <
+        T extends {
+          readonly environmentId: import("@t3tools/contracts").EnvironmentId;
+          readonly id: import("@t3tools/contracts").ProjectId;
+          readonly scope?: EnvironmentScope;
+        },
+      >(
+        values: ReadonlyArray<T>,
+      ) => filterMobileProjectScope(values, enabled, activeScope),
+      [activeScope, enabled],
+    ),
+    filterThreads: useCallback(
+      <
+        T extends {
+          readonly environmentId: import("@t3tools/contracts").EnvironmentId;
+          readonly projectId: import("@t3tools/contracts").ProjectId;
+        },
+      >(
+        values: ReadonlyArray<T>,
+        projects: ReadonlyArray<{
+          readonly environmentId: import("@t3tools/contracts").EnvironmentId;
+          readonly id: import("@t3tools/contracts").ProjectId;
+          readonly scope?: EnvironmentScope;
+        }>,
+      ) => filterMobileThreadScope(values, enabled, activeScope, projects),
+      [activeScope, enabled],
     ),
   } as const;
 }

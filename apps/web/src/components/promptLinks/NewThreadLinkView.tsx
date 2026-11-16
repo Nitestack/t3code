@@ -1,4 +1,8 @@
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import {
+  projectScopeInput,
+  scopeProjectRef,
+  scopeThreadRef,
+} from "@t3tools/client-runtime/environment";
 import {
   getAddProjectInitialQuery,
   getCloneDestinationPath,
@@ -30,6 +34,7 @@ import { useComposerDraftStore } from "~/composerDraftStore";
 import { isElectron } from "~/env";
 import { useNewThreadHandler } from "~/hooks/useHandleNewThread";
 import { useScratchProject } from "~/hooks/useScratchProject";
+import { useClientEnvironmentScope } from "~/environmentScope";
 import { newProjectId } from "~/lib/utils";
 import { useProjects, useThreadShells, waitForProject } from "~/state/entities";
 import { appAtomRegistry } from "~/rpc/atomRegistry";
@@ -102,6 +107,7 @@ const pullRequestThreadLookupAtom = Atom.family((key: string) => {
 const NO_PULL_REQUEST_THREAD_LOOKUP = Atom.make(null);
 
 export function NewThreadLinkView({ link }: { readonly link: NewThreadLink }) {
+  const { activeScope } = useClientEnvironmentScope();
   const locationKey = useLocation({ select: (location) => location.state.__TSR_key ?? "" });
   const navigate = useNavigate();
   const ready = useAtomValue(allReachableShellsLiveAtom);
@@ -221,6 +227,7 @@ export function NewThreadLinkView({ link }: { readonly link: NewThreadLink }) {
         projectId: newProjectId(),
         title: repository.name,
         createdAt: new Date().toISOString(),
+        ...projectScopeInput(serverConfig.environment.capabilities, activeScope),
         remoteUrl,
         destinationPath: getCloneDestinationPath(
           settings.ghqCloneLayout

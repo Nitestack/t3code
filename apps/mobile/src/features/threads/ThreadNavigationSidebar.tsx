@@ -131,9 +131,13 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
   const { fabClearance, fabSize } = useAndroidControlSizing();
   const allProjects = useProjects();
   const allThreads = useAtomValue(steadyNavigationThreadShellsAtom);
-  const { filter: filterScope, enabled, activeScope, assignments } = useMobileEnvironmentScope();
+  const {
+    filter: filterScope,
+    filterThreads: filterThreadScope,
+    activeScope,
+  } = useMobileEnvironmentScope();
   const projects = filterScope(allProjects);
-  const threads = filterScope(allThreads);
+  const threads = filterThreadScope(allThreads, allProjects);
   const { environments: workspaceEnvironments, state: catalogState } = useWorkspaceState();
   const { savedConnectionsById } = useSavedRemoteConnections();
   const openSwipeableRef = useRef<SwipeableMethods | null>(null);
@@ -154,7 +158,7 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
     regenerateThreadTitle,
   } = useThreadListActions();
   const allPendingTasks = usePendingNewTasks();
-  const pendingTasks = filterScope(allPendingTasks);
+  const pendingTasks = filterThreadScope(allPendingTasks, allProjects);
   const launchingThreads = useLaunchingThreads(threads);
   const activeNewTask = useActiveNewTask();
   const queuedThreadKeys = useQueuedThreadKeys();
@@ -162,13 +166,7 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
   const { confirmDeletePendingTask } = usePendingTaskListActions((params) =>
     selectDetail({ name: "Thread", params }),
   );
-  const allEnvironments = Object.values(savedConnectionsById)
-    .map((connection) => ({
-      environmentId: connection.environmentId,
-      label: connection.environmentLabel,
-    }))
-    .sort((left, right) => left.label.localeCompare(right.label));
-  const environments = filterScope(homeListFilterEnvironments(workspaceEnvironments));
+  const environments = homeListFilterEnvironments(workspaceEnvironments);
   const availableEnvironmentIds = new Set(
     environments.map((environment) => environment.environmentId),
   );
@@ -177,9 +175,6 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
   const searchEnvironmentIds = mobileScopeSearchEnvironmentIds({
     environments: workspaceEnvironments,
     selectedEnvironmentId: options.selectedEnvironmentId,
-    enabled,
-    scope: activeScope,
-    assignments,
   });
   const projectScopes = useMemo(
     () =>
@@ -431,6 +426,7 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
             snoozeWakeLabelText={item.snoozeWakeLabelText}
             timeLabel={item.timeLabel}
             project={projectByKey.get(scopeKey) ?? null}
+            activeScope={activeScope}
             providerInstance={resolveProviderInstance(thread)}
             providers={providersByEnvironmentId.get(thread.environmentId)}
             environmentLabel={
@@ -664,7 +660,6 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
         }}
       >
         <EnvironmentScopeSwitcher
-          environments={allEnvironments}
           onScopeChange={() => {
             openSwipeableRef.current?.close();
             openSwipeableRef.current = null;

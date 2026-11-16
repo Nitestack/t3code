@@ -75,13 +75,12 @@ vi.mock("react-native", () => ({
   ScrollView: "ScrollView",
   View: "View",
 }));
+vi.mock("../../components/ui/SegmentedControl", () => ({ SegmentedControl: "SegmentedControl" }));
 vi.mock("../environment-scope/useMobileEnvironmentScope", () => ({
   useMobileEnvironmentScope: () => ({
     enabled: false,
     activeScope: "personal",
-    assignments: {},
     setActiveScope: vi.fn(),
-    setEnvironmentScope: vi.fn(),
     filter: (values: ReadonlyArray<{ readonly environmentId: string }>) => values,
   }),
 }));

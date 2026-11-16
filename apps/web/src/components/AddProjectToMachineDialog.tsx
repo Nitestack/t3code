@@ -1,5 +1,9 @@
 import { useParams } from "@tanstack/react-router";
-import { scopeProjectRef } from "@t3tools/client-runtime/environment";
+import {
+  projectScopeInput,
+  scopeProjectRef,
+  supportsProjectScope,
+} from "@t3tools/client-runtime/environment";
 import {
   getAddProjectInitialQuery,
   getCloneDestinationPath,
@@ -23,6 +27,7 @@ import { create } from "zustand";
 
 import { type DraftId, useComposerDraftStore } from "../composerDraftStore";
 import { useAddProjectTargets } from "../hooks/useAddProjectTargets";
+import { useClientEnvironmentScope } from "../environmentScope";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useLogicalProjectEnvironments } from "../hooks/useLogicalProjectEnvironments";
 import {
@@ -107,12 +112,16 @@ function AddProjectToMachineDialog({ request }: { request: AddProjectToMachineRe
     project?.repositoryIdentity?.locator.remoteUrl ??
     "";
   const [protocol, setProtocol] = useState<CloneProtocol | null>(() => cloneUrlProtocol(sourceUrl));
+  const { activeScope } = useClientEnvironmentScope();
+  const [scope, setScope] = useState<"personal" | "work">(activeScope);
   const sshUrl = cloneUrlForProtocol(sourceUrl, "ssh");
   const httpsUrl = cloneUrlForProtocol(sourceUrl, "https");
   const remoteUrl =
     (protocol === "ssh" ? sshUrl : protocol === "https" ? httpsUrl : null) ?? sourceUrl;
 
   const targetEnvironment = environments.find((env) => env.environmentId === target?.environmentId);
+  const projectScopeCapabilities = targetEnvironment?.serverConfig?.environment.capabilities;
+  const canSetProjectScope = supportsProjectScope(projectScopeCapabilities);
   const defaultPath = getCloneDestinationPath(
     getAddProjectInitialQuery(targetEnvironment?.serverConfig?.settings.addProjectBaseDirectory),
     getCloneDirectoryPath(
@@ -226,6 +235,7 @@ function AddProjectToMachineDialog({ request }: { request: AddProjectToMachineRe
         title: project.title,
         remoteUrl,
         destinationPath: destinationPath.trim(),
+        ...projectScopeInput(projectScopeCapabilities, scope),
         files: [...selectedFiles.keys()],
       });
       close();
@@ -324,6 +334,22 @@ function AddProjectToMachineDialog({ request }: { request: AddProjectToMachineRe
               </div>
             </div>
 
+            {canSetProjectScope ? (
+              <div className="flex flex-col gap-1.5">
+                <Label>Project scope</Label>
+                <ToggleGroup
+                  aria-label="Project scope"
+                  value={[scope]}
+                  onValueChange={(next) => {
+                    const value = next[0];
+                    if (value === "personal" || value === "work") setScope(value);
+                  }}
+                >
+                  <Toggle value="personal">Personal</Toggle>
+                  <Toggle value="work">Work</Toggle>
+                </ToggleGroup>
+              </div>
+            ) : null}
             <div className="flex flex-col gap-1.5">
               <Label>Clone over</Label>
               {sshUrl && httpsUrl ? (

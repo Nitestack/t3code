@@ -95,6 +95,7 @@ const layerWithPolicy = (policy?: ManagedPolicySummary) =>
         get: () =>
           Effect.succeedSome({
             projectId,
+            scope: "personal",
             title: "Project",
             workspaceRoot: "/project-root",
             defaultModelSelection: null,

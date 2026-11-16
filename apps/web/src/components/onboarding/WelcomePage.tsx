@@ -9,7 +9,12 @@ import type {
   ServerConfig,
   ServerProvider,
 } from "@t3tools/contracts";
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import {
+  projectScopeInput,
+  scopeProjectRef,
+  scopeThreadRef,
+  supportsProjectScope,
+} from "@t3tools/client-runtime/environment";
 import { resolveProviderInstanceDisplayName as agentName } from "@t3tools/client-runtime/state/provider-instance-display";
 import {
   isAtomCommandInterrupted,
@@ -41,6 +46,8 @@ import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from "rea
 
 import { TYPOGRAPHY_ADVANCED_STORAGE_KEY } from "../../appearanceFonts";
 import { MOBILE_APP_URL } from "../../branding";
+import { useClientEnvironmentScope } from "../../environmentScope";
+import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { isElectron } from "../../env";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { usePersistEnvironmentProviderInstanceMutation } from "../../hooks/useSettings";
@@ -82,7 +89,7 @@ import {
 } from "../../onboarding/welcomeState";
 import { newProjectId, randomUUID } from "../../lib/utils";
 import { agentSessionImport } from "../../state/agentSessions";
-import { readProjects, useProjects, waitForProject } from "../../state/entities";
+import { readProjects, useProjects, useServerConfigs, waitForProject } from "../../state/entities";
 import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
 import { managedTelemetryOffMessage, useManagedPolicy } from "../../state/managedPolicy";
 import { useProjectScans } from "../../onboarding/useProjectScans";
@@ -856,6 +863,24 @@ function ProjectsSection({
           </Button>
         ) : null}
       </div>
+      {canWrite && projectImport.canSetProjectScope ? (
+        <div className="flex items-center justify-between gap-3 px-8">
+          <span className="text-xs text-muted-foreground">Project scope</span>
+          <ToggleGroup
+            aria-label="Project scope"
+            value={[projectImport.projectScope]}
+            onValueChange={(next) => {
+              const value = next[0];
+              if (value === "personal" || value === "work") {
+                projectImport.setProjectScope(value);
+              }
+            }}
+          >
+            <Toggle value="personal">Personal</Toggle>
+            <Toggle value="work">Work</Toggle>
+          </ToggleGroup>
+        </div>
+      ) : null}
       {reviewing && canWrite ? (
         // The negative margin lines the list's checkboxes up with the one above it.
         <fieldset className="-mx-1.5 mt-1 min-w-0" disabled={isImporting}>
@@ -1411,6 +1436,13 @@ function useProjectImport({
     importedThreadCount?: number,
   ) => Promise<boolean>;
 }) {
+  const { activeScope } = useClientEnvironmentScope();
+  const serverConfigs = useServerConfigs();
+  const canSetProjectScope = scans.some((scan) =>
+    supportsProjectScope(serverConfigs.get(scan.environmentId)?.environment.capabilities),
+  );
+  const [scopeOverride, setScopeOverride] = useState<"personal" | "work" | null>(null);
+  const projectScope = scopeOverride ?? activeScope;
   const writableEnvironments = useEnvironmentsWithScope(scans, AuthOrchestrationOperateScope);
   const createProject = useAtomCommand(projectEnvironment.create, { reportFailure: false });
   const importThreads = useAtomCommand(agentSessionImport, { reportFailure: false });
@@ -1565,6 +1597,10 @@ function useProjectImport({
               commandId: attempt.commandId,
               title: candidate.title,
               workspaceRoot: candidate.path,
+              ...projectScopeInput(
+                serverConfigs.get(environmentId)?.environment.capabilities,
+                projectScope,
+              ),
               createWorkspaceRootIfMissing: false,
               defaultModelSelection: null,
             },
@@ -1637,12 +1673,15 @@ function useProjectImport({
 
   return {
     canWrite,
+    canSetProjectScope,
     candidates,
     isNew,
     recent,
     selected,
     selectedKeys,
     setSelectedKeys,
+    projectScope,
+    setProjectScope: setScopeOverride,
     visibleImportError,
     runImport,
     finishAfterImport,

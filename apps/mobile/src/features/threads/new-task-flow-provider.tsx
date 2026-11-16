@@ -229,10 +229,13 @@ export function NewTaskFlowProvider(
 ) {
   const allProjects = useProjects();
   const mobileScope = useMobileEnvironmentScope();
-  const { activeScope, setActiveScope, filter: filterScope } = mobileScope;
+  const { activeScope, setActiveScope, filter: filterScope, filterThreads } = mobileScope;
   const scopedProjects = useMemo(() => filterScope(allProjects), [allProjects, filterScope]);
   const allThreads = useThreadShells();
-  const threads = useMemo(() => filterScope(allThreads), [allThreads, filterScope]);
+  const threads = useMemo(
+    () => filterThreads(allThreads, allProjects),
+    [allProjects, allThreads, filterThreads],
+  );
   const { savedConnectionsById } = useSavedRemoteConnections();
   const groupingSettings = useMobileProjectGroupingSettings();
 
@@ -295,13 +298,16 @@ export function NewTaskFlowProvider(
     expandedProvider,
   } = flowState;
   const selectableProjects = props.routeDraftId !== undefined ? allProjects : scopedProjects;
+  const routeProject = routeDraft.project
+    ? allProjects.find(
+        (project) =>
+          project.environmentId === routeDraft.project?.environmentId &&
+          project.id === routeDraft.project?.projectId,
+      )
+    : undefined;
   const routeScope = routeEnvironmentScope({
     enabled: props.routeDraftId !== undefined && mobileScope.enabled,
-    environmentId:
-      props.routeDraftId === undefined
-        ? null
-        : (routeDraft.project?.environmentId ?? selectedEnvironmentIdOverride),
-    assignments: mobileScope.assignments,
+    projectScope: routeProject === undefined ? null : routeProject.scope,
   });
   const syncEnvironmentScopeToDraft = useEffectEvent(
     (scope: ReturnType<typeof routeEnvironmentScope>) => {
@@ -855,18 +861,7 @@ export function NewTaskFlowProvider(
     };
   };
 
-  const selectableEnvironments = useMemo(() => {
-    const scoped = filterScope(connectedEnvironments);
-    const includedEnvironments = new Set(scoped.map((environment) => environment.environmentId));
-    return [
-      ...scoped,
-      ...connectedEnvironments.filter(
-        (environment) =>
-          environment.environmentId === selectedEnvironmentId &&
-          !includedEnvironments.has(environment.environmentId),
-      ),
-    ];
-  }, [connectedEnvironments, filterScope, selectedEnvironmentId]);
+  const selectableEnvironments = connectedEnvironments;
   const scratchEnvironments = selectableEnvironments.filter(
     (environment) =>
       availableScratchWorkspaceRoot(

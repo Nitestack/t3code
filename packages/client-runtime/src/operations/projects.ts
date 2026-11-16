@@ -372,6 +372,7 @@ export function buildProjectCreateCommand(input: {
   readonly commandId: CommandId;
   readonly projectId: ProjectId;
   readonly workspaceRoot: string;
+  readonly scope?: import("@t3tools/contracts").ProjectScope;
 }): Extract<ProjectMutation, { type: "project.create" }> {
   return {
     type: "project.create",
@@ -379,6 +380,7 @@ export function buildProjectCreateCommand(input: {
     projectId: input.projectId,
     title: inferProjectTitleFromPath(input.workspaceRoot),
     workspaceRoot: input.workspaceRoot,
+    ...(input.scope === undefined ? {} : { scope: input.scope }),
     createWorkspaceRootIfMissing: true,
     defaultModelSelection: null,
   };

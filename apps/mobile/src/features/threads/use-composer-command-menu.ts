@@ -14,6 +14,7 @@ import {
   matchComposerThreadItems,
 } from "@t3tools/client-runtime/composerThreadItems";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
+import { useProjects } from "../../state/entities";
 
 const EMPTY_THREAD_SHELLS: ReadonlyArray<EnvironmentThreadShell> = [];
 const EMPTY_ENVIRONMENTS: ReadonlyArray<ComposerEnvironmentCandidate> = [];
@@ -341,6 +342,7 @@ export function useComposerCommandMenu({
     return detectComposerTrigger(draftMessage, selection.end);
   })();
   const environmentScope = useMobileEnvironmentScope();
+  const projects = useProjects();
   const composerCandidates = useMemo(
     () =>
       environmentId
@@ -348,18 +350,18 @@ export function useComposerCommandMenu({
             environmentId,
             linkedEnvironments,
             shells: threadShells,
+            projects,
             environments,
             scope: environmentScope.enabled ? environmentScope.activeScope : null,
-            assignments: environmentScope.assignments,
           })
         : null,
     [
       environmentId,
       environmentScope.activeScope,
-      environmentScope.assignments,
       environmentScope.enabled,
       environments,
       linkedEnvironments,
+      projects,
       threadShells,
     ],
   );
@@ -373,7 +375,12 @@ export function useComposerCommandMenu({
   useThreadSearch(
     trigger?.kind === "path" ? (composerCandidates?.searchEnvironmentIds ?? []) : [],
     trigger?.kind === "path" ? trigger.query : "",
-    { titlesOnly: true },
+    {
+      ...(composerCandidates?.searchProjectIds === undefined
+        ? {}
+        : { projectIds: composerCandidates.searchProjectIds }),
+      titlesOnly: true,
+    },
   );
   const pullRequestSearch = useComposerPullRequestSearch({
     environmentId,

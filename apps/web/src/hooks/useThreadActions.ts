@@ -1,4 +1,5 @@
 import {
+  projectScopeInput,
   parseScopedThreadKey,
   scopeProjectRef,
   scopeThreadRef,
@@ -56,6 +57,7 @@ import { buildThreadRouteParams, resolveThreadRouteRef } from "../threadRoutes";
 import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "../worktreeCleanup";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { useClientSettings } from "./useSettings";
+import { useClientEnvironmentScope } from "../environmentScope";
 import * as ThreadUndo from "@t3tools/client-runtime/state/thread-undo";
 import { showThreadUndoNotice } from "./showThreadUndoNotice";
 import { useAtomCommand } from "../state/use-atom-command";
@@ -276,6 +278,7 @@ function threadOperationFailure(target: ScopedThreadRef) {
 }
 
 export function useThreadActions() {
+  const { activeScope } = useClientEnvironmentScope();
   const archiveThreadMutation = useOrchestrationCommand(threadEnvironment.archive, {
     reportFailure: false,
   });
@@ -1032,7 +1035,14 @@ export function useThreadActions() {
     turnThreadIntoProject: (target: ScopedThreadRef) =>
       createProjectFromThread({
         environmentId: target.environmentId,
-        input: { threadId: target.threadId },
+        input: {
+          threadId: target.threadId,
+          ...projectScopeInput(
+            appAtomRegistry.get(environmentServerConfigsAtom).get(target.environmentId)?.environment
+              .capabilities,
+            activeScope,
+          ),
+        },
       }),
   };
 }

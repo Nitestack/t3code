@@ -1,14 +1,15 @@
 import { describe, expect, it } from "@effect/vitest";
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId, ProjectId } from "@t3tools/contracts";
 import {
-  filterMobileEnvironmentScope,
+  filterMobileProjectScope,
+  filterMobileThreadScope,
   isAndroidForkEnvironmentScopeEnabled,
   routeEnvironmentScope,
   mobileScopeSearchEnvironmentIds,
 } from "./mobile-environment-scope";
 
-describe("mobile environment scope", () => {
-  it("searches only connected environments in the active scope, even with a stale selection", () => {
+describe("mobile project scope", () => {
+  it("keeps every environment available to search and selection", () => {
     const work = EnvironmentId.make("work-server");
     const personal = EnvironmentId.make("personal-server");
     const input = {
@@ -17,76 +18,38 @@ describe("mobile environment scope", () => {
         { environmentId: personal, connectionState: "connected" },
         { environmentId: EnvironmentId.make("offline"), connectionState: "offline" },
       ],
-      enabled: true,
-      scope: "personal" as const,
-      assignments: { "work-server": "work" as const },
+      selectedEnvironmentId: null,
     };
-    expect(mobileScopeSearchEnvironmentIds({ ...input, selectedEnvironmentId: null })).toEqual([
-      personal,
+    expect(mobileScopeSearchEnvironmentIds(input)).toEqual([work, personal]);
+    expect(mobileScopeSearchEnvironmentIds({ ...input, selectedEnvironmentId: work })).toEqual([
+      work,
     ]);
-    expect(mobileScopeSearchEnvironmentIds({ ...input, selectedEnvironmentId: work })).toEqual([]);
-    expect(
-      mobileScopeSearchEnvironmentIds({ ...input, enabled: false, selectedEnvironmentId: null }),
-    ).toEqual([work, personal]);
   });
 
-  it("filters same-named project paths by environment id only for the Android fork", () => {
+  it("filters project and thread lists using each project's scope", () => {
+    const environmentId = EnvironmentId.make("shared-server");
+    const workId = ProjectId.make("work-project");
+    const personalId = ProjectId.make("personal-project");
     const projects = [
-      { environmentId: EnvironmentId.make("work-server"), title: "repo", workspaceRoot: "/repo" },
-      {
-        environmentId: EnvironmentId.make("personal-server"),
-        title: "repo",
-        workspaceRoot: "/repo",
-      },
+      { environmentId, id: workId, scope: "work" as const },
+      { environmentId, id: personalId },
     ];
-    const assignments = { "work-server": "work", "personal-server": "personal" } as const;
-
-    expect(filterMobileEnvironmentScope(projects, true, "work", assignments)).toEqual([
-      projects[0],
-    ]);
-    expect(filterMobileEnvironmentScope(projects, true, "personal", assignments)).toEqual([
-      projects[1],
-    ]);
+    const threads = [
+      { environmentId, projectId: workId, id: "work-thread" },
+      { environmentId, projectId: personalId, id: "personal-thread" },
+    ];
+    expect(filterMobileProjectScope(projects, true, "work")).toEqual([projects[0]]);
+    expect(filterMobileThreadScope(threads, true, "work", projects)).toEqual([threads[0]]);
+    expect(filterMobileProjectScope(projects, false, "work")).toBe(projects);
   });
 
-  it("leaves official Android and iOS behavior unchanged", () => {
-    const values = [{ environmentId: EnvironmentId.make("work-server") }];
-
+  it("resolves navigation from a project's persisted scope", () => {
+    expect(routeEnvironmentScope({ enabled: true, projectScope: "work" })).toBe("work");
+    expect(routeEnvironmentScope({ enabled: true, projectScope: undefined })).toBe("personal");
+    expect(routeEnvironmentScope({ enabled: true, projectScope: null })).toBeNull();
+    expect(routeEnvironmentScope({ enabled: false, projectScope: "work" })).toBeNull();
     expect(
       isAndroidForkEnvironmentScopeEnabled({ platformOS: "android", appVariant: "android-fork" }),
     ).toBe(true);
-    expect(
-      isAndroidForkEnvironmentScopeEnabled({ platformOS: "android", appVariant: "production" }),
-    ).toBe(false);
-    expect(
-      isAndroidForkEnvironmentScopeEnabled({ platformOS: "ios", appVariant: "android-fork" }),
-    ).toBe(false);
-    expect(filterMobileEnvironmentScope(values, false, "personal", { "work-server": "work" })).toBe(
-      values,
-    );
-    expect(
-      routeEnvironmentScope({
-        enabled: false,
-        environmentId: values[0]!.environmentId,
-        assignments: { "work-server": "work" },
-      }),
-    ).toBeNull();
-  });
-
-  it("resolves direct navigation to the route environment's scope", () => {
-    expect(
-      routeEnvironmentScope({
-        enabled: true,
-        environmentId: EnvironmentId.make("work-server"),
-        assignments: { "work-server": "work" },
-      }),
-    ).toBe("work");
-    expect(
-      routeEnvironmentScope({
-        enabled: true,
-        environmentId: EnvironmentId.make("new-environment"),
-        assignments: {},
-      }),
-    ).toBe("personal");
   });
 });

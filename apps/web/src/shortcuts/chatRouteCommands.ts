@@ -16,8 +16,7 @@ import {
 import { createScratchProjectActions } from "../hooks/useScratchProject";
 import { getClientSettings } from "../hooks/useSettings";
 import { resolveThreadActionProjectRef, startNewThreadFromContext } from "../lib/chatThreadActions";
-import { filterByEnvironmentScope } from "@t3tools/client-runtime/environment";
-import { filterEnvironmentIdsByScope } from "../environmentScope";
+import { filterProjectsByScope } from "@t3tools/client-runtime/environment";
 import { selectProjectGroupingSettings } from "@t3tools/client-runtime/state/project-grouping";
 import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
 import { appAtomRegistry } from "../rpc/atomRegistry";
@@ -77,7 +76,7 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
     const settings = getClientSettings();
     const environmentScope = {
       activeScope: settings.activeEnvironmentScope,
-      assignments: settings.environmentScopeAssignments,
+      projects: readProjects(),
     };
     const target = readRouteTarget();
     const drafts = useComposerDraftStore.getState();
@@ -92,11 +91,7 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
       activeThread: activeThread ?? undefined,
       environmentScope,
       defaultProjectRef: resolveDefaultProjectRef(
-        filterByEnvironmentScope(
-          readProjects(),
-          environmentScope.activeScope,
-          environmentScope.assignments,
-        ),
+        filterProjectsByScope(environmentScope.projects, environmentScope.activeScope),
         useUiStateStore.getState().projectOrder,
         lastUsedProjectKey,
         appAtomRegistry.get(defaultProjectFallbackReadyAtom(lastUsedProjectKey)),
@@ -107,11 +102,7 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
   // Grouped like the sidebar, so the shortcut and the New thread button agree.
   const readProjectGroups = () =>
     buildSidebarProjectSnapshots({
-      projects: filterByEnvironmentScope(
-        readProjects(),
-        getClientSettings().activeEnvironmentScope,
-        getClientSettings().environmentScopeAssignments,
-      ),
+      projects: filterProjectsByScope(readProjects(), getClientSettings().activeEnvironmentScope),
       groupScratchProjects: true,
       settings: selectProjectGroupingSettings(getClientSettings()),
       primaryEnvironmentId: appAtomRegistry.get(primaryEnvironmentIdAtom),
@@ -147,11 +138,9 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
       "chat.newWithoutProject": (event) => {
         const context = readThreadContext();
         const selectedEnvironmentId = resolveThreadActionProjectRef(context)?.environmentId;
-        const scopedEnvironmentIds = filterEnvironmentIdsByScope(
-          [...appAtomRegistry.get(environmentPresentations.presentationsAtom).keys()],
-          context.environmentScope.activeScope,
-          context.environmentScope.assignments,
-        );
+        const scopedEnvironmentIds = [
+          ...appAtomRegistry.get(environmentPresentations.presentationsAtom).keys(),
+        ];
         const environmentId = scratch.scratchEnvironmentId(
           selectedEnvironmentId ?? scopedEnvironmentIds[0] ?? null,
           scopedEnvironmentIds,

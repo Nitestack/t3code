@@ -132,7 +132,7 @@ vi.mock(import("../files/projectFilesQueryState"), async (original) => ({
   getProjectFileQueryAtom: () => missingProjectFile,
 }));
 
-import { scopeProjectRef } from "@t3tools/client-runtime/environment";
+import { filterProjectsByScope, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { DraftId, useComposerDraftStore } from "../../composerDraftStore";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { assetEnvironment } from "../../state/assets";
@@ -154,7 +154,10 @@ const environments = [primaryId, remoteId].map((environmentId) => ({
   serverConfig: {
     keybindings: DEFAULT_RESOLVED_KEYBINDINGS,
     settings: DEFAULT_SERVER_SETTINGS,
-    environment: { platform: { machine: "server" }, capabilities: { projectOrganization: true } },
+    environment: {
+      platform: { machine: "server" },
+      capabilities: { projectOrganization: true, projectScope: true },
+    },
   },
 }));
 const session = (scopes: ReadonlyArray<AuthEnvironmentScope>): AuthSessionState => ({
@@ -180,6 +183,8 @@ function deferred<T>() {
 
 function setup() {
   vi.clearAllMocks();
+  for (const environment of environments)
+    environment.serverConfig.environment.capabilities.projectScope = true;
   state.sessions.clear();
   for (const id of [primaryId, remoteId])
     state.sessions.set(id, Atom.make<SessionResult>(writable()).pipe(Atom.keepAlive));
@@ -647,6 +652,40 @@ describe("project settings scope", () => {
   const environmentMenu = () => page.getByRole("button", { name: /^Environment scope:/ });
   const primaryOption = () => page.getByRole("menuitemradio", { name: /^primary/ });
   const remoteOption = () => page.getByRole("menuitemradio", { name: /^remote/ });
+
+  it("hides scope controls when only project organization is advertised", async () => {
+    setup();
+    for (const environment of environments)
+      environment.serverConfig.environment.capabilities.projectScope = false;
+    await using _screen = await mountPanel();
+
+    await expect
+      .element(page.getByRole("button", { name: "Move to Work" }))
+      .not.toBeInTheDocument();
+  });
+
+  it("lets a project move between Personal and Work from settings", async () => {
+    setup();
+    const project = state.projects[0]!;
+    await using _screen = await mountPanel();
+
+    const moveToWork = page.getByRole("button", { name: "Move to Work" });
+    await expect.element(moveToWork).toBeVisible();
+    await userEvent.click(moveToWork);
+    await vi.waitFor(() =>
+      expect(state.update).toHaveBeenCalledWith({
+        environmentId: primaryId,
+        input: { projectId: project.id, scope: "work" },
+      }),
+    );
+    const workGroups = buildSidebarProjectSnapshots({
+      projects: filterProjectsByScope(state.projects, "work"),
+      settings: DEFAULT_CLIENT_SETTINGS,
+      primaryEnvironmentId: primaryId,
+      resolveEnvironmentLabel: (id) => id,
+    });
+    expect(workGroups.map((group) => [group.id, group.scope])).toEqual([[project.id, "work"]]);
+  });
 
   it("offers every environment while no project is selected", async () => {
     setup();

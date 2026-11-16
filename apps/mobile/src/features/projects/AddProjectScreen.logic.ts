@@ -1,9 +1,19 @@
 import { canCreateProjectInEnvironment } from "@t3tools/client-runtime/operations/projects";
+import { projectScopeInput } from "@t3tools/client-runtime/environment";
+import type { ExecutionEnvironmentCapabilities, ProjectScope } from "@t3tools/contracts";
 import type { EnvironmentConnectionPhase } from "@t3tools/client-runtime/connection";
 import { type EnvironmentId, FilesystemBrowseError } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
 const isFilesystemBrowseError = Schema.is(FilesystemBrowseError);
+
+export function mobileProjectScopeInput(
+  platformEnabled: boolean,
+  capabilities: Partial<ExecutionEnvironmentCapabilities> | null | undefined,
+  scope: ProjectScope,
+): { readonly scope?: ProjectScope } {
+  return platformEnabled ? projectScopeInput(capabilities, scope) : {};
+}
 
 /** Clone destinations may name folders that do not exist yet; cloning creates them. */
 export function isMissingCloneParentBrowseFailure(input: {

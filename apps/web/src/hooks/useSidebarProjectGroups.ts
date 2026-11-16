@@ -8,7 +8,7 @@ import { useEnvironmentIdentities, usePrimaryEnvironmentId } from "../state/envi
 import { useDelegatedUnderParent, useProjects, useQuietThreadShells } from "../state/entities";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
 import { useClientSettings } from "./useSettings";
-import { filterByEnvironmentScope } from "@t3tools/client-runtime/environment";
+import { filterByProjectScope, filterProjectsByScope } from "@t3tools/client-runtime/environment";
 import { useClientEnvironmentScope } from "../environmentScope";
 
 export function useSidebarProjectGroups() {
@@ -22,9 +22,9 @@ export function useSidebarProjectGroups() {
   const groupingSettings = useClientSettings(selectProjectGroupingSettings);
   const environments = useEnvironmentIdentities();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
-  const { activeScope, assignments } = useClientEnvironmentScope();
-  const projects = filterByEnvironmentScope(allProjects, activeScope, assignments);
-  const threads = filterByEnvironmentScope(allThreads, activeScope, assignments);
+  const { activeScope } = useClientEnvironmentScope();
+  const projects = filterProjectsByScope(allProjects, activeScope);
+  const threads = filterByProjectScope(allThreads, activeScope, allProjects);
   const orderedProjects = orderItemsByPreferredIds({
     items: projects,
     preferredIds: projectOrder,

@@ -56,7 +56,6 @@ vi.mock("../hooks/useSettings", async (original) => ({
     const settings: ClientSettings = {
       ...DEFAULT_CLIENT_SETTINGS,
       activeEnvironmentScope: scopes.activeScope,
-      environmentScopeAssignments: { work: "work" },
     };
     return selector ? selector(settings) : settings;
   },
@@ -151,11 +150,17 @@ vi.mock("./settings/useAvailableSettingsSearchItems", () => ({
   useAvailableSettingsSearchItems: () => [],
 }));
 
+async function openAddProjectOnPrimary() {
+  await act(() => openCommandPalette({ open: "add-project" }));
+  await page.getByRole("option", { name: /This device/ }).click();
+}
+
 it("keeps Add Project in the selected scope when the primary environment is personal", async () => {
   setup();
   scopes.activeScope = "work";
   await using _screen = await render(<CommandPalette>{null}</CommandPalette>);
   await act(() => openCommandPalette({ open: "add-project" }));
+  await page.getByText("Work server", { exact: true }).click();
   await page.getByText("Local folder", { exact: true }).click();
   await expect.element(page.getByRole("combobox")).toHaveValue("/work/");
 });
@@ -168,7 +173,7 @@ describe.each(["repository", "folder", "destination"] as const)("add-project %s"
   ])("keeps Enter in the input during composition: %j", async (composition) => {
     setup();
     await using _screen = await render(<CommandPalette>{null}</CommandPalette>);
-    await act(() => openCommandPalette({ open: "add-project" }));
+    await openAddProjectOnPrimary();
     await page.getByText(step === "folder" ? "Local folder" : "Git URL", { exact: true }).click();
     const input = () => page.getByRole("combobox");
     if (step === "destination") {
@@ -225,7 +230,7 @@ it.each([
   async ({ source, keys, deniedScope, description }) => {
     setup(deniedScope);
     await using _screen = await render(<CommandPalette>{null}</CommandPalette>);
-    await act(() => openCommandPalette({ open: "add-project" }));
+    await openAddProjectOnPrimary();
     await page.getByText(source, { exact: true }).click();
     if (keys) await userEvent.keyboard(keys);
     await expect.element(page.getByRole("combobox")).toHaveAccessibleDescription(description);
@@ -235,7 +240,7 @@ it.each([
 it("keeps the caret in place when an edit briefly makes the folder path not a path", async () => {
   setup();
   await using _screen = await render(<CommandPalette>{null}</CommandPalette>);
-  await act(() => openCommandPalette({ open: "add-project" }));
+  await openAddProjectOnPrimary();
   await page.getByText("Local folder", { exact: true }).click();
   const input = () => page.getByRole("combobox");
   await input().fill("/workspace/project");
@@ -252,7 +257,7 @@ it.each([
   { flow: "New project", value: "demo-tab-order", submit: /^Create \(/ },
 ])("moves focus from the $flow input to its enabled submit button on Tab", async (step) => {
   await using _screen = await render(<CommandPalette>{null}</CommandPalette>);
-  await act(() => openCommandPalette({ open: "add-project" }));
+  await openAddProjectOnPrimary();
   await page.getByText(step.flow, { exact: true }).click();
   const input = page.getByRole("combobox");
   await input.fill(step.value);
@@ -265,7 +270,7 @@ it.each([
 it("tells screen readers whether a new project will be published", async () => {
   setup(undefined, githubAvailable);
   await using _screen = await render(<CommandPalette>{null}</CommandPalette>);
-  await act(() => openCommandPalette({ open: "add-project" }));
+  await openAddProjectOnPrimary();
   await page.getByText("New project", { exact: true }).click();
   await page.getByRole("combobox").fill("demo-project");
   const option = page.getByRole("option", { name: /Create private repository/ });

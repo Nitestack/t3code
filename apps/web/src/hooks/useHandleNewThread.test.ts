@@ -145,6 +145,24 @@ vi.mock("@effect/atom-react", () => ({
       : testServerConfigs(),
 }));
 vi.mock("@t3tools/client-runtime/environment", () => ({
+  filterByProjectScope: (
+    values: ReadonlyArray<{ environmentId: string; projectId: string }>,
+    scope: "personal" | "work",
+    projects: ReadonlyArray<{ environmentId: string; id: string; scope?: "personal" | "work" }>,
+  ) =>
+    values.filter((value) =>
+      projects.some(
+        (project) =>
+          project.environmentId === value.environmentId &&
+          project.id === value.projectId &&
+          (project.scope ?? "personal") === scope,
+      ),
+    ),
+  filterProjectsByScope: (
+    projects: ReadonlyArray<{ scope?: "personal" | "work" }>,
+    scope: "personal" | "work",
+  ) => projects.filter((project) => (project.scope ?? "personal") === scope),
+  resolveProjectScope: (scope: unknown) => (scope === "work" ? "work" : "personal"),
   scopedProjectKey: (ref: { environmentId: string; projectId: string }) =>
     `${ref.environmentId}:${ref.projectId}`,
   scopeProjectRef: (environmentId: string, projectId: string) => ({ environmentId, projectId }),

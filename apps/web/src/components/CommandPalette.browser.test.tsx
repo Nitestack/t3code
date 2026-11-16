@@ -39,6 +39,20 @@ describe("CommandPalette open intents", () => {
     const environmentId = EnvironmentId.make("remote");
     const threadId = ThreadId.make("dragged-thread");
     setup({
+      projects: [
+        {
+          id: ProjectId.make("project-test"),
+          environmentId,
+          scope: "personal",
+          title: "Project",
+          workspaceRoot: "/work/project",
+          repositoryIdentity: null,
+          defaultModelSelection: null,
+          createdAt: "2026-03-01T00:00:00.000Z",
+          updatedAt: "2026-03-01T00:00:00.000Z",
+          scripts: [],
+        },
+      ],
       threads: [makeThreadFixture({ environmentId, id: threadId, title: "Drag this thread" })],
     });
     const onDrop = vi.fn();

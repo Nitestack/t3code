@@ -22,6 +22,11 @@ export const PROJECT_SEARCH_CONTENTS_QUERY_MAX_LENGTH = 256;
 const PROJECT_WRITE_FILE_PATH_MAX_LENGTH = 512;
 const PROJECT_READ_FILE_PATH_MAX_LENGTH = 512;
 
+export const ProjectScope = Schema.Literals(["personal", "work"]).annotate({
+  description: "Project scope. Projects without an assigned scope are personal.",
+});
+export type ProjectScope = typeof ProjectScope.Type;
+
 export const ProjectScriptIcon = Schema.Literals([
   "play",
   "test",
@@ -153,6 +158,7 @@ export const ReceivedProjectIcon = ForwardCompatibleUnion(projectIconMembers, "k
 
 export const Project = Schema.Struct({
   id: ProjectId,
+  scope: Schema.optional(ProjectScope),
   title: TrimmedNonEmptyString,
   workspaceRoot: TrimmedNonEmptyString,
   repositoryIdentity: Schema.optional(Schema.NullOr(RepositoryIdentity)),
@@ -178,6 +184,7 @@ export const ProjectSnapshot = Schema.Struct({
 export type ProjectSnapshot = typeof ProjectSnapshot.Type;
 
 export const ProjectCreatePayload = Schema.Struct({
+  scope: Schema.optional(ProjectScope),
   title: TrimmedNonEmptyString,
   workspaceRoot: TrimmedNonEmptyString,
   createWorkspaceRootIfMissing: Schema.optional(Schema.Boolean),
@@ -187,6 +194,7 @@ export const ProjectCreatePayload = Schema.Struct({
 export type ProjectCreatePayload = typeof ProjectCreatePayload.Type;
 
 export const ProjectUpdatePayload = Schema.Struct({
+  scope: Schema.optional(ProjectScope),
   title: Schema.optional(TrimmedNonEmptyString),
   workspaceRoot: Schema.optional(TrimmedNonEmptyString),
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
@@ -532,6 +540,7 @@ export type ProjectEnsureScratchResult = typeof ProjectEnsureScratchResult.Type;
 
 export const ProjectCreateNewInput = Schema.Struct({
   name: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
+  scope: Schema.optional(ProjectScope),
 });
 export type ProjectCreateNewInput = typeof ProjectCreateNewInput.Type;
 
@@ -545,6 +554,7 @@ export type ProjectCreateNewResult = typeof ProjectCreateNewResult.Type;
 
 export const ProjectCreateFromThreadInput = Schema.Struct({
   threadId: ThreadId,
+  scope: Schema.optional(ProjectScope),
 });
 export type ProjectCreateFromThreadInput = typeof ProjectCreateFromThreadInput.Type;
 

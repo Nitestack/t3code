@@ -2,13 +2,14 @@ import {
   isListedThreadLineage,
   type EnvironmentId,
   type EnvironmentMachineKind,
+  type ProjectId,
   type ScopedThreadRef,
   type ThreadId,
 } from "@t3tools/contracts";
 import {
-  filterByEnvironmentScope,
+  filterByProjectScope,
+  filterProjectsByScope,
   type EnvironmentScope,
-  type EnvironmentScopeAssignments,
 } from "./environment/index.ts";
 import { foldSearchQuery, rankSearchItems, scoreThreadSearch } from "@t3tools/shared/paletteSearch";
 
@@ -18,7 +19,7 @@ import { threadSearchSubject, type ThreadSearchShell } from "./state/threadSearc
 const COMPOSER_THREAD_RESULT_LIMIT = 5;
 
 export type ComposerThreadCandidate = ThreadSearchShell &
-  Pick<EnvironmentThreadShell, "archivedAt" | "lineage">;
+  Pick<EnvironmentThreadShell, "archivedAt" | "lineage" | "projectId">;
 
 export interface ComposerThreadItem {
   readonly id: string;
@@ -99,12 +100,17 @@ export function composerMenuCandidatesForScope(input: {
   readonly environmentId: EnvironmentId;
   readonly linkedEnvironments: ReadonlyMap<EnvironmentId, string>;
   readonly shells: ReadonlyArray<ComposerThreadCandidate>;
+  readonly projects: ReadonlyArray<{
+    readonly environmentId: EnvironmentId;
+    readonly id: ProjectId;
+    readonly scope?: EnvironmentScope | undefined;
+  }>;
   readonly environments: ReadonlyArray<ComposerEnvironmentCandidate>;
   /** Null keeps surfaces without the scope feature unfiltered. */
   readonly scope: EnvironmentScope | null;
-  readonly assignments: EnvironmentScopeAssignments;
 }): {
   readonly searchEnvironmentIds: ReadonlyArray<EnvironmentId>;
+  readonly searchProjectIds?: ReadonlyArray<ProjectId>;
   readonly linkedEnvironments: ReadonlyMap<EnvironmentId, string>;
   readonly shells: ReadonlyArray<ComposerThreadCandidate>;
   readonly environments: ReadonlyArray<ComposerEnvironmentCandidate>;
@@ -122,20 +128,18 @@ export function composerMenuCandidatesForScope(input: {
     };
   }
 
-  const searchEnvironmentIds = new Set(
-    filterByEnvironmentScope(searchTargets, input.scope, input.assignments).map(
-      ({ environmentId }) => environmentId,
-    ),
-  );
+  const scopedProjects = filterProjectsByScope(input.projects, input.scope);
+  const searchEnvironmentIds = new Set(scopedProjects.map(({ environmentId }) => environmentId));
   return {
     searchEnvironmentIds: [...searchEnvironmentIds],
+    searchProjectIds: scopedProjects.map(({ id }) => id),
     linkedEnvironments: new Map(
       [...input.linkedEnvironments].filter(([environmentId]) =>
         searchEnvironmentIds.has(environmentId),
       ),
     ),
-    shells: filterByEnvironmentScope(input.shells, input.scope, input.assignments),
-    environments: filterByEnvironmentScope(input.environments, input.scope, input.assignments),
+    shells: filterByProjectScope(input.shells, input.scope, scopedProjects),
+    environments: input.environments,
   };
 }
 

@@ -141,10 +141,9 @@ function setup() {
   mocks.scope.mockReturnValue({
     enabled: false,
     activeScope: "personal",
-    assignments: {},
     setActiveScope: vi.fn(),
-    setEnvironmentScope: vi.fn(),
     filter: (values: ReadonlyArray<{ readonly environmentId: string }>) => values,
+    filterThreads: (values: ReadonlyArray<{ readonly environmentId: string }>) => values,
   });
   const registry = AtomRegistry.make();
   mocks.registry.mockReturnValue(registry);
@@ -252,6 +251,17 @@ function setup() {
       });
       holdStatus = true;
     },
+    enableScope(activeScope: "personal" | "work") {
+      const setActiveScope = vi.fn();
+      mocks.scope.mockReturnValue({
+        enabled: true,
+        activeScope,
+        setActiveScope,
+        filter: (values: ReadonlyArray<{ readonly environmentId: string }>) => values,
+        filterThreads: (values: ReadonlyArray<{ readonly environmentId: string }>) => values,
+      });
+      return setActiveScope;
+    },
     snapshot,
     clearWorkspace(key: string) {
       act(() => write(key, { workspaceSelection: undefined }));
@@ -259,11 +269,24 @@ function setup() {
     get current() {
       return current;
     },
-    async render(active: boolean) {
+    async render(active: boolean, routeDraftId?: string, stampedProject?: EnvironmentProject) {
+      if (routeDraftId !== undefined && stampedProject !== undefined) {
+        write(routeDraftId, {
+          project: {
+            environmentId: stampedProject.environmentId,
+            projectId: stampedProject.id,
+            createdAt: "2026-10-26T00:00:00Z",
+          },
+        });
+      }
       await act(async () =>
         root.render(
           <RegistryContext.Provider value={registry}>
-            <NewTaskFlowProvider active={active} flowKey="test-flow">
+            <NewTaskFlowProvider
+              active={active}
+              flowKey="test-flow"
+              {...(routeDraftId === undefined ? {} : { routeDraftId })}
+            >
               <Probe />
             </NewTaskFlowProvider>
           </RegistryContext.Provider>,
@@ -283,49 +306,6 @@ function setup() {
     },
   };
 }
-
-it("limits an active draft's destinations after a manual scope switch", async () => {
-  using screen = setup();
-  mocks.connections.mockReturnValue({
-    savedConnectionsById: {
-      one: { environmentLabel: "Work" },
-      two: { environmentLabel: "Personal" },
-    },
-  });
-  const selectScope = (environmentId: string) => {
-    mocks.scope.mockReturnValue({
-      enabled: true,
-      activeScope: environmentId === "one" ? "work" : "personal",
-      assignments: { one: "work", two: "personal" },
-      setActiveScope: vi.fn(),
-      setEnvironmentScope: vi.fn(),
-      filter: (values: ReadonlyArray<{ readonly environmentId: string }>) =>
-        values.filter((value) => value.environmentId === environmentId),
-    });
-  };
-  selectScope("one");
-  await screen.render(true);
-  expect(screen.current.draftKey).not.toBeNull();
-  const draftKey = screen.current.draftKey!;
-  act(() => screen.current.setPrompt("draft content"));
-  expect(screen.current.environments.map((value) => value.environmentId)).toEqual(["one"]);
-
-  selectScope("two");
-  await screen.render(true);
-  expect(screen.current.selectedProject?.environmentId).toBe("two");
-  expect(screen.current.environments.map((value) => value.environmentId)).toEqual(["two"]);
-  expect(screen.current.draftKey).toBe(draftKey);
-  expect(screen.current.prompt).toBe("draft content");
-  expect(screen.snapshot(draftKey).project).toEqual({ environmentId: "two", projectId: "b" });
-
-  selectScope("one");
-  await screen.render(false);
-  expect(screen.snapshot(draftKey).project?.environmentId).toBe("two");
-  await screen.render(true);
-  expect(screen.current.selectedProject?.environmentId).toBe("one");
-  expect(screen.snapshot(draftKey).project).toEqual({ environmentId: "one", projectId: "a" });
-  expect(screen.current.prompt).toBe("draft content");
-});
 
 it("owns a status stream only while the draft is active, retaining draft choices on reopen", async () => {
   using screen = setup();
@@ -386,6 +366,25 @@ it("owns a status stream only while the draft is active, retaining draft choices
   expect.soft(screen.current.currentCheckoutBranchName).toBe("updated-checkout");
   expect(screen.current.prompt).toBe("keep this draft");
   expect(screen.snapshot(draftKey).workspaceSelection).toEqual(chosenWorkspace);
+});
+
+it("keeps the selected scope when an enabled route draft has no stamped project", async () => {
+  using screen = setup();
+  const setActiveScope = screen.enableScope("work");
+
+  await screen.render(true, "empty-route-draft");
+
+  expect(setActiveScope).not.toHaveBeenCalled();
+});
+
+it("selects the stamped project's scope when scope support is enabled", async () => {
+  using screen = setup();
+  const setActiveScope = screen.enableScope("personal");
+  screen.projects[0] = { ...screen.projects[0]!, scope: "work" };
+
+  await screen.render(true, "work-route-draft", screen.projects[0]);
+
+  expect(setActiveScope).toHaveBeenCalledWith("work");
 });
 
 it("does not persist a provisional workspace default after releasing inactive status", async () => {

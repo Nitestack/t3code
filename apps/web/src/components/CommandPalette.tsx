@@ -99,8 +99,13 @@ import { useAtomValue } from "@effect/atom-react";
 import { isDesktopLocalConnectionTarget } from "../connection/desktopLocal";
 import { useDesktopLocalBootstraps } from "../connection/useDesktopLocalBootstraps";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
-import { filterByEnvironmentScope } from "@t3tools/client-runtime/environment";
-import { filterEnvironmentIdsByScope, useClientEnvironmentScope } from "../environmentScope";
+import {
+  filterByProjectScope,
+  filterProjectsByScope,
+  projectScopeInput,
+  supportsProjectScope,
+} from "@t3tools/client-runtime/environment";
+import { useClientEnvironmentScope } from "../environmentScope";
 import { useOpenPanelPullRequestUrl } from "../hooks/useOpenPanelPullRequestUrl";
 import { copyThreadReference } from "../lib/copyThreadReference";
 import {
@@ -113,6 +118,7 @@ import {
   promptLinkRepositoryOf,
 } from "./promptLinks/copyPromptLink";
 import { useClientSettings } from "../hooks/useSettings";
+import { Toggle, ToggleGroup } from "./ui/toggle-group";
 import { useStableCallback } from "../hooks/useStableCallback";
 import { readLocalApi } from "../localApi";
 import { configuredHostedAppUrl } from "../hostedPairing";
@@ -488,8 +494,8 @@ function OpenCommandPaletteDialog(props: {
     useHandleNewThread();
   const paletteRouteTarget = useThreadRouteTarget();
   const allProjects = useProjects();
-  const { activeScope, assignments } = useClientEnvironmentScope();
-  const projects = filterByEnvironmentScope(allProjects, activeScope, assignments);
+  const { activeScope } = useClientEnvironmentScope();
+  const projects = filterProjectsByScope(allProjects, activeScope);
   const referenceThreadRef =
     pathname === "/pull-requests"
       ? environments.some((environment) => environment.serverConfig !== null)
@@ -523,11 +529,7 @@ function OpenCommandPaletteDialog(props: {
   };
   // Threads the sidebar shows under their parent open there, so opening a project never lands on one.
   const delegatedUnderParent = useDelegatedUnderParent();
-  const threads = filterByEnvironmentScope(
-    useVisibleThreadShells(),
-    activeScope,
-    assignments,
-  ).filter(
+  const threads = filterByProjectScope(useVisibleThreadShells(), activeScope, allProjects).filter(
     (thread) =>
       !isShownUnderParent(
         { environmentId: thread.environmentId, threadId: thread.id },
@@ -545,6 +547,7 @@ function OpenCommandPaletteDialog(props: {
   const [addProjectEnvironmentId, setAddProjectEnvironmentId] = useState<EnvironmentId | null>(
     null,
   );
+  const [projectCreateScope, setProjectCreateScope] = useState<"personal" | "work">(activeScope);
   const [isPickingProjectFolder, setIsPickingProjectFolder] = useState(false);
   const [addProjectCloneFlow, setAddProjectCloneFlow] = useState<AddProjectCloneFlow | null>(null);
   const [newProjectFlow, setNewProjectFlow] = useState<{
@@ -601,7 +604,7 @@ function OpenCommandPaletteDialog(props: {
   };
 
   const addProjectEnvironmentOptions = (() => {
-    const options = filterByEnvironmentScope(environments, activeScope, assignments)
+    const options = environments
       .filter((environment) => canCreateProjectInEnvironment(environment.connection.phase))
       .map((environment): AddProjectEnvironmentOption => {
         const isPrimary = environment.entry.target._tag === "PrimaryConnectionTarget";
@@ -648,6 +651,16 @@ function OpenCommandPaletteDialog(props: {
   const canCreateProject = useEnvironmentScope(browseEnvironmentId, AuthOrchestrationOperateScope);
   const browseEnvironment =
     environments.find((environment) => environment.environmentId === browseEnvironmentId) ?? null;
+  const projectScopeEnvironmentId =
+    addProjectCloneFlow?.environmentId ?? newProjectFlow?.environmentId ?? browseEnvironmentId;
+  const projectScopeCapabilitiesFor = (environmentId: EnvironmentId | null) =>
+    environmentId === null
+      ? undefined
+      : environments.find((environment) => environment.environmentId === environmentId)
+          ?.serverConfig?.environment.capabilities;
+  const projectScopeCapabilities = projectScopeCapabilitiesFor(projectScopeEnvironmentId);
+  const canSetProjectScope = supportsProjectScope(projectScopeCapabilities);
+  const effectiveProjectCreateScope = canSetProjectScope ? projectCreateScope : "personal";
   const browseEnvironmentIsDesktopLocal =
     browseEnvironment !== null && isDesktopLocalConnectionTarget(browseEnvironment.entry.target);
   // pickFolder routes desktop-local environments by pool id, not catalog environmentId.
@@ -720,13 +733,9 @@ function OpenCommandPaletteDialog(props: {
       ?.serverConfig?.threadFind === true;
   const currentProjectEnvironmentId = contextualProjectRef?.environmentId ?? null;
   const currentProjectId = contextualProjectRef?.projectId ?? null;
-  const scopedEnvironmentIds = filterEnvironmentIdsByScope(
-    environments
-      .filter((environment) => environment.connection.phase === "connected")
-      .map((environment) => environment.environmentId),
-    activeScope,
-    assignments,
-  );
+  const scopedEnvironmentIds = environments
+    .filter((environment) => environment.connection.phase === "connected")
+    .map((environment) => environment.environmentId);
   const scratchTargetEnvironmentId = scratchEnvironmentId(
     currentProjectEnvironmentId ?? scopedEnvironmentIds[0] ?? null,
     scopedEnvironmentIds,
@@ -1031,6 +1040,7 @@ function OpenCommandPaletteDialog(props: {
           ? prefetchBrowsePath(initialBrowsePath, environmentId, browseCwd)
           : Promise.resolve(),
       () => {
+        setProjectCreateScope(activeScope);
         setAddProjectEnvironmentId(environmentId);
         setAddProjectCloneFlow(null);
         pushPaletteView(view);
@@ -1042,6 +1052,7 @@ function OpenCommandPaletteDialog(props: {
     environmentId: EnvironmentId,
     source: AddProjectRemoteSource,
   ): void => {
+    setProjectCreateScope(activeScope);
     setAddProjectEnvironmentId(environmentId);
     setAddProjectCloneFlow({ step: "repository", environmentId, source });
     pushPaletteView({
@@ -1063,6 +1074,7 @@ function OpenCommandPaletteDialog(props: {
     environmentId: EnvironmentId,
     sourcesEnvironmentId: EnvironmentId | null,
   ): void => {
+    setProjectCreateScope(activeScope);
     setAddProjectEnvironmentId(environmentId);
     setAddProjectCloneFlow(null);
     setNewProjectFlow({ environmentId, sourcesEnvironmentId });
@@ -1196,6 +1208,7 @@ function OpenCommandPaletteDialog(props: {
       );
       return;
     }
+    setProjectCreateScope(activeScope);
     setAddProjectEnvironmentId(environmentId);
     setAddProjectCloneFlow(null);
     pushPaletteView({
@@ -2001,6 +2014,10 @@ function OpenCommandPaletteDialog(props: {
         workspaceRoot: cwd,
         createWorkspaceRootIfMissing: true,
         defaultModelSelection: null,
+        ...projectScopeInput(
+          projectScopeCapabilitiesFor(input.environmentId),
+          effectiveProjectCreateScope,
+        ),
       },
     });
     if (createResult._tag === "Failure") {
@@ -2072,6 +2089,10 @@ function OpenCommandPaletteDialog(props: {
       createNewProject({
         environmentId: newProjectFlow.environmentId,
         name: newProjectName,
+        ...projectScopeInput(
+          projectScopeCapabilitiesFor(newProjectFlow.environmentId),
+          effectiveProjectCreateScope,
+        ),
         publishTo: newProjectPublishes ? newProjectPublishTarget : null,
       }),
     );
@@ -2254,6 +2275,10 @@ function OpenCommandPaletteDialog(props: {
         createdAt: new Date().toISOString(),
         remoteUrl: addProjectCloneFlow.remoteUrl,
         destinationPath,
+        ...projectScopeInput(
+          projectScopeCapabilitiesFor(addProjectCloneFlow.environmentId),
+          effectiveProjectCreateScope,
+        ),
       },
     });
     setIsRemoteProjectCloning(false);
@@ -3051,6 +3076,25 @@ function OpenCommandPaletteDialog(props: {
           projectsRoot={newProjectsRoot}
           environmentLabel={newProjectEnvironmentLabel}
         />
+      ) : null}
+      {canSetProjectScope &&
+      (addProjectEnvironmentId !== null ||
+        addProjectCloneFlow !== null ||
+        newProjectFlow !== null) ? (
+        <div className="flex items-center justify-between gap-3 border-b px-4 py-2">
+          <span className="text-sm text-muted-foreground">Project scope</span>
+          <ToggleGroup
+            aria-label="Project scope"
+            value={[projectCreateScope]}
+            onValueChange={(next) => {
+              const value = next[0];
+              if (value === "personal" || value === "work") setProjectCreateScope(value);
+            }}
+          >
+            <Toggle value="personal">Personal</Toggle>
+            <Toggle value="work">Work</Toggle>
+          </ToggleGroup>
+        </div>
       ) : null}
       {addProjectCloneFlow?.step === "confirm" ? (
         <RemoteRepositorySummary

@@ -267,10 +267,14 @@ function LiveThreadRouteController(props: ThreadRouteScreenProps) {
       ? scopedThreadKey(environmentId, ThreadId.make(threadIdRaw))
       : null;
   const mobileEnvironmentScope = useMobileEnvironmentScope();
+  const routeProject = useProjects().find(
+    (project) =>
+      project.environmentId === selectedThread?.environmentId &&
+      project.id === selectedThread?.projectId,
+  );
   const routeScope = routeEnvironmentScope({
     enabled: mobileEnvironmentScope.enabled,
-    environmentId,
-    assignments: mobileEnvironmentScope.assignments,
+    projectScope: routeProject === undefined ? null : routeProject.scope,
   });
   const syncEnvironmentScopeToRoute = useEffectEvent(
     (scope: ReturnType<typeof routeEnvironmentScope>) => {

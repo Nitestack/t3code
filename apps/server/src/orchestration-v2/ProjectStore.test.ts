@@ -11,6 +11,68 @@ import * as ProjectStore from "./ProjectStore.ts";
 it.layer(ProjectStore.layer.pipe(Layer.provideMerge(SqlitePersistence.layerMemory)))(
   "ProjectStoreV2",
   (it) => {
+    it.effect(
+      "persists project scope from creation and metadata updates, defaulting older events to personal",
+      () =>
+        Effect.gen(function* () {
+          const projects = yield* ProjectStore.ProjectStoreV2;
+          const projectId = ProjectId.make("project-scope");
+          const legacyProjectId = ProjectId.make("project-scope-legacy");
+          const at = "2026-03-24T00:00:00.000Z";
+          const event = {
+            aggregateKind: "project",
+            occurredAt: at,
+            commandId: null,
+            causationEventId: null,
+            correlationId: null,
+            metadata: {},
+          } as const;
+          const create = (id: ProjectId, sequence: number, scope?: "personal" | "work") =>
+            projects.apply({
+              ...event,
+              sequence,
+              eventId: EventId.make(`event-scope-${sequence}`),
+              aggregateId: id,
+              type: "project.created",
+              payload: {
+                projectId: id,
+                ...(scope === undefined ? {} : { scope }),
+                title: "Scoped project",
+                workspaceRoot: `/tmp/${id}`,
+                defaultModelSelection: null,
+                scripts: [],
+                createdAt: at,
+                updatedAt: at,
+              },
+            });
+          yield* create(projectId, 1, "work");
+          yield* create(legacyProjectId, 2);
+          assert.strictEqual(Option.getOrNull(yield* projects.get(projectId))?.scope, "work");
+          assert.strictEqual(
+            Option.getOrNull(yield* projects.get(legacyProjectId))?.scope,
+            "personal",
+          );
+          yield* projects.apply({
+            ...event,
+            sequence: 3,
+            eventId: EventId.make("event-scope-updated"),
+            aggregateId: projectId,
+            type: "project.meta-updated",
+            payload: { projectId, scope: "personal", updatedAt: at },
+          });
+
+          assert.strictEqual(Option.getOrNull(yield* projects.get(projectId))?.scope, "personal");
+          assert.strictEqual(
+            Option.getOrNull(yield* projects.get(legacyProjectId))?.scope,
+            "personal",
+          );
+          assert.strictEqual(
+            Option.getOrNull(yield* projects.getShell(projectId))?.scope,
+            "personal",
+          );
+        }),
+    );
+
     it.effect("stores a model selection without options as JSON without an options key", () =>
       Effect.gen(function* () {
         const projects = yield* ProjectStore.ProjectStoreV2;
