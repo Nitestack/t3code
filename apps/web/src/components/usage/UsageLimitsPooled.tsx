@@ -15,6 +15,8 @@ import {
   remainingPercent,
   type ResetCreditChoice,
   resetCreditChoices,
+  budgetLeftUsd,
+  profilesOnSeveralEnvironments,
 } from "@t3tools/shared/usageLimits";
 import type { Popover as PopoverPrimitive } from "@base-ui/react/popover";
 import { normalizeProviderAccentColor } from "@t3tools/client-runtime/state/provider-instance-display";
@@ -559,18 +561,20 @@ function PoolWindowCard({
   readonly description?: string | undefined;
 }) {
   const nextRefill = pool.resets.find((reset) => reset.restoresPercent > 0);
-  const amounts = pool.members.length === 1 ? pool.members[0]?.window.amounts : undefined;
+  const budgetWindow = pool.members.length === 1 ? pool.members[0]?.window : undefined;
+  const amounts = budgetWindow?.amounts;
+  const leftUsd = budgetWindow ? budgetLeftUsd(budgetWindow) : undefined;
   return (
     <div className="grid items-center gap-x-6 gap-y-3 rounded-lg border border-border/60 p-4 md:grid-cols-[11rem_minmax(0,1fr)]">
       <div className="flex flex-col gap-1">
         {label !== null ? (
           <span className="text-sm font-medium text-foreground">{label ?? pool.label}</span>
         ) : null}
-        {amounts ? (
+        {amounts && leftUsd !== undefined ? (
           <>
             <span className="flex items-baseline gap-2">
               <span className="text-3xl font-semibold text-foreground tabular-nums">
-                {formatUsd(Math.max(0, amounts.total - amounts.spent))}
+                {formatUsd(leftUsd)}
               </span>
               <span className="text-sm text-muted-foreground">left</span>
             </span>
@@ -671,12 +675,7 @@ export function UsageLimitsPooled({
   const [segmentPopover] = useState(() => PopoverCreateHandle<SegmentPayload>());
   const segmentPopoverActions = useRef<PopoverPrimitive.Root.Actions | null>(null);
   const pools = collectLimitPools(collectLimitAccounts(presentations), now);
-  const profileCounts = new Map<string, number>();
-  for (const pool of pools) {
-    if (pool.profileName) {
-      profileCounts.set(pool.profileName, (profileCounts.get(pool.profileName) ?? 0) + 1);
-    }
-  }
+  const repeatedProfiles = profilesOnSeveralEnvironments(pools);
   const notices = collectLimitNotices(presentations);
   const externalLinks = collectExternalUsageLinks(presentations);
   return (
@@ -693,7 +692,9 @@ export function UsageLimitsPooled({
               pool={pool}
               now={now}
               aixProfileLabels={aixProfileLabels}
-              showEnvironment={(profileCounts.get(pool.profileName ?? "") ?? 0) > 1}
+              showEnvironment={
+                pool.profileName !== undefined && repeatedProfiles.has(pool.profileName)
+              }
             />
           </Fragment>
         ))}

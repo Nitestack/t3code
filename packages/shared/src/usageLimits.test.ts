@@ -19,6 +19,7 @@ import {
   collectExternalUsageLinks,
   collectLimitNotices,
   collectLimitPools,
+  profilesOnSeveralEnvironments,
   elapsedShare,
   exhaustedUsageWindow,
   paceOf,
@@ -351,6 +352,7 @@ describe("pools", () => {
     expect(accounts[0]?.redeem).toBeNull();
     const pools = collectLimitPools(accounts, now);
     expect(pools).toHaveLength(3);
+    expect(profilesOnSeveralEnvironments(pools)).toEqual(new Set(["work"]));
     expect(pools.map((pool) => pool.windows[0]?.members)).toEqual([
       [expect.objectContaining({ account: expect.objectContaining({ profileName: "work" }) })],
       [expect.objectContaining({ account: expect.objectContaining({ profileName: "home" }) })],
