@@ -137,6 +137,14 @@ export const resolveClaudeHomePath = Effect.fn("resolveClaudeHomePath")(function
   return path.resolve(path.join(home, ".claude"));
 });
 
+export const resolveClaudeAixConfigDir = Effect.fn("resolveClaudeAixConfigDir")(function* (
+  stateDir: string,
+  profileName: string,
+): Effect.fn.Return<string, never, Path.Path> {
+  const path = yield* Path.Path;
+  return path.join(stateDir, "providers", "claude", "aix", profileName);
+});
+
 export const makeClaudeEnvironment = Effect.fn("makeClaudeEnvironment")(function* (
   config: Pick<ClaudeSettings, "homePath">,
   baseEnv?: NodeJS.ProcessEnv,

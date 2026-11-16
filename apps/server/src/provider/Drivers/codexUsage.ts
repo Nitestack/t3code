@@ -82,6 +82,7 @@ const CodexUnreportedRequest = Schema.Struct({
   turnId: Schema.String,
   speed: CodexSpeed,
   sawThreadSettings: Schema.Boolean,
+  scope: Schema.optionalKey(Schema.Literals(["personal", "work"])),
   usage: CodexTokenUsage,
 });
 type CodexUnreportedRequest = typeof CodexUnreportedRequest.Type;
@@ -431,13 +432,14 @@ function codexAttribution(state: CodexScanState, timestampMs: number): CodexRequ
     turnId: state.turnId,
     speed: state.speed,
     sawThreadSettings: state.sawThreadSettings,
+    scope: state.modelProvider === "t3_aix" ? "work" : "personal",
   };
 }
 
 function codexRequestRecord(
   state: CodexScanState,
   usage: CodexTokenUsage,
-  { timestampMs, model, turnId, speed, sawThreadSettings }: CodexRequestAttribution,
+  { timestampMs, model, turnId, speed, sawThreadSettings, scope }: CodexRequestAttribution,
 ): UsageRecord {
   const inputTokens = usage.input_tokens;
   const cachedInputTokens = usage.cached_input_tokens;
@@ -456,6 +458,7 @@ function codexRequestRecord(
 
   return {
     provider: "codex",
+    scope: scope ?? (state.modelProvider === "t3_aix" ? "work" : "personal"),
     timestampMs,
     model,
     sessionId: state.sessionId,

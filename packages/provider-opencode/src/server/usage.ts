@@ -497,17 +497,21 @@ export const openCodeUsageReader: ProviderUsageReader<OpenCodeSettings, OpenCode
     windowStartMs,
     retentionCutoffMs,
   }) {
-    const roots = new Set<string>();
+    const roots = new Map<string, "personal" | "work">();
     for (const instance of instances) {
-      if (instance.config?.aixProfile !== undefined) continue;
-      for (const root of yield* resolveOpenCodeDataDirs(instance.environment)) roots.add(root);
+      const scope = instance.config?.aixProfile === undefined ? "personal" : "work";
+      for (const root of yield* resolveOpenCodeDataDirs(instance.environment)) {
+        const previous = roots.get(root);
+        roots.set(root, previous !== undefined && previous !== scope ? "personal" : scope);
+      }
     }
     return yield* Effect.forEach(
       roots,
-      (dir) =>
+      ([dir, scope]) =>
         readOpenCodeUsage(dir, windowStartMs, retentionCutoffMs).pipe(
           Effect.map((result) => ({
             dir,
+            scope,
             files: result.missing && !result.error ? null : result.files,
             status: result.error ? ("partial" as const) : ("ok" as const),
             ...(result.error ? { message: "Some OpenCode history could not be read." } : {}),

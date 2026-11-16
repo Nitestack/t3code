@@ -82,7 +82,11 @@ export interface UsageView {
   readonly environments: readonly EnvironmentUsageStatus[];
   readonly selectedEnvironments: readonly EnvironmentUsageStatus[];
   readonly isPending: boolean;
-  readonly shown: { readonly window: UsageSummaryInput; readonly merged: MergedUsage } | null;
+  readonly shown: {
+    readonly window: UsageSummaryInput;
+    readonly merged: MergedUsage;
+    readonly environments: readonly EnvironmentUsageStatus[];
+  } | null;
   readonly isPartial: boolean;
   readonly refresh: (input?: UsageSummaryInput) => Promise<void>;
 }
@@ -221,6 +225,7 @@ export function useUsage(
     setLastAnswered({
       window: input,
       merged,
+      environments: withoutProviders(selectedEnvironments, hiddenProviders),
       selection: selectedEnvironmentIds,
       hidden: hiddenProviders,
     });
@@ -231,8 +236,19 @@ export function useUsage(
       : null;
   const shown =
     answeredCount > 0
-      ? { window: input, merged }
-      : (kept ?? (isPending ? null : { window: input, merged }));
+      ? {
+          window: input,
+          merged,
+          environments: withoutProviders(selectedEnvironments, hiddenProviders),
+        }
+      : (kept ??
+        (isPending
+          ? null
+          : {
+              window: input,
+              merged,
+              environments: withoutProviders(selectedEnvironments, hiddenProviders),
+            }));
 
   return {
     merged,

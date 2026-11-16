@@ -3,17 +3,21 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   type ServerProvider,
+  UsageDay,
   UsageLimitSourceId,
+  type UsageBucket,
 } from "@t3tools/contracts";
 import type { LimitAccount } from "@t3tools/shared/usageLimits";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   filterLimitPresentationsByGroup,
+  filterUsageBucketsByScope,
   groupLimitAccounts,
   resolveUsageLimitGroup,
   usageLimitGroupForProvider,
   usageLimitGroupsInPresentations,
+  usageScopeGroupsInBuckets,
 } from "./usageGrouping.ts";
 
 const checkedAt = "2026-09-05T12:00:00.000Z";
@@ -55,6 +59,33 @@ function account(profileName?: string, providerInstanceId?: string): LimitAccoun
 }
 
 describe("usage limit grouping", () => {
+  it("filters usage by scope and treats buckets from older servers as Personal", () => {
+    const bucket = (scope?: UsageBucket["scope"]): UsageBucket => ({
+      day: UsageDay.make("2026-09-05"),
+      ...(scope === undefined ? {} : { scope }),
+      provider: "codex",
+      model: "gpt-6.1",
+      totals: {
+        uncachedInputTokens: 1,
+        cachedInputTokens: 0,
+        cacheCreationTokens: 0,
+        outputTokens: 1,
+        reasoningTokens: 0,
+      },
+      costUsd: 0,
+      cacheSavingsUsd: 0,
+      costSource: "modelPriced",
+      records: 1,
+      unpricedRecords: 0,
+      sessions: 1,
+    });
+    const buckets = [bucket(), bucket("work")];
+
+    expect(usageScopeGroupsInBuckets(buckets)).toEqual(new Set(["personal", "work"]));
+    expect(filterUsageBucketsByScope(buckets, "personal")).toEqual([buckets[0]]);
+    expect(filterUsageBucketsByScope(buckets, "work")).toEqual([buckets[1]]);
+  });
+
   it("classifies AIX profile metadata as Work regardless of its display name", () => {
     expect(
       usageLimitGroupForProvider(

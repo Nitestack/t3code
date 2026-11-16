@@ -32,6 +32,9 @@ export type UsageResolution = typeof UsageResolution.Type;
 export const UsageCostSource = Schema.Literals(["providerReported", "modelPriced", "unpriced"]);
 export type UsageCostSource = typeof UsageCostSource.Type;
 
+export const UsageScope = Schema.Literals(["personal", "work"]);
+export type UsageScope = typeof UsageScope.Type;
+
 /** Sum uncached input, cache reads, and cache writes for input totals; reasoning is already included in output. */
 export const UsageTokenTotals = Schema.Struct({
   uncachedInputTokens: NonNegativeInt,
@@ -53,6 +56,8 @@ export type UsageCategoryCost = typeof UsageCategoryCost.Type;
 export const UsageBucket = Schema.Struct({
   day: UsageDay,
   hourStart: Schema.optional(TrimmedNonEmptyString),
+  /** Absent from older servers; clients treat it as Personal. */
+  scope: Schema.optional(UsageScope),
   provider: UsageProviderKind,
   model: TrimmedNonEmptyString,
   sourcePath: Schema.optional(TrimmedNonEmptyString),

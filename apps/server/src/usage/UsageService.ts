@@ -107,6 +107,7 @@ interface TranscriptSource {
   readonly volumeId: string;
   readonly physicalSourceId?: string;
   readonly fileName?: string;
+  readonly scope?: "personal" | "work";
 }
 
 const RatesCacheFile = Schema.Struct({
@@ -372,13 +373,31 @@ export const make = Effect.gen(function* () {
     return yield* Effect.forEach(
       entries,
       Effect.fnUntraced(function* ([instanceId, instance, configured]) {
+        const decodedConfig = Option.getOrUndefined(decodeConfig(instance.config ?? {}));
+        let environment = yield* mergeProviderInstanceEnvironment(
+          instance.environment,
+          hostEnvironment,
+        );
+        const aixProfile =
+          driver.driverKind === "opencode"
+            ? (decodedConfig as { readonly aixProfile?: string } | undefined)?.aixProfile
+            : undefined;
+        if (aixProfile !== undefined) {
+          environment = { ...environment };
+          delete environment.OPENCODE_DATA_DIR;
+          environment.XDG_DATA_HOME = path.join(
+            config.stateDir,
+            "providers",
+            "opencode",
+            "aix",
+            aixProfile,
+            "data",
+          );
+        }
         const instanceConfig: ProviderUsageInstance<Config> = {
           instanceId,
-          config: Option.getOrUndefined(decodeConfig(instance.config ?? {})),
-          environment: yield* mergeProviderInstanceEnvironment(
-            instance.environment,
-            hostEnvironment,
-          ),
+          config: decodedConfig,
+          environment,
           configured,
         };
         return instanceConfig;
@@ -400,12 +419,19 @@ export const make = Effect.gen(function* () {
         yield* usageInstances(driver, settings),
         (instance) => reader.directories(instance, { awaitRefresh }),
       );
-      for (const { dir: directory, fileName, refreshing } of directories.flat()) {
+      for (const { dir: directory, fileName, refreshing, scope } of directories.flat()) {
         if (refreshing) {
           const key = `${provider}\0${directory}`;
           if (seen.has(key)) continue;
           seen.add(key);
-          pending.push({ provider, dir: directory, volumeId: "", files: [], refreshing });
+          pending.push({
+            provider,
+            dir: directory,
+            volumeId: "",
+            files: [],
+            refreshing,
+            ...(scope === undefined ? {} : { scope }),
+          });
           continue;
         }
         const sourceKey = provider + "\0" + directory;
@@ -442,6 +468,7 @@ export const make = Effect.gen(function* () {
           volumeId,
           ...(sourceId === undefined ? {} : { physicalSourceId: sourceId }),
           ...(fileName === undefined ? {} : { fileName }),
+          ...(scope === undefined ? {} : { scope }),
         });
       }
     }
@@ -607,6 +634,7 @@ export const make = Effect.gen(function* () {
     const identity = (record: UsageRecord) =>
       encodeUsageRecordKey([
         record.provider,
+        record.scope ?? "personal",
         record.sessionId,
         record.timestampMs,
         record.model,
@@ -684,6 +712,7 @@ export const make = Effect.gen(function* () {
     readonly hostId?: string;
     readonly status?: UsageSource["status"];
     readonly message?: string;
+    readonly scope?: "personal" | "work";
     readonly files:
       | readonly {
           readonly path: string;
@@ -706,6 +735,7 @@ export const make = Effect.gen(function* () {
       provider,
       dir,
       volumeId,
+      ...(source.scope === undefined ? {} : { scope: source.scope }),
       ...(physicalSourceId === undefined ? {} : { physicalSourceId }),
     };
     const exists = yield* fileSystem
@@ -1101,7 +1131,7 @@ export const make = Effect.gen(function* () {
             eventOccurrences.set(key, occurrence);
             usageRecord = { ...record, dedupeKey: key + ":" + occurrence };
           }
-          if (aggregator.add(usageRecord, dir)) {
+          if (aggregator.add(usageRecord, dir, scannedDirs[index]?.scope)) {
             counted = true;
             if (record.sessionId.length > 0) sessionIds.add(record.sessionId);
           }

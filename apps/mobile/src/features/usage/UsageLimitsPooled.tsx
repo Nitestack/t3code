@@ -5,8 +5,6 @@ import { providerClients } from "@t3tools/client-runtime/provider-clients";
 import { normalizeProviderAccentColor } from "@t3tools/client-runtime/state/provider-instance-display";
 import {
   filterLimitPresentationsByGroup,
-  usageLimitGroupsInPresentations,
-  resolveUsageLimitGroup,
   type UsageLimitGroup,
   usageLimitEmptyMessage,
 } from "@t3tools/client-runtime/state/usage-grouping";
@@ -36,8 +34,6 @@ import { SettingsScreen } from "../settings/components/SettingsScreen";
 import { environmentPresentations } from "../../state/presentation";
 import { ResetCredits } from "./UsageLimitsSection";
 import { usageProviderKind, useProviderColors } from "./usageProviders";
-import { SegmentedControl } from "../../components/ui/SegmentedControl";
-import { useMobileEnvironmentScope } from "../environment-scope/useMobileEnvironmentScope";
 
 const PACE_LABEL = { ahead: "Ahead of pace", on: "On pace", under: "Under pace" } as const;
 const PROFILE_LIMIT_COLOR = "#8e8e93";
@@ -416,45 +412,31 @@ export function UsageLimitsSection({
   failedLabels,
   selectedEnvironmentIds,
   wide = false,
+  scope,
 }: {
   readonly now: number;
   readonly failedLabels: readonly string[];
   readonly selectedEnvironmentIds: ReadonlySet<EnvironmentId> | null;
   readonly wide?: boolean;
+  readonly scope: UsageLimitGroup;
 }) {
   const presentations = useAtomValue(environmentPresentations.presentationsWithProvidersAtom);
   const selected =
     selectedEnvironmentIds === null
       ? presentations
       : new Map([...presentations].filter(([id]) => selectedEnvironmentIds.has(id)));
-  const groups = usageLimitGroupsInPresentations(selected);
-  const { activeScope } = useMobileEnvironmentScope();
-  const [requestedGroup, setRequestedGroup] = useState<UsageLimitGroup | null>(null);
-  const group = resolveUsageLimitGroup(requestedGroup, groups, activeScope);
-  const scopedPresentations = filterLimitPresentationsByGroup(selected, group);
+  const scopedPresentations = filterLimitPresentationsByGroup(selected, scope);
   const pools = collectLimitPools(collectLimitAccounts(scopedPresentations), now);
   const notices = collectLimitNotices(scopedPresentations);
   const externalLinks = collectExternalUsageLinks(scopedPresentations);
   const colors = useProviderColors();
   return (
     <View className="gap-6">
-      {groups.size > 1 ? (
-        <SegmentedControl
-          options={[
-            { value: "personal", label: "Personal" },
-            { value: "work", label: "Work" },
-          ]}
-          selected={group}
-          onSelect={(value) => {
-            if (value === "personal" || value === "work") setRequestedGroup(value);
-          }}
-        />
-      ) : null}
       {pools.length === 0 && notices.length === 0 && externalLinks.length === 0 ? (
         <Text className="py-12 text-center text-base text-foreground-muted">
           {selected.size === 0
             ? "Select an environment to see limits."
-            : usageLimitEmptyMessage(group)}
+            : usageLimitEmptyMessage(scope)}
         </Text>
       ) : null}
       {pools.map((pool) => {

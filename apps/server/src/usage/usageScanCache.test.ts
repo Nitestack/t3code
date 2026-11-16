@@ -107,7 +107,7 @@ describe("scan cache round trip", () => {
     });
     const state = initialCodexScanState();
     for (const line of [
-      { type: "session_meta", payload: { id: "session-c", model_provider: "openai" } },
+      { type: "session_meta", payload: { id: "session-c", model_provider: "t3_aix" } },
       { type: "turn_context", payload: { model: "gpt-6-astra", turn_id: "native-turn" } },
       {
         type: "event_msg",
@@ -122,6 +122,7 @@ describe("scan cache round trip", () => {
     const pending = {
       ...record({
         provider: "codex",
+        scope: "work",
         model: "gpt-6-astra",
         sessionId: "session-c",
         dedupeKey: null,
@@ -137,6 +138,7 @@ describe("scan cache round trip", () => {
       records: [
         record({
           provider: "codex",
+          scope: "work",
           model: "gpt-6-astra",
           rateModel: "gpt-6",
           dedupeKey: null,

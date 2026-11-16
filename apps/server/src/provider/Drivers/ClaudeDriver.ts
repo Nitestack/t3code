@@ -62,6 +62,7 @@ import {
   mergeClaudeProcessEnvironment,
   resolveClaudeProviderInstanceEnvironment,
   resolveClaudeHomePath,
+  resolveClaudeAixConfigDir,
   validateClaudeAixSettingsAuth,
 } from "./ClaudeHome.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -93,7 +94,11 @@ export type ClaudeDriverEnv =
   | ProviderEventLoggers.ProviderEventLoggers
   | ServerConfig.ServerConfig;
 
-export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.Path> = {
+export const ClaudeDriver: ProviderDriver<
+  ClaudeSettings,
+  ClaudeDriverEnv,
+  Path.Path | ServerConfig.ServerConfig
+> = {
   driverKind: DRIVER_KIND,
   metadata: {
     displayName: "Claude",
@@ -134,8 +139,30 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
           }),
       ),
     );
+    const runtimeConfig =
+      config.aixProfile === undefined
+        ? config
+        : {
+            ...config,
+            homePath: yield* resolveClaudeAixConfigDir(stateDir, config.aixProfile),
+          };
+    if (config.aixProfile !== undefined) {
+      yield* fileSystem
+        .makeDirectory(runtimeConfig.homePath, { recursive: true, mode: 0o700 })
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new ProviderDriverError({
+                driver: DRIVER_KIND,
+                instanceId,
+                detail: "Claude aix configuration directory could not be created.",
+                cause,
+              }),
+          ),
+        );
+    }
     const processEnv = yield* mergeClaudeProcessEnvironment(
-      config,
+      runtimeConfig,
       resolvedEnvironment,
       process.env,
     );
@@ -189,7 +216,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
       instanceId,
     });
     const effectiveConfig = {
-      ...config,
+      ...runtimeConfig,
       enabled,
       binaryPath: expandHomePath(config.binaryPath, yield* HostProcess.HomeDirectory),
     } satisfies ClaudeSettings;
@@ -245,7 +272,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
         accentColor,
         environment: resolvedEnvironment,
         enabled,
-        config,
+        config: runtimeConfig,
       },
       {
         scopedLimitNames,

@@ -38,6 +38,7 @@ const HOST_CREDENTIAL_ENV = [
   "OPENCODE_CONFIG",
   "OPENCODE_CONFIG_DIR",
   "OPENCODE_DB",
+  "OPENCODE_DATA_DIR",
 ] as const;
 
 export class OpenCodeAixLaunchError extends Schema.TaggedError<

@@ -523,6 +523,86 @@ describe("Codex usage history", () => {
 });
 
 describe("UsageService", () => {
+  it.effect("classifies aix Codex and Claude transcripts as Work", () =>
+    Effect.gen(function* () {
+      const { home, settings } = yield* setup;
+      const codexSessions = NodePath.join(home, "codex", "sessions");
+      const claudeAixProjects = NodePath.join(
+        home,
+        "usage-aix-classification",
+        "userdata",
+        "providers",
+        "claude",
+        "aix",
+        "personal",
+        "projects",
+        "project",
+      );
+      yield* Effect.promise(async () => {
+        await NodeFSP.mkdir(codexSessions, { recursive: true });
+        for (const [name, modelProvider] of [
+          ["personal.jsonl", "openai"],
+          ["work.jsonl", "t3_aix"],
+        ] as const) {
+          await NodeFSP.writeFile(
+            NodePath.join(codexSessions, name),
+            [
+              {
+                type: "session_meta",
+                payload: { id: name, model_provider: modelProvider },
+              },
+              { type: "turn_context", payload: { model: "gpt-6-astra", turn_id: name } },
+              {
+                type: "event_msg",
+                timestamp: "2026-08-01T10:00:00Z",
+                payload: {
+                  type: "token_count",
+                  info: { last_token_usage: { input_tokens: 1, output_tokens: 2 } },
+                },
+              },
+            ]
+              .map((line) => encodeUnknownJsonString(line))
+              .join("\n") + "\n",
+          );
+        }
+        await NodeFSP.mkdir(claudeAixProjects, { recursive: true });
+        await NodeFSP.writeFile(
+          NodePath.join(claudeAixProjects, "session.jsonl"),
+          claudeLine(9, 7),
+        );
+      });
+      const scopedSettings = {
+        ...settings,
+        providerInstances: {
+          ...settings.providerInstances,
+          [ProviderInstanceId.make("claude-aix")]: {
+            driver: ProviderDriverKind.make("claudeAgent"),
+            config: { aixProfile: "personal" },
+          },
+        },
+      };
+      const summary = yield* Effect.gen(function* () {
+        const service = yield* UsageService.make;
+        return yield* service.readSummary(WINDOW);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          layerService({
+            prefix: "usage-aix-classification",
+            home,
+            settings: scopedSettings,
+            ratesDocument: {},
+          }),
+        ),
+      );
+
+      assert.deepStrictEqual(
+        summary.buckets.map(({ provider, scope }) => `${provider}:${scope}`).sort(),
+        ["claude:work", "codex:personal", "codex:work"],
+      );
+    }),
+  );
+
   it.effect("keeps pricing metadata paired with the rates used during a concurrent refresh", () =>
     Effect.gen(function* () {
       const { home, settings } = yield* setup;
@@ -3306,7 +3386,7 @@ describe("UsageService", () => {
             60 + 20 * (version === 4 ? 1 : 2),
           );
           yield* upgraded.awaitPersisted;
-          assert.strictEqual(SCAN_CACHE_FILE_NAME, "usage-scan-cache-v17.json");
+          assert.strictEqual(SCAN_CACHE_FILE_NAME, "usage-scan-cache-v18.json");
           assert.deepStrictEqual(
             (yield* Effect.promise(() => NodeFSP.readdir(stateDir)))
               .filter((name) => name.startsWith("usage-scan-cache"))
