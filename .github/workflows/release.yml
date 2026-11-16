@@ -1,4 +1,5 @@
 name: Release
+run-name: ${{ github.repository == 'Nitestack/t3code' && inputs.channel == 'stable' && (inputs.publish && 'Fork publish stable' || 'Fork build-only stable') || 'Release stable' }} ${{ inputs.version || github.ref_name }} source ${{ inputs.source_commit || github.sha }}
 
 on:
   push:
@@ -12,7 +13,7 @@ on:
   workflow_dispatch:
     inputs:
       channel:
-        description: "Release channel"
+        description: "Release channel (stable on Nitestack/t3code publishes the reviewed fork commit)"
         required: false
         default: preview
         type: choice
@@ -24,17 +25,33 @@ on:
         description: "Stable version override (for example 1.2.3). Defaults to the version the latest nightly previewed."
         required: false
         type: string
+      source_commit:
+        description: Exact reviewed commit to release after it has reached fork main
+        required: false
+        type: string
+      source_branch:
+        description: CI branch that produced the successful checks for source_commit
+        required: false
+        type: string
+      upstream_base:
+        description: Full upstream commit SHA when a manual source has no upstream sync marker
+        required: false
+        type: string
+      artifact_run_id:
+        description: Successful build-only run whose locally tested installers should be published
+        required: false
+        type: string
+      publish:
+        description: Create the public tag and GitHub release after all build artifacts pass verification
+        required: true
+        default: false
+        type: boolean
 
-# Serialize nightlies (scheduled and manual) so overlapping runs cannot build
-# the same commit twice or publish out of order. Stable tag releases get their
-# own group so a nightly never blocks them. Running publishers are never
-# canceled, and queue: max keeps every pending run instead of the default
-# newest-wins single slot, so a queued stable tag can never be silently
-# dropped. Automatic nightlies recheck the release gap after leaving the queue.
+# Serialize upstream nightlies as before. Fork stable builds use their full
+# source SHA so different commits cannot replace one another's pending run.
 concurrency:
-  group: release-${{ (github.event_name == 'schedule' || inputs.channel == 'nightly' || inputs.channel == 'preview') && 'nightly' || 'stable' }}
+  group: release-${{ github.repository == 'Nitestack/t3code' && github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && format('fork-stable-{0}', inputs.source_commit || github.sha) || ((github.event_name == 'schedule' || inputs.channel == 'nightly' || inputs.channel == 'preview') && 'nightly' || 'stable') }}
   cancel-in-progress: false
-  queue: max
 
 permissions:
   # The Windows desktop jobs read this run's artifact list to wait for the
@@ -44,6 +61,841 @@ permissions:
   id-token: none
 
 jobs:
+  fork_preflight:
+    name: Fork release preflight
+    if: >-
+      github.repository == 'Nitestack/t3code' &&
+      github.event_name == 'workflow_dispatch' && inputs.channel == 'stable'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      release_name: ${{ steps.resolve.outputs.release_name }}
+      sha: ${{ steps.resolve.outputs.sha }}
+      runner: ${{ steps.resolve.outputs.runner }}
+      already_published: ${{ steps.resolve.outputs.already_published }}
+      artifact_name: ${{ steps.resolve.outputs.artifact_name }}
+      upstream_base: ${{ steps.resolve.outputs.upstream_base }}
+      upstream_tag: ${{ steps.resolve.outputs.upstream_tag }}
+      source_branch: ${{ steps.resolve.outputs.source_branch }}
+      publication_mode: ${{ steps.resolve.outputs.publication_mode }}
+    steps:
+      - name: Check out the release source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify source, CI, versions, and release identity
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_VERSION: ${{ inputs.version }}
+          SOURCE_COMMIT: ${{ inputs.source_commit }}
+          SOURCE_BRANCH: ${{ inputs.source_branch }}
+          UPSTREAM_BASE_INPUT: ${{ inputs.upstream_base }}
+          ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          PUBLISH_REQUESTED: ${{ inputs.publish }}
+          AUTO_PUBLISH_ALLOWED: ${{ vars.FORK_AUTO_PUBLISH_STABLE_RELEASES == 'true' }}
+          RELEASE_CHANNEL: ${{ inputs.channel }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          publication_mode="$(node - <<'NODE'
+          const { validateForkPublicationMode } = require("./.github/scripts/fork-release.cjs");
+          const mode = validateForkPublicationMode({
+            publish: process.env.PUBLISH_REQUESTED === "true",
+            artifactRunId: process.env.ARTIFACT_RUN_ID,
+            autoPublishAllowed: process.env.AUTO_PUBLISH_ALLOWED === "true",
+          });
+          process.stdout.write(mode);
+          NODE
+          )"
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          source_sha="${SOURCE_COMMIT:-$GITHUB_SHA}"
+          source_branch="${SOURCE_BRANCH:-main}"
+          if git merge-base --is-ancestor "$source_sha" refs/remotes/origin/main; then
+            source_on_main=true
+          else
+            source_on_main=false
+          fi
+
+          ci_runs="$RUNNER_TEMP/fork-ci-runs.json"
+          gh run list --repo "$GITHUB_REPOSITORY" --workflow CI --commit "$source_sha" --branch "$source_branch" \
+            --json databaseId,event,headSha,headBranch,status,conclusion --limit 100 > "$ci_runs"
+          ci_run_id="$(SOURCE_SHA="$source_sha" SOURCE_BRANCH="$source_branch" node - "$ci_runs" <<'NODE'
+          const fs = require("node:fs");
+          const { selectLatestForkCiRun } = require("./.github/scripts/fork-ci-checks.cjs");
+          const runs = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+          const latest = selectLatestForkCiRun(runs, {
+            expectedSha: process.env.SOURCE_SHA,
+            expectedBranch: process.env.SOURCE_BRANCH,
+          });
+          process.stdout.write(String(latest.databaseId));
+          NODE
+          )"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ci_run_id" > "$RUNNER_TEMP/fork-ci-run.json"
+          gh api --paginate --jq '.jobs[] | {name, conclusion}' \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$ci_run_id/jobs?per_page=100" > "$RUNNER_TEMP/fork-ci-jobs.jsonl"
+          SOURCE_SHA="$source_sha" SOURCE_BRANCH="$source_branch" node - \
+            "$RUNNER_TEMP/fork-ci-run.json" "$RUNNER_TEMP/fork-ci-jobs.jsonl" <<'NODE'
+          const fs = require("node:fs");
+          const { validateForkCiRun } = require("./.github/scripts/fork-ci-checks.cjs");
+          const run = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+          const jobs = fs.readFileSync(process.argv[3], "utf8").trim().split(/\r?\n/).filter(Boolean).map(JSON.parse);
+          validateForkCiRun({
+            run,
+            jobs,
+            expectedSha: process.env.SOURCE_SHA,
+            expectedBranch: process.env.SOURCE_BRANCH,
+          });
+          NODE
+
+          manifest_versions="$(SOURCE_SHA="$source_sha" node -e 'const cp = require("node:child_process"); const paths = { server: "apps/server/package.json", desktop: "apps/desktop/package.json", web: "apps/web/package.json", contracts: "packages/contracts/package.json" }; console.log(JSON.stringify(Object.fromEntries(Object.entries(paths).map(([name, path]) => [name, JSON.parse(cp.execFileSync("git", ["show", process.env.SOURCE_SHA + ":" + path], { encoding: "utf8" })).version]))));')"
+          tag_version=""
+          if [[ "$GITHUB_EVENT_NAME" == push ]]; then
+            tag_version="${GITHUB_REF_NAME#v}"
+          fi
+
+          manifest_version="$(SOURCE_SHA="$source_sha" node -e 'const cp = require("node:child_process"); process.stdout.write(JSON.parse(cp.execFileSync("git", ["show", process.env.SOURCE_SHA + ":apps/server/package.json"], { encoding: "utf8" })).version)')"
+          upstream_tag="v${manifest_version}"
+          upstream_url="https://github.com/pingdotgg/t3code.git"
+          git fetch --no-tags "$upstream_url" \
+            "+refs/tags/$upstream_tag:refs/tags/fork-upstream/$upstream_tag" \
+            "+refs/heads/main:refs/remotes/fork-upstream/main"
+          peeled_tag_commit="$(git rev-parse --verify "refs/tags/fork-upstream/$upstream_tag^{commit}")"
+          upstream_base="$(SOURCE_SHA="$source_sha" SOURCE_BRANCH="$source_branch" UPSTREAM_BASE_INPUT="$UPSTREAM_BASE_INPUT" MANIFEST_VERSION="$manifest_version" PEELED_TAG_COMMIT="$peeled_tag_commit" node - <<'NODE'
+          const cp = require("node:child_process");
+          const { resolveForkUpstreamBase } = require("./.github/scripts/fork-release.cjs");
+          const markerPath = ".github/upstream-stable.json";
+          const markerExists = cp.execFileSync("git", ["ls-tree", "--name-only", process.env.SOURCE_SHA, "--", markerPath], { encoding: "utf8" }).trim() !== "";
+          const markerContents = markerExists
+            ? cp.execFileSync("git", ["show", `${process.env.SOURCE_SHA}:${markerPath}`], { encoding: "utf8" })
+            : undefined;
+          process.stdout.write(resolveForkUpstreamBase({
+            markerContents,
+            explicitBase: process.env.UPSTREAM_BASE_INPUT,
+            sourceBranch: process.env.SOURCE_BRANCH,
+            expectedVersion: process.env.MANIFEST_VERSION,
+            peeledTagCommit: process.env.PEELED_TAG_COMMIT,
+          }));
+          NODE
+          )"
+          if git merge-base --is-ancestor "$upstream_base" "$source_sha"; then
+            upstream_base_is_ancestor=true
+          else
+            upstream_base_is_ancestor=false
+          fi
+          if [[ "$upstream_base_is_ancestor" != true ]]; then
+            echo "::error::Upstream stable base $upstream_base is not an ancestor of fork source $source_sha."
+            exit 1
+          fi
+
+          git rev-list "$upstream_base..$source_sha" > "$RUNNER_TEMP/fork-source-history.txt"
+          git rev-list refs/remotes/fork-upstream/main > "$RUNNER_TEMP/upstream-main-history.txt"
+          history_json="$(SOURCE_SHA="$source_sha" UPSTREAM_TAG="$upstream_tag" node - "$RUNNER_TEMP/fork-source-history.txt" "$RUNNER_TEMP/upstream-main-history.txt" <<'NODE'
+          const fs = require("node:fs");
+          const { analyzeForkUpstreamHistory } = require("./.github/scripts/fork-release.cjs");
+          const commits = (file) => fs.readFileSync(file, "utf8").split(/\r?\n/).filter(Boolean);
+          const result = analyzeForkUpstreamHistory({
+            sourceRangeCommits: commits(process.argv[2]),
+            upstreamMainCommits: commits(process.argv[3]),
+          });
+          const lines = ["### Upstream stable source history", ""];
+          if (result.commits.length === 0) {
+            lines.push(`No upstream-main commits beyond ${process.env.UPSTREAM_TAG} are present in this fork source.`);
+          } else {
+            const shortShas = result.commits.slice(0, 5).map((commit) => commit.slice(0, 12));
+            lines.push(`Blocked: ${result.commits.length} upstream-main commit(s) beyond ${process.env.UPSTREAM_TAG} are present in fork source ${process.env.SOURCE_SHA}. Main accepts stable upstream tags only.`);
+            lines.push(`First offending commits: ${shortShas.join(", ")}${result.commits.length > shortShas.length ? ", …" : ""}`);
+            lines.push("");
+          }
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${lines.join("\n")}\n\n`);
+          process.stdout.write(JSON.stringify(result));
+          NODE
+          )"
+          if [[ "$(HISTORY_JSON="$history_json" node -e 'process.stdout.write(JSON.parse(process.env.HISTORY_JSON).blocked ? "true" : "false")')" == true ]]; then
+            short_shas="$(HISTORY_JSON="$history_json" node -e 'const commits = JSON.parse(process.env.HISTORY_JSON).commits; process.stdout.write(commits.slice(0, 5).map((commit) => commit.slice(0, 12)).join(", "))')"
+            count="$(HISTORY_JSON="$history_json" node -e 'process.stdout.write(String(JSON.parse(process.env.HISTORY_JSON).commits.length))')"
+            echo "::error::Fork source contains $count upstream-main commit(s) beyond $upstream_tag: $short_shas. Main accepts stable upstream tags only."
+            exit 1
+          fi
+          tag="v${tag_version:-$manifest_version}"
+          remote_refs="$(git ls-remote origin "refs/tags/$tag" "refs/tags/$tag^{}")"
+          existing_tag_sha="$(printf '%s\n' "$remote_refs" | awk '$2 ~ /\^\{\}$/ { print $1; exit }')"
+          if [[ -z "$existing_tag_sha" ]]; then
+            existing_tag_sha="$(printf '%s\n' "$remote_refs" | awk 'NF { print $1; exit }')"
+          fi
+
+          release_exists=false
+          existing_release=''
+          if existing_release="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" 2>"$RUNNER_TEMP/release-error")"; then
+            release_exists=true
+          elif grep -q "HTTP 404" "$RUNNER_TEMP/release-error"; then
+            release_exists=false
+          else
+            echo "Could not verify whether release $tag already exists." >&2
+            exit 1
+          fi
+
+          existing_assets_verified=false
+          if [[ "$release_exists" == true ]]; then
+            existing_release_path="$RUNNER_TEMP/existing-fork-release.json"
+            existing_assets_dir="$RUNNER_TEMP/existing-fork-release-assets"
+            printf '%s' "$existing_release" > "$existing_release_path"
+            SOURCE_SHA="$source_sha" UPSTREAM_BASE="$upstream_base" UPSTREAM_TAG="$upstream_tag" MANIFEST_VERSION="$manifest_version" node - \
+              "$existing_release_path" <<'NODE'
+          const fs = require("node:fs");
+          const { assertExistingForkReleaseMetadata } = require("./.github/scripts/fork-release.cjs");
+          assertExistingForkReleaseMetadata({
+            release: JSON.parse(fs.readFileSync(process.argv[2], "utf8")),
+            version: process.env.MANIFEST_VERSION,
+            sha: process.env.SOURCE_SHA,
+            upstreamBase: process.env.UPSTREAM_BASE,
+            upstreamTag: process.env.UPSTREAM_TAG,
+              sourceBranch: process.env.SOURCE_BRANCH || "main",
+          });
+          NODE
+            gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir "$existing_assets_dir"
+            SOURCE_SHA="$source_sha" UPSTREAM_BASE="$upstream_base" UPSTREAM_TAG="$upstream_tag" MANIFEST_VERSION="$manifest_version" node - \
+              "$existing_release_path" "$existing_assets_dir" <<'NODE'
+          const fs = require("node:fs");
+          const { verifyExistingForkReleaseAssets } = require("./.github/scripts/fork-release.cjs");
+          verifyExistingForkReleaseAssets({
+            release: JSON.parse(fs.readFileSync(process.argv[2], "utf8")),
+            directory: process.argv[3],
+            version: process.env.MANIFEST_VERSION,
+            sha: process.env.SOURCE_SHA,
+            upstreamBase: process.env.UPSTREAM_BASE,
+            upstreamTag: process.env.UPSTREAM_TAG,
+              sourceBranch: process.env.SOURCE_BRANCH || "main",
+          }).catch((error) => { console.error(error.message); process.exitCode = 1; });
+          NODE
+            existing_assets_verified=true
+          fi
+
+          export SOURCE_SHA="$source_sha" SOURCE_ON_MAIN="$source_on_main" SOURCE_BRANCH="$source_branch"
+          export EXISTING_TAG_SHA="$existing_tag_sha" RELEASE_EXISTS="$release_exists"
+          export EXISTING_RELEASE="$existing_release"
+          export EXISTING_ASSETS_VERIFIED="$existing_assets_verified"
+          export UPSTREAM_BASE="$upstream_base"
+          export UPSTREAM_TAG="$upstream_tag"
+          export UPSTREAM_BASE_IS_ANCESTOR="$upstream_base_is_ancestor"
+          export UPSTREAM_HISTORY_JSON="$history_json"
+          export PUBLICATION_MODE="$publication_mode"
+          node - "$manifest_versions" <<'NODE' >> "$GITHUB_OUTPUT"
+          const { resolveForkRelease } = require("./.github/scripts/fork-release.cjs");
+          const result = resolveForkRelease({
+            repository: process.env.GITHUB_REPOSITORY,
+            eventName: process.env.GITHUB_EVENT_NAME,
+            ref: process.env.GITHUB_REF,
+            channel: process.env.RELEASE_CHANNEL,
+            requestedVersion: process.env.REQUESTED_VERSION,
+            manifestVersions: JSON.parse(process.argv[2]),
+            sha: process.env.SOURCE_SHA,
+            sourceBranch: process.env.SOURCE_BRANCH,
+            upstreamBase: process.env.UPSTREAM_BASE,
+            upstreamTag: process.env.UPSTREAM_TAG,
+            upstreamBaseIsAncestor: process.env.UPSTREAM_BASE_IS_ANCESTOR === "true",
+            unreleasedUpstreamCommits: JSON.parse(process.env.UPSTREAM_HISTORY_JSON).commits,
+            sourceOnMain: process.env.SOURCE_ON_MAIN === "true",
+            existingTagSha: process.env.EXISTING_TAG_SHA,
+            releaseExists: process.env.RELEASE_EXISTS === "true",
+            existingRelease: process.env.EXISTING_RELEASE ? JSON.parse(process.env.EXISTING_RELEASE) : undefined,
+            existingAssetsVerified: process.env.EXISTING_ASSETS_VERIFIED === "true",
+          });
+          for (const [key, value] of Object.entries({
+            version: result.version,
+            tag: result.tag,
+            sha: result.sha,
+            release_name: result.releaseName,
+            runner: result.runner,
+            already_published: result.alreadyPublished ? "true" : "false",
+            artifact_name: `t3-code-installers-${result.version}-${result.sha.slice(0, 12)}`,
+            upstream_base: process.env.UPSTREAM_BASE,
+            upstream_tag: process.env.UPSTREAM_TAG,
+            source_branch: process.env.SOURCE_BRANCH,
+            publication_mode: process.env.PUBLICATION_MODE,
+          })) {
+            console.log(`${key}=${value}`);
+          }
+          NODE
+
+  fork_android:
+    name: Build signed fork Android APK
+    needs: [fork_preflight]
+    if: ${{ !failure() && !cancelled() && inputs.artifact_run_id == '' && needs.fork_preflight.result == 'success' && needs.fork_preflight.outputs.already_published != 'true' }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/mobile-android-fork.yml
+    with:
+      version: ${{ needs.fork_preflight.outputs.version }}
+      ref: ${{ needs.fork_preflight.outputs.sha }}
+    secrets:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+  fork_bundle:
+    name: Build fork desktop bundle
+    needs: [fork_preflight]
+    if: ${{ !failure() && !cancelled() && inputs.artifact_run_id == '' && needs.fork_preflight.result == 'success' && needs.fork_preflight.outputs.already_published != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the exact fork release source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ needs.fork_preflight.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Vite+ and dependencies
+        uses: ./.github/actions/setup-ci-deps
+        with:
+          install-args: --filter=t3... --filter=@t3tools/web... --filter=@t3tools/desktop... --filter=@t3tools/scripts...
+
+      - name: Load public build configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          set -a
+          . ./.env.example
+          set +a
+          echo "T3CODE_TELEMETRY_CHANNEL=dev" >> "$GITHUB_ENV"
+
+      - name: Build the platform-independent desktop bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          if node -e 'process.exit(require("./package.json").scripts["build:desktop:bundle"] ? 0 : 1)'; then
+            vp run build:desktop:bundle
+          else
+            sudo apt-get update
+            sudo apt-get install -y libsecret-1-dev pkg-config
+            vp run build:desktop
+          fi
+
+      - name: Upload desktop bundle
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: js-bundle
+          path: |
+            apps/server/dist
+            apps/desktop/dist-electron
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+
+  fork_desktop_linux:
+    name: Build Linux CLI runtime for Windows
+    needs: [fork_preflight, fork_bundle]
+    if: ${{ !failure() && !cancelled() && inputs.artifact_run_id == '' && needs.fork_preflight.result == 'success' && needs.fork_preflight.outputs.already_published != 'true' && needs.fork_bundle.result == 'success' }}
+    permissions:
+      actions: read
+      contents: read
+    uses: ./.github/workflows/release-desktop.yml
+    with:
+      version: ${{ needs.fork_preflight.outputs.version }}
+      ref: ${{ needs.fork_preflight.outputs.sha }}
+      release_channel: stable
+      clerk_publishable_key: ""
+      clerk_jwt_template: ""
+      clerk_cli_oauth_client_id: ""
+      relay_url: ""
+      label: Linux x64
+      runner: ubuntu-24.04
+      platform: linux
+      target: AppImage
+      arch: x64
+      rust_target: x86_64-unknown-linux-gnu
+      resource_key: linux-x64
+      cli_archive: true
+      relay_client_tracing: false
+      fork_build_only: true
+
+  fork_desktop_windows:
+    name: Build Windows x64 installer
+    needs: [fork_preflight, fork_bundle, fork_desktop_linux]
+    if: ${{ !failure() && !cancelled() && inputs.artifact_run_id == '' && needs.fork_preflight.result == 'success' && needs.fork_preflight.outputs.already_published != 'true' && needs.fork_bundle.result == 'success' && needs.fork_desktop_linux.result == 'success' }}
+    permissions:
+      actions: read
+      contents: read
+    uses: ./.github/workflows/release-desktop.yml
+    with:
+      version: ${{ needs.fork_preflight.outputs.version }}
+      ref: ${{ needs.fork_preflight.outputs.sha }}
+      release_channel: stable
+      clerk_publishable_key: ""
+      clerk_jwt_template: ""
+      clerk_cli_oauth_client_id: ""
+      relay_url: ""
+      label: Windows x64
+      runner: windows-2025
+      platform: win
+      target: nsis
+      arch: x64
+      rust_target: x86_64-pc-windows-msvc
+      resource_key: win32-x64
+      cli_archive: false
+      relay_client_tracing: false
+      fork_build_only: true
+
+  fork_nix:
+    name: Build versioned fork Nix package
+    needs: [fork_preflight]
+    if: ${{ !failure() && !cancelled() && inputs.artifact_run_id == '' && needs.fork_preflight.result == 'success' && needs.fork_preflight.outputs.already_published != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    outputs:
+      store_path: ${{ steps.build.outputs.store_path }}
+    steps:
+      - name: Check out the exact fork release source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ needs.fork_preflight.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31
+        with:
+          github_access_token: ${{ github.token }}
+
+      - name: Build and verify the matching Nix package
+        id: build
+        env:
+          EXPECTED_VERSION: ${{ needs.fork_preflight.outputs.version }}
+          EXPECTED_SHA: ${{ needs.fork_preflight.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_name="t3code-${EXPECTED_VERSION}"
+          actual_name="$(nix eval --raw .#t3code.name)"
+          if [[ "$actual_name" != "$expected_name" ]]; then
+            echo "::error::Nix package name $actual_name does not match $expected_name."
+            exit 1
+          fi
+          nix build .#t3code --no-link --print-out-paths --print-build-logs > "$RUNNER_TEMP/nix-build-output"
+          store_path="$(cat "$RUNNER_TEMP/nix-build-output")"
+          if [[ ! "$store_path" =~ ^/nix/store/[a-z0-9]{32}-t3code-${EXPECTED_VERSION}$ ]]; then
+            echo "::error::Nix did not return the expected versioned store path."
+            exit 1
+          fi
+          echo "store_path=$store_path" >> "$GITHUB_OUTPUT"
+          NIX_PACKAGE_NAME="$actual_name" node - <<'NODE' >> "$GITHUB_STEP_SUMMARY"
+          const { buildForkNixBuildSummary } = require("./.github/scripts/fork-release.cjs");
+          process.stdout.write(buildForkNixBuildSummary({
+            packageName: process.env.NIX_PACKAGE_NAME,
+            sourceSha: process.env.EXPECTED_SHA,
+          }));
+          NODE
+
+  fork_build_artifacts:
+    name: Verify and package fork installers
+    needs: [fork_preflight, fork_android, fork_desktop_windows, fork_nix]
+    if: >-
+      !failure() && !cancelled() &&
+      inputs.artifact_run_id == '' &&
+      needs.fork_preflight.result == 'success' &&
+      needs.fork_preflight.outputs.already_published != 'true' &&
+      needs.fork_android.result == 'success' &&
+      needs.fork_desktop_windows.result == 'success' &&
+      needs.fork_nix.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Download signed Android build
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: t3-code-android-${{ github.run_id }}
+          path: incoming/android
+
+      - name: Download Windows installer build
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: desktop-win-x64
+          path: incoming/windows
+
+      - name: Verify both installers and prepare a build-only artifact
+        env:
+          EXPECTED_VERSION: ${{ needs.fork_preflight.outputs.version }}
+          EXPECTED_SHA: ${{ needs.fork_preflight.outputs.sha }}
+          UPSTREAM_BASE: ${{ needs.fork_preflight.outputs.upstream_base }}
+          UPSTREAM_TAG: ${{ needs.fork_preflight.outputs.upstream_tag }}
+          SOURCE_BRANCH: ${{ needs.fork_preflight.outputs.source_branch }}
+          ARTIFACT_NAME: ${{ needs.fork_preflight.outputs.artifact_name }}
+          NIX_STORE_PATH: ${{ needs.fork_nix.outputs.store_path }}
+          BUILD_RUN_ID: ${{ github.run_id }}
+          BUILD_RUN_ATTEMPT: ${{ github.run_attempt }}
+          PUBLICATION_MODE: ${{ needs.fork_preflight.outputs.publication_mode }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="incoming/android/T3-Code-${EXPECTED_VERSION}.apk"
+          windows_meta="incoming/windows/windows-metadata.json"
+          android_meta="incoming/android/metadata.json"
+          installers=(incoming/windows/*.exe)
+          if [[ ${#installers[@]} -ne 1 || ! -f "$apk" || ! -f "$windows_meta" || ! -f "$android_meta" ]]; then
+            echo "Expected one Windows installer, one signed APK, and both build metadata files." >&2
+            exit 1
+          fi
+
+          (cd incoming/android && sha256sum --check "$(basename "$apk").sha256")
+          (cd incoming/windows && sha256sum --check "$(basename "${installers[0]}").sha256")
+          node - "$android_meta" "$windows_meta" "${installers[0]}" <<'NODE'
+          const fs = require("node:fs");
+          const [androidPath, windowsPath, installerPath] = process.argv.slice(2);
+          const android = JSON.parse(fs.readFileSync(androidPath, "utf8"));
+          const windows = JSON.parse(fs.readFileSync(windowsPath, "utf8"));
+          const expectedVersion = process.env.EXPECTED_VERSION;
+          const expectedSha = process.env.EXPECTED_SHA;
+          if (android.applicationId !== "com.nitestack.t3code" || android.versionName !== expectedVersion || android.gitSha !== expectedSha) {
+            throw new Error("Android metadata does not match the selected release source.");
+          }
+          if (windows.version !== expectedVersion || windows.gitSha !== expectedSha || windows.architecture !== "x64" || windows.installer !== require("node:path").basename(installerPath)) {
+            throw new Error("Windows metadata does not match the selected release source.");
+          }
+          if (!["signed", "unsigned"].includes(windows.windowsSigning)) {
+            throw new Error("Windows signing status is missing or unrecognized.");
+          }
+          NODE
+
+          mkdir -p release-assets
+          windows_name="T3-Code-${EXPECTED_VERSION}-x64.exe"
+          cp "${installers[0]}" "release-assets/$windows_name"
+          (cd release-assets && sha256sum "$windows_name" > "$windows_name.sha256")
+          cp "$apk" release-assets/
+          cp "incoming/android/$(basename "$apk").sha256" release-assets/
+          cp "$android_meta" release-assets/metadata.json
+          cp "$windows_meta" release-assets/windows-metadata.json
+
+          EXPECTED_SHA="$EXPECTED_SHA" UPSTREAM_BASE="$UPSTREAM_BASE" UPSTREAM_TAG="$UPSTREAM_TAG" BUILD_RUN_ID="$BUILD_RUN_ID" BUILD_RUN_ATTEMPT="$BUILD_RUN_ATTEMPT" node - <<'NODE'
+          const fs = require("node:fs");
+          const { buildForkArtifactSourceMetadata } = require("./.github/scripts/fork-release.cjs");
+          const metadata = buildForkArtifactSourceMetadata({
+            sha: process.env.EXPECTED_SHA,
+            upstreamTag: process.env.UPSTREAM_TAG,
+            upstreamBase: process.env.UPSTREAM_BASE,
+            buildRunId: process.env.BUILD_RUN_ID,
+            buildRunAttempt: process.env.BUILD_RUN_ATTEMPT,
+          });
+          for (const file of ["metadata.json", "windows-metadata.json"]) {
+            const current = JSON.parse(fs.readFileSync(`release-assets/${file}`, "utf8"));
+            fs.writeFileSync(`release-assets/${file}`, `${JSON.stringify({ ...current, ...metadata }, null, 2)}\n`);
+          }
+          NODE
+
+          node - "$NIX_STORE_PATH" <<'NODE'
+          const fs = require("node:fs");
+          const { buildForkArtifactSourceMetadata } = require("./.github/scripts/fork-release.cjs");
+          const [storePath] = process.argv.slice(2);
+          if (!/^\/nix\/store\/[a-z0-9]{32}-t3code-\d+\.\d+\.\d+$/.test(storePath)) {
+            throw new Error("Nix build output is not a verified versioned package path.");
+          }
+          fs.writeFileSync("release-assets/nix-build.json", `${JSON.stringify({
+            package: "t3code",
+            version: process.env.EXPECTED_VERSION,
+            gitSha: process.env.EXPECTED_SHA,
+            storePath,
+            ...buildForkArtifactSourceMetadata({
+              sha: process.env.EXPECTED_SHA,
+              upstreamTag: process.env.UPSTREAM_TAG,
+              upstreamBase: process.env.UPSTREAM_BASE,
+              buildRunId: process.env.BUILD_RUN_ID,
+              buildRunAttempt: process.env.BUILD_RUN_ATTEMPT,
+            }),
+          }, null, 2)}\n`);
+          NODE
+
+          node - "$windows_meta" "$windows_name" <<'NODE'
+          const fs = require("node:fs");
+          const path = require("node:path");
+          const meta = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+          meta.installer = process.argv[3];
+          meta.sha256 = fs.readFileSync(path.join("release-assets", `${process.argv[3]}.sha256`), "utf8").split(" ")[0];
+          fs.writeFileSync("release-assets/windows-metadata.json", `${JSON.stringify(meta, null, 2)}\n`);
+          NODE
+
+          EXPECTED_VERSION="$EXPECTED_VERSION" EXPECTED_SHA="$EXPECTED_SHA" UPSTREAM_BASE="$UPSTREAM_BASE" UPSTREAM_TAG="$UPSTREAM_TAG" SOURCE_BRANCH="$SOURCE_BRANCH" BUILD_RUN_ID="$BUILD_RUN_ID" BUILD_RUN_ATTEMPT="$BUILD_RUN_ATTEMPT" node - <<'NODE'
+          const fs = require("node:fs");
+          const { buildForkBuildInfo } = require("./.github/scripts/fork-release.cjs");
+          fs.writeFileSync("release-assets/BUILD-INFO.md", buildForkBuildInfo({
+            version: process.env.EXPECTED_VERSION,
+            sha: process.env.EXPECTED_SHA,
+            upstreamTag: process.env.UPSTREAM_TAG,
+            upstreamBase: process.env.UPSTREAM_BASE,
+            sourceBranch: process.env.SOURCE_BRANCH,
+            buildRunId: process.env.BUILD_RUN_ID,
+            buildRunAttempt: process.env.BUILD_RUN_ATTEMPT,
+            publicationMode: process.env.PUBLICATION_MODE,
+          }));
+          NODE
+
+          {
+            printf 'Build-only artifact: %s\n' "$ARTIFACT_NAME"
+            printf 'Fork commit (built source): %s\n' "$EXPECTED_SHA"
+            printf 'Upstream stable base: %s = %s\n' "$UPSTREAM_TAG" "$UPSTREAM_BASE"
+            printf 'These artifacts are built from the fork commit and include fork changes plus upstream through %s.\n' "$UPSTREAM_TAG"
+            if [[ "$PUBLICATION_MODE" == "build-only" ]]; then
+              printf 'No tag or release was created.\n'
+            else
+              printf 'Authorized publication proceeds only after final artifact verification.\n'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Windows and Android installers
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ needs.fork_preflight.outputs.artifact_name }}
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 30
+          overwrite: true
+
+  fork_verify_tested_artifact:
+    name: Verify tested build-only artifact
+    needs: [fork_preflight]
+    if: >-
+      github.repository == 'Nitestack/t3code' &&
+      github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && inputs.publish == true &&
+      inputs.artifact_run_id != '' &&
+      !failure() && !cancelled() &&
+      needs.fork_preflight.result == 'success' &&
+      needs.fork_preflight.outputs.already_published != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      artifact_name: ${{ steps.verify.outputs.artifact_name }}
+      build_run_attempt: ${{ steps.verify.outputs.build_run_attempt }}
+    steps:
+      - name: Check out the trusted release verifier
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - id: verify
+        name: Verify the exact successful build-only run and artifact
+        env:
+          ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
+          EXPECTED_VERSION: ${{ needs.fork_preflight.outputs.version }}
+          EXPECTED_SHA: ${{ needs.fork_preflight.outputs.sha }}
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$ARTIFACT_RUN_ID" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::artifact_run_id must be a positive integer."
+            exit 1
+          fi
+          run_json="$RUNNER_TEMP/fork-build-only-run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ARTIFACT_RUN_ID" > "$run_json"
+          attempt="$(node -e 'const run = require(process.argv[1]); process.stdout.write(String(run.run_attempt));' "$run_json")"
+          if [[ ! "$attempt" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::Selected artifact run has no valid completed attempt."
+            exit 1
+          fi
+          jobs_jsonl="$RUNNER_TEMP/fork-build-only-jobs.jsonl"
+          artifacts_jsonl="$RUNNER_TEMP/fork-build-only-artifacts.jsonl"
+          gh api --paginate --jq '.jobs[] | {name, conclusion}' \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$ARTIFACT_RUN_ID/attempts/$attempt/jobs?per_page=100" > "$jobs_jsonl"
+          gh api --paginate --jq '.artifacts[] | {name, expired, size_in_bytes}' \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$ARTIFACT_RUN_ID/artifacts?per_page=100" > "$artifacts_jsonl"
+          EXPECTED_VERSION="$EXPECTED_VERSION" EXPECTED_SHA="$EXPECTED_SHA" ARTIFACT_RUN_ID="$ARTIFACT_RUN_ID" \
+            node - "$run_json" "$jobs_jsonl" "$artifacts_jsonl" <<'NODE'
+          const fs = require("node:fs");
+          const { validateForkBuildOnlyRun } = require("./.github/scripts/fork-release.cjs");
+          const jsonLines = (filename) =>
+            fs.readFileSync(filename, "utf8").split(/\r?\n/).filter(Boolean).map(JSON.parse);
+          const result = validateForkBuildOnlyRun({
+            run: JSON.parse(fs.readFileSync(process.argv[2], "utf8")),
+            jobs: jsonLines(process.argv[3]),
+            artifacts: jsonLines(process.argv[4]),
+            expectedRunId: process.env.ARTIFACT_RUN_ID,
+            version: process.env.EXPECTED_VERSION,
+            sha: process.env.EXPECTED_SHA,
+          });
+          process.stdout.write(`Verified ${result.artifactName} from build-only run ${result.runId}.\n`);
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `build_run_attempt=${result.runAttempt}\n`);
+          NODE
+          artifact_name="t3-code-installers-${EXPECTED_VERSION}-${EXPECTED_SHA:0:12}"
+          printf 'artifact_name=%s\n' "$artifact_name" >> "$GITHUB_OUTPUT"
+          printf 'The exact tested build-only artifact from run %s is ready for promotion.\n' "$ARTIFACT_RUN_ID" >> "$GITHUB_STEP_SUMMARY"
+
+  fork_publish:
+    name: Publish authorized fork release
+    needs: [fork_preflight, fork_build_artifacts, fork_nix, fork_verify_tested_artifact]
+    if: >-
+      github.repository == 'Nitestack/t3code' &&
+      github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && inputs.publish == true &&
+      !failure() && !cancelled() &&
+      needs.fork_preflight.result == 'success' &&
+      needs.fork_preflight.outputs.already_published != 'true' &&
+      (
+        (
+          needs.fork_preflight.outputs.publication_mode == 'promote-tested-artifact' &&
+          needs.fork_verify_tested_artifact.result == 'success'
+        ) ||
+        (
+          needs.fork_preflight.outputs.publication_mode == 'authorized-auto-publish' &&
+          needs.fork_build_artifacts.result == 'success' &&
+          needs.fork_nix.result == 'success'
+        )
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Check out the trusted release verifier
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download installers from this authorized auto-publication run
+        if: inputs.artifact_run_id == ''
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ needs.fork_preflight.outputs.artifact_name }}
+          path: release-assets
+
+      - name: Download the exact tested build-only installers
+        if: inputs.artifact_run_id != ''
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ needs.fork_verify_tested_artifact.outputs.artifact_name }}
+          path: release-assets
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.artifact_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Recheck source identity and tag before publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.fork_preflight.outputs.tag }}
+          RELEASE_SHA: ${{ needs.fork_preflight.outputs.sha }}
+          RELEASE_VERSION: ${{ needs.fork_preflight.outputs.version }}
+          UPSTREAM_BASE: ${{ needs.fork_preflight.outputs.upstream_base }}
+          UPSTREAM_TAG: ${{ needs.fork_preflight.outputs.upstream_tag }}
+          SOURCE_BRANCH: ${{ needs.fork_preflight.outputs.source_branch }}
+          BUILD_ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id || github.run_id }}
+          BUILD_ARTIFACT_RUN_ATTEMPT: ${{ inputs.artifact_run_id != '' && needs.fork_verify_tested_artifact.outputs.build_run_attempt || github.run_attempt }}
+        run: |
+          set -euo pipefail
+          cd release-assets
+          RELEASE_VERSION="$RELEASE_VERSION" RELEASE_SHA="$RELEASE_SHA" UPSTREAM_BASE="$UPSTREAM_BASE" UPSTREAM_TAG="$UPSTREAM_TAG" SOURCE_BRANCH="$SOURCE_BRANCH" BUILD_ARTIFACT_RUN_ID="$BUILD_ARTIFACT_RUN_ID" BUILD_ARTIFACT_RUN_ATTEMPT="$BUILD_ARTIFACT_RUN_ATTEMPT" \
+            node - <<'NODE'
+          const { verifyForkBuildArtifactAssets } = require("../.github/scripts/fork-release.cjs");
+          verifyForkBuildArtifactAssets({
+            directory: process.cwd(),
+            version: process.env.RELEASE_VERSION,
+            sha: process.env.RELEASE_SHA,
+            upstreamBase: process.env.UPSTREAM_BASE,
+            upstreamTag: process.env.UPSTREAM_TAG,
+            sourceBranch: process.env.SOURCE_BRANCH,
+            buildRunId: process.env.BUILD_ARTIFACT_RUN_ID,
+            buildRunAttempt: process.env.BUILD_ARTIFACT_RUN_ATTEMPT,
+          }).then(() => {
+            process.stdout.write("Verified exact Windows, Android, and Nix build artifacts.\n");
+          }).catch((error) => {
+            console.error(error.message);
+            process.exitCode = 1;
+          });
+          NODE
+          refs="$(git ls-remote "https://github.com/$GH_REPO.git" "refs/tags/$RELEASE_TAG" "refs/tags/$RELEASE_TAG^{}")"
+          if [[ -n "$refs" ]]; then
+            tag_sha="$(printf '%s\n' "$refs" | awk '$2 ~ /\^\{\}$/ { print $1; exit }')"
+            if [[ -z "$tag_sha" ]]; then tag_sha="$(printf '%s\n' "$refs" | awk 'NF { print $1; exit }')"; fi
+            if [[ "$tag_sha" != "$RELEASE_SHA" ]]; then
+              echo "::error::Existing tag $RELEASE_TAG does not point to the authorized release source." >&2
+              exit 1
+            fi
+          fi
+          if gh api "repos/$GH_REPO/releases/tags/$RELEASE_TAG" >/dev/null 2>"$RUNNER_TEMP/release-check.err"; then
+            echo "::error::Release $RELEASE_TAG already exists; refusing to overwrite it." >&2
+            exit 1
+          elif ! grep -q "HTTP 404" "$RUNNER_TEMP/release-check.err"; then
+            echo "::error::Could not confirm that release $RELEASE_TAG is absent." >&2
+            exit 1
+          fi
+          if [[ -z "$refs" ]]; then
+            if ! node - <<'NODE' | gh api --method POST "repos/$GH_REPO/git/refs" --input - >/dev/null 2>"$RUNNER_TEMP/tag-create.err"
+          const body = { ref: `refs/tags/${process.env.RELEASE_TAG}`, sha: process.env.RELEASE_SHA };
+          process.stdout.write(`${JSON.stringify(body)}\n`);
+          NODE
+            then
+              refs="$(git ls-remote "https://github.com/$GH_REPO.git" "refs/tags/$RELEASE_TAG" "refs/tags/$RELEASE_TAG^{}")"
+              if [[ -z "$refs" ]]; then
+                cat "$RUNNER_TEMP/tag-create.err" >&2
+                echo "::error::Could not atomically reserve release tag $RELEASE_TAG." >&2
+                exit 1
+              fi
+            fi
+          fi
+          refs="$(git ls-remote "https://github.com/$GH_REPO.git" "refs/tags/$RELEASE_TAG" "refs/tags/$RELEASE_TAG^{}")"
+          tag_sha="$(printf '%s\n' "$refs" | awk '$2 ~ /\^\{\}$/ { print $1; exit }')"
+          if [[ -z "$tag_sha" ]]; then tag_sha="$(printf '%s\n' "$refs" | awk 'NF { print $1; exit }')"; fi
+          ACTUAL_TAG_SHA="$tag_sha" EXPECTED_TAG_SHA="$RELEASE_SHA" RELEASE_TAG="$RELEASE_TAG" node - <<'NODE'
+          const { assertForkReleaseTagTarget } = require("../.github/scripts/fork-release.cjs");
+          assertForkReleaseTagTarget({
+            tag: process.env.RELEASE_TAG,
+            expectedSha: process.env.EXPECTED_TAG_SHA,
+            actualSha: process.env.ACTUAL_TAG_SHA,
+          });
+          NODE
+          UPSTREAM_BASE="$UPSTREAM_BASE" UPSTREAM_TAG="$UPSTREAM_TAG" RELEASE_SHA="$RELEASE_SHA" SOURCE_BRANCH="$SOURCE_BRANCH" BUILD_ARTIFACT_RUN_ID="$BUILD_ARTIFACT_RUN_ID" BUILD_ARTIFACT_RUN_ATTEMPT="$BUILD_ARTIFACT_RUN_ATTEMPT" RELEASE_TAG="$RELEASE_TAG" node - <<'NODE' > ../release-notes.md
+          const { buildForkReleaseNotes } = require("../.github/scripts/fork-release.cjs");
+          process.stdout.write(buildForkReleaseNotes({
+            upstreamBase: process.env.UPSTREAM_BASE,
+            upstreamTag: process.env.UPSTREAM_TAG,
+            sha: process.env.RELEASE_SHA,
+            sourceBranch: process.env.SOURCE_BRANCH,
+            buildArtifactRunId: process.env.BUILD_ARTIFACT_RUN_ID,
+            buildArtifactRunAttempt: process.env.BUILD_ARTIFACT_RUN_ATTEMPT,
+            releaseTag: process.env.RELEASE_TAG,
+          }));
+          NODE
+
+      - name: Create the authorized immutable fork release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.fork_preflight.outputs.tag }}
+          RELEASE_NAME: ${{ needs.fork_preflight.outputs.release_name }}
+          RELEASE_SHA: ${{ needs.fork_preflight.outputs.sha }}
+          SOURCE_BRANCH: ${{ needs.fork_preflight.outputs.source_branch }}
+          BUILD_ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id || github.run_id }}
+        run: >-
+          gh release create "$RELEASE_TAG" release-assets/*
+          --repo "$GH_REPO"
+          --title "$RELEASE_NAME"
+          --target "$RELEASE_SHA"
+          --notes-file release-notes.md
+
   # Picks the commit every later job builds. Nightlies and tag pushes build the
   # triggering commit. Manual stable releases build the commit of the latest
   # published nightly, so stable only ever ships a build that nightly users
@@ -230,6 +1082,7 @@ jobs:
         with:
           name: release-dependency-verification
           path: ${{ runner.temp }}/pnpm-metadata/lockfile-verified.jsonl
+          overwrite: true
 
   quality:
     name: Release quality checks
@@ -469,6 +1322,7 @@ jobs:
           path: ${{ runner.temp }}/relay-client-tracing.env
           if-no-files-found: error
           retention-days: 1
+          overwrite: true
 
       - id: public_config
         name: Resolve production relay public config
@@ -612,6 +1466,7 @@ jobs:
             apps/desktop/dist-electron
           if-no-files-found: error
           retention-days: 1
+          overwrite: true
 
       # publish_cli publishes this exact tarball, so the trusted publisher
       # needs no workspace checkout or install. It is version-matched here.
@@ -628,6 +1483,7 @@ jobs:
           path: npm-packages/t3.tgz
           if-no-files-found: error
           retention-days: 30
+          overwrite: true
 
   # One job per platform and architecture (see release-desktop.yml), each
   # gated only on the JS bundle. Windows targets build on Linux and run their

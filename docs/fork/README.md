@@ -1,24 +1,21 @@
 # T3 Code fork
 
-This fork keeps T3's provider, thread, and client behavior aligned with upstream. Fork-only
-development is identified by its Git commit; do not change upstream product versions or publish
-upstream-style `vX.Y.Z` tags from the fork.
+This fork keeps T3's provider, thread, and client behavior aligned with upstream. It keeps the
+upstream application version and uses the same `vX.Y.Z` tag and `T3 Code vX.Y.Z` release title for
+reviewed fork releases.
+
+The released Nix package is named `t3code-<version>` and keeps the upstream `t3` and
+`t3code-desktop` commands, T3 Code app name, and default state directory. Install it instead of
+upstream T3 Code; the Android APK is the exception and can coexist because its hidden package ID is
+different.
 
 ## Verified starting point
 
-The ticket branch started from `daed91f26464a280796e38911b7b97455226ef9e`, which was also
-`origin/main` at bootstrap. GitHub identifies `Nitestack/t3code` as a public fork of
-`pingdotgg/t3code`, with `main` as its default branch. The checkout's `origin` points to the fork
-and `upstream` points to the original repository. `gh` uses `Nitestack/t3code` as its local default.
-
-The latest stable upstream release at bootstrap was `v0.1.9`, published on 2026-11-11 and pointing
-to `24e77473ecf41bc1f7142529c7911c1c1aae1d76`. GitHub's compare API reported the checkout base
-974 commits ahead of that release and zero commits behind. At bootstrap, the checkout was based on
-upstream `main`, not that older stable tag. During the T00 implementation, upstream `main` was
-`065aca4889fb422c536bbf673d2f2beba50df3cb`, three commits ahead of the ticket base.
-
-Recheck these values before a future upstream sync; they describe the bootstrap, not a moving
-version pin.
+GitHub identifies `Nitestack/t3code` as a public fork of `pingdotgg/t3code`, with `main` as its
+default branch. The checkout's `origin` points to the fork and `upstream` points to the original
+repository. `gh` uses `Nitestack/t3code` as its local default. The fork history includes upstream
+commits beyond the imported `v0.1.9` stable tag, so the sync automation waits for a stable tag that
+contains them before creating the first release.
 
 ## Bootstrap from an upstream clone
 
@@ -74,12 +71,25 @@ Always pass `--repo OWNER/t3code` to later mutating `gh` commands.
 ## Branches, versions, and upstream review
 
 Work from the fork's `main`; use `feature/<topic>`, `fix/<topic>`, or `chore/<topic>` branches and
-open PRs against the fork's `main`. Use conventional commit titles. Do not merge upstream changes
-blindly: T17 owns the automated stable-release check and reviewable sync process.
+open PRs against the fork's `main`. Use conventional commit titles. The daily stable sync opens a
+PR for a newer upstream release and merges it only after all four exact-head fork CI jobs succeed
+under protected `main`. Conflicts or stale checks leave the sync unmerged for manual repair.
 
-The fork keeps upstream's application version values while developing and identifies builds by
-commit SHA. Do not create upstream-style `vX.Y.Z` tags or releases in the fork. A future fork release
-must use a separate fork-prefixed version/tag scheme and its own explicit release workflow.
+Fork `main` takes only published upstream stable tags; never merge upstream `main`. A stable tag is
+skipped until it contains every upstream commit already present in fork `main`, so the first release
+can happen only at the first stable tag that contains all commits already merged there.
+
+The fork keeps the upstream application version values. The existing `Release` workflow from
+`main` checks all four fork CI jobs on the exact source commit, confirms the application manifests
+agree, and builds a Windows x64 installer, signed Android APK, and matching Nix package. Its default
+build-only mode uploads an Actions artifact without creating a tag or release. After explicit
+authorization, a stable dispatch can publish the upstream-matched `vX.Y.Z` tag and `T3 Code vX.Y.Z`
+release. The tag points to the fork integration merge commit on `main`: its tree includes fork changes
+and upstream through the matching stable tag. The upstream tag's peeled commit is recorded only as
+the stable base. Notes and artifact metadata show both full SHAs, and the Nix command pins to the fork
+release tag with `nix profile add 'github:Nitestack/t3code/<tag>'`.
+The old imported tag in this clone is not a fork release: the workflow refuses to move it or replace
+an existing release.
 
 To inspect upstream changes manually without applying them:
 
@@ -87,11 +97,11 @@ To inspect upstream changes manually without applying them:
 git fetch upstream --tags
 gh api repos/pingdotgg/t3code/releases/latest \
   --jq '{tag_name, target_commitish, draft, prerelease, published_at}'
-git log --oneline --decorate --left-right origin/main...upstream/main
 ```
 
 `releases/latest` selects GitHub's latest stable release. To resolve its exact commit after fetching
-tags, use `git rev-parse '<tag>^{commit}'`. Review the commit range and CI before syncing it.
+tags, use `git rev-parse '<tag>^{commit}'`. Review that stable tag and its CI before syncing it;
+upstream `main` is not a sync source.
 
 ## Local development and separate server data
 
@@ -130,11 +140,15 @@ publishing, or iOS builds:
 | Mobile  | Typecheck and unit/React test projects; no native build | `vp run --filter @t3tools/mobile typecheck` and `vp run --filter @t3tools/mobile test` |
 
 The mobile test task runs the unit and React projects. The signed Android APK has its own workflow,
-described in the [Android APK guide](../operations/android-fork-apk.md); this fork does not build iOS.
-Releases follow the [fork release runbook](../operations/fork-release.md). Local mobile development may still use an existing development client
-and Metro as described in [the mobile guide](../../apps/mobile/README.md).
+described in the [Android APK guide](../operations/android-fork-apk.md); the stable release workflow
+also builds the Windows installer and Nix package. This fork does not build iOS. Releases follow the
+[fork release runbook](../operations/fork-release.md). Local mobile development may still use an
+existing development client and Metro as described in [the mobile guide](../../apps/mobile/README.md).
 
 The fork's `CI` workflow keeps its upstream jobs behind `github.repository == 'pingdotgg/t3code'`.
 This job-level guard also protects reusable workflows and triggers such as `workflow_dispatch`,
 `schedule`, `release`, `workflow_run`, and `pull_request_target`. New upstream-only jobs must carry
-the same guard. Fork baseline jobs use standard GitHub runners and need no maintainer credentials.
+the same guard. Fork baseline jobs and the fork release use standard GitHub runners. The release
+workflow passes only the four Android signing secrets to the reusable APK build; Windows and Nix
+builds receive no upstream signing, publishing, or deployment credentials. Upstream release and
+deploy jobs remain repository-guarded.

@@ -13,9 +13,10 @@ clean fork checkout at the source commit recorded in its `t3-fork.json`:
 yarn --cwd /tmp/t3-screens-fork pack:t3 /absolute/path/to/t3code/apps/mobile/deps
 ```
 
-For an update, sync the fork's `main` with upstream, merge it and the required
-proposal branches into `t3/main`, increment the `5.0.0-t3.N` version, pin `t3Fork.upstreamCommit` to the
-integrated upstream SHA and commit.
+For an update, use a reviewed published stable tag from the T3 Screens upstream
+and the required proposal branches; do not merge upstream `main`. Integrate
+those into `t3/main`, increment the `5.0.0-t3.N` version, pin
+`t3Fork.upstreamCommit` to the integrated upstream SHA and commit.
 Run `pack:t3` from that clean checkout and tag the source as `t3-v<version>`.
 Publish the source commit and tag to the fork before submitting the app change.
 Replace the old archive, update `apps/mobile/package.json` and run `vp i` to

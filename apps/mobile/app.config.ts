@@ -104,7 +104,7 @@ const VARIANT_CONFIG = {
     assets: RELEASE_ASSETS,
   },
   "android-fork": {
-    appName: "T3 Code (Nitestack)",
+    appName: "T3 Code",
     scheme: "t3code-aix",
     iosBundleIdentifier: "com.t3tools.t3code",
     androidPackage: "com.nitestack.t3code",

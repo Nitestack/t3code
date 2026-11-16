@@ -60,10 +60,10 @@ For the fork's pinned Nix CLI on `x86_64-linux`, `--base-dir` is the server CLI'
 
 ```sh
 T3CODE_AIX=1 T3CODE_HOME="$HOME/.local/share/t3code-aix" \
-  t3code-fork serve --no-browser --base-dir "$HOME/.local/share/t3code-aix"
+  t3 serve --no-browser --base-dir "$HOME/.local/share/t3code-aix"
 ```
 
-The command prints pairing details for connecting another client. Keep each independent T3 server on its own data directory. The source flake and coexistence instructions are in the [fork Nix guide](./docs/user/install.md#t3-code-fork-nix); the source checkout and development environment are covered by the [development runbook](./docs/operations/development.md#first-checkout).
+The command prints pairing details for connecting another client. Keep each independent T3 server on its own data directory. The source flake and install instructions are in the [fork Nix guide](./docs/user/install.md#t3-code-fork-nix); the source checkout and development environment are covered by the [development runbook](./docs/operations/development.md#first-checkout).
 
 ## A typical workflow
 
