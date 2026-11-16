@@ -1,4 +1,9 @@
-import type { ProjectScope, ProviderDriverKind, ProviderInstanceId } from "@t3tools/contracts";
+import {
+  ProviderDriverKind,
+  ProviderInstanceId,
+  type ProjectScope,
+  type ModelSelection,
+} from "@t3tools/contracts";
 
 export type PickerProviderInstance = {
   readonly instanceId: ProviderInstanceId;
@@ -30,6 +35,29 @@ export type AixProviderProfile<T extends PickerProviderInstance> = {
   readonly label: string;
   readonly entries: ReadonlyArray<T>;
 };
+
+export function pickerInstancesFromModelGroups<
+  T extends {
+    readonly providerKey: string;
+    readonly models: ReadonlyArray<{
+      readonly providerDriver?: string | undefined;
+      readonly aixProfile?: string | undefined;
+      readonly aixProfileLabel?: string | undefined;
+    }>;
+  },
+>(groups: ReadonlyArray<T>) {
+  return groups.map((group) => {
+    const model = group.models[0];
+    return {
+      providerKey: group.providerKey,
+      instanceId: ProviderInstanceId.make(group.providerKey),
+      driverKind: ProviderDriverKind.make(model?.providerDriver ?? group.providerKey),
+      enabled: true,
+      ...(model?.aixProfile ? { aixProfile: model.aixProfile } : {}),
+      ...(model?.aixProfileLabel ? { aixProfileLabel: model.aixProfileLabel } : {}),
+    };
+  });
+}
 
 export function aixMetadataFromInstanceId(instanceId: string, driverKind: ProviderDriverKind) {
   const prefix = `aix-${driverKind}-`;
@@ -109,6 +137,95 @@ export function providerInstancesForProjectScope<T extends PickerProviderInstanc
   }
   const selectedOutOfScope = selected && !inScope(selected) ? [selected] : [];
   return [...byDriver.values(), ...selectedOutOfScope];
+}
+
+export function resolvePickerHierarchy<T extends PickerProviderInstance>(input: {
+  readonly entries: ReadonlyArray<T>;
+  readonly scope: ProjectScope;
+  readonly rememberedProfileId?: string | undefined;
+  readonly selectedModelProfileId?: string | undefined;
+  readonly selectedInstanceId?: ProviderInstanceId | undefined;
+}) {
+  const profiles = groupAixProviderProfiles(input.entries);
+  const profileId =
+    input.scope === "work"
+      ? resolveAixProfileId({
+          profiles,
+          rememberedProfileId: input.rememberedProfileId,
+          selectedModelProfileId: input.selectedModelProfileId,
+        })
+      : undefined;
+  const visibleEntries = providerInstancesForProjectScope({
+    entries: input.entries,
+    scope: input.scope,
+    ...(profileId ? { aixProfile: profileId } : {}),
+    ...(input.selectedInstanceId ? { selectedInstanceId: input.selectedInstanceId } : {}),
+  });
+  return { profiles, profileId, visibleEntries };
+}
+
+type DraftDefaultProvider = {
+  readonly instanceId: ProviderInstanceId;
+  readonly driver: ProviderDriverKind;
+  readonly enabled: boolean;
+  readonly installed: boolean;
+  readonly status: string;
+  readonly availability?: string | undefined;
+  readonly aixProfile?: string | undefined;
+  readonly models: ReadonlyArray<{
+    readonly slug: string;
+    readonly isDefault?: boolean | undefined;
+  }>;
+};
+
+export function resolveScopedDraftModelSelection(input: {
+  readonly scope: ProjectScope;
+  readonly normalDefault: ModelSelection | null | undefined;
+  readonly providers: ReadonlyArray<DraftDefaultProvider>;
+}): ModelSelection | null {
+  const providers = input.providers.map((provider) => ({
+    ...provider,
+    aixProfile:
+      provider.aixProfile ??
+      aixMetadataFromInstanceId(provider.instanceId, provider.driver)?.aixProfile,
+  }));
+  const ready = providers.filter(
+    (provider) =>
+      provider.enabled &&
+      provider.installed &&
+      provider.status === "ready" &&
+      provider.availability !== "unavailable",
+  );
+  const currentProvider = input.normalDefault
+    ? providers.find((provider) => provider.instanceId === input.normalDefault?.instanceId)
+    : undefined;
+  if (input.scope === "personal") {
+    if (!currentProvider?.aixProfile) return input.normalDefault ?? null;
+    const personal = ready.find((provider) => provider.aixProfile === undefined);
+    return personal ? defaultSelectionForProvider(personal) : (input.normalDefault ?? null);
+  }
+  const aixProviders = ready.filter((provider) => provider.aixProfile !== undefined);
+  if (aixProviders.length === 0) return input.normalDefault ?? null;
+  const rememberedProfile = currentProvider?.aixProfile;
+  const profileId =
+    (rememberedProfile && aixProviders.some((provider) => provider.aixProfile === rememberedProfile)
+      ? rememberedProfile
+      : aixProviders[0]?.aixProfile) ?? undefined;
+  const profileProviders = aixProviders.filter((provider) => provider.aixProfile === profileId);
+  const matching = profileProviders.find(
+    (provider) =>
+      provider.driver === currentProvider?.driver &&
+      input.normalDefault !== null &&
+      provider.models.some((model) => model.slug === input.normalDefault?.model),
+  );
+  if (matching && input.normalDefault)
+    return { ...input.normalDefault, instanceId: matching.instanceId };
+  return defaultSelectionForProvider(profileProviders[0]!);
+}
+
+function defaultSelectionForProvider(provider: DraftDefaultProvider): ModelSelection {
+  const model = provider.models.find((candidate) => candidate.isDefault) ?? provider.models[0];
+  return { instanceId: provider.instanceId, model: model?.slug ?? "" };
 }
 
 export function isPickerModelVisibleForProjectScope(input: {

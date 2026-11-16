@@ -33,10 +33,7 @@ import {
   shouldShowInstanceBadge,
   type ProviderInstanceEntry,
 } from "../../providerInstances";
-import {
-  groupAixProviderProfiles,
-  resolveAixProfileId,
-} from "@t3tools/client-runtime/provider-picker-hierarchy";
+import { resolvePickerHierarchy } from "@t3tools/client-runtime/provider-picker-hierarchy";
 import { ModelPickerHierarchyContext } from "./ModelPickerHierarchyContext";
 import { ModelPickerHierarchyFooterControls } from "./ModelPickerHierarchyFooter";
 import { ComposerControl, type ComposerControlSize } from "./ComposerControl";
@@ -201,18 +198,25 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
 
   const activeEntry =
     props.instanceEntries.find((entry) => entry.instanceId === props.activeInstanceId) ?? null;
-  const aixProfiles = groupAixProviderProfiles(
-    props.instanceEntries.filter(isProviderInstancePickerVisible),
-  );
   const hierarchyScope = props.projectScope ?? activeScope;
+  const availableHierarchy = resolvePickerHierarchy({
+    entries: props.instanceEntries.filter(isProviderInstancePickerVisible),
+    scope: hierarchyScope,
+    selectedModelProfileId: activeEntry?.aixProfile,
+    selectedInstanceId: props.activeInstanceId,
+  });
+  const aixProfiles = availableHierarchy.profiles;
   const [hierarchyProfileId, setHierarchyProfileId] = useState<string | undefined>(
     activeEntry?.aixProfile ?? aixProfiles[0]?.id,
   );
-  const resolvedProfileId = resolveAixProfileId({
-    profiles: aixProfiles,
+  const [wasOpen, setWasOpen] = useState(props.open === true);
+  const resolvedProfileId = resolvePickerHierarchy({
+    entries: props.instanceEntries.filter(isProviderInstancePickerVisible),
+    scope: hierarchyScope,
     rememberedProfileId: hierarchyProfileId,
     selectedModelProfileId: activeEntry?.aixProfile,
-  });
+    selectedInstanceId: props.activeInstanceId,
+  }).profileId;
   const hierarchy = {
     profiles: aixProfiles,
     scope: hierarchyScope,
@@ -220,13 +224,14 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     onProfileChange: setHierarchyProfileId,
   };
   const resetHierarchyProfile = () => {
-    setHierarchyProfileId(
-      resolveAixProfileId({
-        profiles: aixProfiles,
-        selectedModelProfileId: activeEntry?.aixProfile,
-      }),
-    );
+    setHierarchyProfileId(availableHierarchy.profileId);
   };
+  if (props.open === true && !wasOpen) {
+    setWasOpen(true);
+    resetHierarchyProfile();
+  } else if (props.open !== true && wasOpen) {
+    setWasOpen(false);
+  }
 
   const activeInstanceId = props.activeInstanceId;
   const selectedInstanceOptions = props.modelOptionsByInstance.get(activeInstanceId) ?? [];

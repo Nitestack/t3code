@@ -27,6 +27,7 @@ import {
   useScheduledTaskEditor,
 } from "./scheduled-task-editor";
 import { moveDraftToThread, unbindDraftFromThread } from "./scheduledTaskDraft";
+import { resolveProjectScope } from "@t3tools/client-runtime/environment";
 
 function MissingTaskDraft() {
   return (
@@ -40,8 +41,12 @@ export function ScheduledTaskModelPickerRouteScreen() {
   const navigation = useNavigation();
   const { editor, setEditor } = useScheduledTaskEditor();
   const config = useEnvironmentServerConfig(editor?.environmentId ?? null);
+  const projects = useProjects();
   const selectedModel = editor?.draft.modelSelection ?? null;
   const projectId = editor?.draft.projectId ?? null;
+  const project = projects.find(
+    (candidate) => candidate.environmentId === editor?.environmentId && candidate.id === projectId,
+  );
   const models = useMemo(
     () => buildModelOptions(config, selectedModel, undefined, projectId),
     [config, selectedModel, projectId],
@@ -67,7 +72,11 @@ export function ScheduledTaskModelPickerRouteScreen() {
     <ThreadSettingsPickerScreen
       environmentId={editor.environmentId}
       projectId={projectId}
-      projectScope={null}
+      projectScope={
+        projectId && config?.environment.capabilities.projectScope === true
+          ? resolveProjectScope(project?.scope)
+          : null
+      }
       cwd={null}
       providerGroups={providerGroups}
       selectedModel={selectedModel}

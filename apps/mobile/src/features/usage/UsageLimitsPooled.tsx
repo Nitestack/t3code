@@ -457,7 +457,7 @@ export function UsageLimitsSection({
               </View>
               {pool.profileName ? (
                 <Text className="-mt-2 px-1 text-xs text-foreground-muted">
-                  AIX profile
+                  Work profile
                   {pool.accounts[0]?.environments[0]?.label
                     ? ` · ${pool.accounts[0].environments[0].label}`
                     : ""}

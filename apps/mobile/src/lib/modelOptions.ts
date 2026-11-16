@@ -72,7 +72,7 @@ function providerDisplayLabel(provider: {
 }): string {
   if (provider.aixProfile) {
     if (provider.driver === "codex") return "Codex";
-    if (provider.driver === "claudeAgent") return "Claude Code";
+    if (provider.driver === "claudeAgent") return "Claude";
     if (provider.driver === "opencode") return "OpenCode";
     return provider.driver;
   }
@@ -343,6 +343,9 @@ export function buildModelOptions(
   };
   const badgeEntries = (config?.providers ?? []).map((provider) => ({
     driverKind: provider.driver,
+    aixProfile:
+      provider.aixProfile ??
+      aixMetadataFromInstanceId(provider.instanceId, provider.driver)?.aixProfile,
     enabled: provider.enabled,
     acpRegistryAgentId: registryAgentId(provider.instanceId),
   }));
@@ -364,6 +367,8 @@ export function buildModelOptions(
       showBadge: shouldShowInstanceBadge(
         {
           driverKind: driver,
+          aixProfile:
+            snapshot?.aixProfile ?? aixMetadataFromInstanceId(instanceId, driver)?.aixProfile,
           accentColor,
           acpRegistryAgentId: registryAgentId(instanceId),
           enabled: snapshot?.enabled ?? instance?.enabled ?? false,

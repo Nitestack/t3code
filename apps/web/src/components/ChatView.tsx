@@ -2,6 +2,7 @@ import { ChildThreadApprovals } from "./chat/ChildThreadApprovals";
 import { workspaceAreaProps } from "../lib/workspaceFocus";
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
 import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
+import { resolveScopedDraftModelSelection } from "@t3tools/client-runtime/provider-picker-hierarchy";
 import { queuedRunEditBlockedReason } from "@t3tools/client-runtime/queued-run-edit";
 import { ScrollToEndButton, WorkspaceFileDropOverlay } from "./chat/TimelineOverlays";
 import { usePasteToFocusComposer } from "./chat/usePasteToFocusComposer";
@@ -112,6 +113,7 @@ import {
 } from "@t3tools/client-runtime/state/threads";
 import {
   parseScopedThreadKey,
+  resolveProjectScope,
   scopedThreadKey,
   scopeProjectRef,
   scopeThreadRef,
@@ -809,28 +811,42 @@ export default function ChatView(props: ChatViewProps) {
         fallbackDraftProject ?? undefined,
       ).settings.defaultModelSelection
     : null;
-  const draftModelResolution = draftThread
-    ? resolveNewThreadModelSelection({
-        defaultSelection:
-          draftDefaultModelSelection ??
-          resolveProjectDefaultProviderModelSelection(
-            providersByEnvironment.get(draftThread.environmentId) ?? [],
-            settings,
-            draftThread.projectId,
-          ),
-        fallbackSelection: settings.fallbackModelSelection,
-        providers: providersByEnvironment.get(draftThread.environmentId) ?? [],
-        settings,
-        projectId: draftThread.projectId,
-        now: Date.parse(`${nowMinute}:00Z`),
-      })
+  const draftProviders = draftThread
+    ? (providersByEnvironment.get(draftThread.environmentId) ?? [])
+    : [];
+  const draftNormalDefault = draftThread
+    ? (draftDefaultModelSelection ??
+      resolveProjectDefaultProviderModelSelection(draftProviders, settings, draftThread.projectId))
     : null;
+  const draftExplicitModelSelection =
+    composerModelSelectionExplicit && composerSelectedModelSelection
+      ? composerSelectedModelSelection
+      : null;
+  const draftScopedDefault = draftThread
+    ? (draftExplicitModelSelection ??
+      resolveScopedDraftModelSelection({
+        scope: resolveProjectScope(fallbackDraftProject?.scope),
+        normalDefault: draftNormalDefault,
+        providers: draftProviders,
+      }))
+    : null;
+  const draftModelResolution =
+    draftThread && draftExplicitModelSelection === null
+      ? resolveNewThreadModelSelection({
+          defaultSelection: draftScopedDefault,
+          fallbackSelection: settings.fallbackModelSelection,
+          providers: draftProviders,
+          settings,
+          projectId: draftThread.projectId,
+          now: Date.parse(`${nowMinute}:00Z`),
+        })
+      : null;
   const draftFallback = draftModelResolution?.fallback ? draftModelResolution : null;
   const localDraftThread = draftThread
     ? buildLocalDraftThread(
         threadId,
         draftThread,
-        (draftFallback ? draftFallback.selection : draftDefaultModelSelection) ??
+        (draftFallback ? draftFallback.selection : draftScopedDefault) ??
           NO_PROVIDER_MODEL_SELECTION,
       )
     : undefined;
@@ -3723,9 +3739,8 @@ export default function ChatView(props: ChatViewProps) {
                                 projectScope={
                                   activeProject === null
                                     ? null
-                                    : serverConfig?.environment.capabilities.projectScope ===
-                                          true && activeProject.scope === "work"
-                                      ? "work"
+                                    : serverConfig?.environment.capabilities.projectScope === true
+                                      ? resolveProjectScope(activeProject.scope)
                                       : "personal"
                                 }
                                 projectName={activeProject?.title}

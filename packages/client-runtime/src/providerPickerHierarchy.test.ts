@@ -10,6 +10,7 @@ import {
   pickerFilterProfileId,
   pickerFilterProviderKey,
   providerInstancesForProjectScope,
+  resolveScopedDraftModelSelection,
   resolveAixProfileId,
 } from "./providerPickerHierarchy.ts";
 
@@ -144,5 +145,61 @@ describe("provider picker hierarchy", () => {
     ]);
     expect(aixProfileLabel("ac", labels)).toBe("adCare");
     expect(aixProfileLabel("personal", labels)).toBe("personal");
+  });
+
+  it("resolves new draft defaults into the project scope", () => {
+    const providers = [
+      {
+        instanceId: ProviderInstanceId.make("codex"),
+        driver: ProviderDriverKind.make("codex"),
+        enabled: true,
+        installed: true,
+        status: "ready",
+        models: [{ slug: "gpt-default", isDefault: true }, { slug: "gpt-6.1" }],
+      },
+      {
+        instanceId: ProviderInstanceId.make("aix-codex-ac"),
+        driver: ProviderDriverKind.make("codex"),
+        enabled: true,
+        installed: true,
+        status: "ready",
+        aixProfile: "ac",
+        models: [{ slug: "gpt-6.1" }],
+      },
+      {
+        instanceId: ProviderInstanceId.make("aix-opencode-ac"),
+        driver: ProviderDriverKind.make("opencode"),
+        enabled: true,
+        installed: true,
+        status: "ready",
+        aixProfile: "ac",
+        models: [{ slug: "gemma-default", isDefault: true }, { slug: "gemma" }],
+      },
+    ];
+    const normalDefault = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-6.1" };
+    expect(resolveScopedDraftModelSelection({ scope: "work", normalDefault, providers })).toEqual({
+      instanceId: ProviderInstanceId.make("aix-codex-ac"),
+      model: "gpt-6.1",
+    });
+    expect(
+      resolveScopedDraftModelSelection({
+        scope: "work",
+        normalDefault: { instanceId: ProviderInstanceId.make("codex"), model: "missing" },
+        providers,
+      }),
+    ).toEqual({
+      instanceId: ProviderInstanceId.make("aix-codex-ac"),
+      model: "gpt-6.1",
+    });
+    expect(
+      resolveScopedDraftModelSelection({
+        scope: "personal",
+        normalDefault: {
+          instanceId: ProviderInstanceId.make("aix-codex-ac"),
+          model: "gpt-6.1",
+        },
+        providers,
+      }),
+    ).toEqual({ instanceId: ProviderInstanceId.make("codex"), model: "gpt-default" });
   });
 });

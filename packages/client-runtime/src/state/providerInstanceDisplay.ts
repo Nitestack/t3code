@@ -64,19 +64,23 @@ export function providerAccentForegroundColor(accentColor: string) {
 export function shouldShowInstanceBadge(
   entry: {
     readonly driverKind: ProviderDriverKind;
+    readonly aixProfile?: string | undefined;
     readonly accentColor?: string | undefined;
     readonly acpRegistryAgentId?: string | undefined;
     readonly enabled: boolean;
   },
   entries: Iterable<{
     readonly driverKind: ProviderDriverKind;
+    readonly aixProfile?: string | undefined;
     readonly acpRegistryAgentId?: string | undefined;
     readonly enabled: boolean;
   }>,
 ): boolean {
+  if (entry.aixProfile !== undefined) return false;
   if (normalizeProviderAccentColor(entry.accentColor)) return true;
   let sharedProviderCount = 0;
   for (const candidate of entries) {
+    if (candidate.aixProfile !== undefined) continue;
     if (candidate.driverKind !== entry.driverKind) continue;
     // Historical threads still need to distinguish accounts that are all disabled.
     if (entry.enabled && !candidate.enabled) continue;

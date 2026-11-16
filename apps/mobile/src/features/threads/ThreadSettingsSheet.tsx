@@ -5,11 +5,7 @@ import {
 import * as Dialog from "../../components/ui/Dialog";
 import { createV5StackNavigator as createNativeStackNavigator } from "../../native/createV5StackNavigator";
 import { useSheetStackOptions } from "../layout/nested-stacks";
-import {
-  DEFAULT_SERVER_SETTINGS,
-  ProviderDriverKind,
-  ProviderInstanceId,
-} from "@t3tools/contracts";
+import { DEFAULT_SERVER_SETTINGS, ProviderInstanceId } from "@t3tools/contracts";
 import {
   modelPreferencesMigrationPatch,
   resolveModelPreferences,
@@ -132,10 +128,9 @@ import {
   pickerFilterIsFavorites,
   pickerFilterProfileId,
   pickerFilterProviderKey,
-  groupAixProviderProfiles,
   isPickerModelVisibleForProjectScope,
-  providerInstancesForProjectScope,
-  resolveAixProfileId,
+  pickerInstancesFromModelGroups,
+  resolvePickerHierarchy,
   type PickerFilterState,
 } from "@t3tools/client-runtime/provider-picker-hierarchy";
 import { resolveProjectScope, scopeProjectRef } from "@t3tools/client-runtime/environment";
@@ -281,7 +276,7 @@ type ThreadSettingsSubmenuPage =
 type ThreadSettingsSessionProps = {
   readonly environmentId: EnvironmentId | null;
   readonly projectId: ProjectId | null;
-  readonly projectScope: unknown | null;
+  readonly projectScope: ProjectScope | null;
   readonly cwd: string | null;
   readonly providerInstanceId?: ProviderInstanceId;
   readonly lockedProviderInstanceId?: ProviderInstanceId;
@@ -507,7 +502,6 @@ function ThreadSettingsSessionProvider(
   };
   const [showLegacyToggle, setShowLegacyToggle] = useState(false);
   const [providerFilter, setProviderFilter] = useState<PickerFilterState | null>(() => {
-    if (projectScope !== "work") return null;
     const selectedInstanceId = props.selectedModel?.instanceId ?? props.providerInstanceId;
     const selectedAixProfile = selectedInstanceId
       ? props.providerGroups
@@ -518,6 +512,20 @@ function ThreadSettingsSessionProvider(
       .flatMap((group) => group.models)
       .find((model) => model.aixProfile)?.aixProfile;
     const profileId = selectedAixProfile ?? firstAixProfile;
+    const hasScopedFavorite = props.providerGroups.some((group) =>
+      group.models.some(
+        (model) =>
+          favoriteKeys.has(model.key) &&
+          isPickerModelVisibleForProjectScope({
+            scope: projectScope,
+            modelProfileId: model.aixProfile,
+            selectedProfileId: profileId,
+            isSelected: false,
+          }),
+      ),
+    );
+    if (hasScopedFavorite) return FAVORITES_PROVIDER_FILTER;
+    if (projectScope !== "work") return null;
     return profileId ? { tag: "aix-profile", profileId } : null;
   });
   const [searchQuery, setSearchQuery] = useState("");
@@ -805,41 +813,21 @@ function ThreadSettingsProviderListHeader(props: {
 function buildThreadSettingsCatalogItems(
   session: ThreadSettingsSessionValue,
 ): ReadonlyArray<ThreadSettingsCatalogItem> {
-  const hierarchyEntries = session.providerGroups.map((group) => ({
-    providerKey: group.providerKey,
-    instanceId: ProviderInstanceId.make(group.providerKey),
-    driverKind: ProviderDriverKind.make(group.models[0]?.providerDriver ?? group.providerKey),
-    enabled: true,
-    ...(group.models[0]?.aixProfile ? { aixProfile: group.models[0].aixProfile } : {}),
-    ...(group.models[0]?.aixProfileLabel
-      ? { aixProfileLabel: group.models[0].aixProfileLabel }
-      : {}),
-  }));
-  const profiles = groupAixProviderProfiles(hierarchyEntries);
   const selectedModelProfileId = session.displayedModelSelection
     ? session.providerGroups
         .flatMap((group) => group.models)
         .find((model) => model.selection.instanceId === session.displayedModelSelection?.instanceId)
         ?.aixProfile
     : undefined;
-  const aixProfileFilter =
-    session.projectScope === "work"
-      ? resolveAixProfileId({
-          profiles,
-          rememberedProfileId: pickerFilterProfileId(session.providerFilter),
-          selectedModelProfileId,
-        })
-      : undefined;
-  const visibleEntrySet = new Set(
-    providerInstancesForProjectScope({
-      entries: hierarchyEntries,
-      scope: session.projectScope,
-      ...(aixProfileFilter ? { aixProfile: aixProfileFilter } : {}),
-      ...(session.displayedModelSelection
-        ? { selectedInstanceId: session.displayedModelSelection.instanceId }
-        : {}),
-    }).map((entry) => entry.providerKey),
-  );
+  const hierarchy = resolvePickerHierarchy({
+    entries: pickerInstancesFromModelGroups(session.providerGroups),
+    scope: session.projectScope,
+    rememberedProfileId: pickerFilterProfileId(session.providerFilter),
+    selectedModelProfileId,
+    selectedInstanceId: session.displayedModelSelection?.instanceId,
+  });
+  const { profileId: aixProfileFilter } = hierarchy;
+  const visibleEntrySet = new Set(hierarchy.visibleEntries.map((entry) => entry.providerKey));
   return session.providerGroups.flatMap((group) => {
     const aixHarnessFilter =
       session.providerFilter?.tag === "aix-harness"
@@ -865,13 +853,17 @@ function buildThreadSettingsCatalogItems(
         ? scopeModels
         : scopeModels.filter(
             (model) =>
-              !model.isLegacy || session.isDisplayed(model) || session.favoriteKeys.has(model.key),
+              !model.isLegacy ||
+              session.isDisplayed(model) ||
+              session.isApplied(model) ||
+              session.favoriteKeys.has(model.key),
           );
     const visibleModels = favoritesFirst(
       catalogModels.filter(
         (model) =>
           (!pickerFilterIsFavorites(session.providerFilter) ||
-            session.favoriteKeys.has(model.key)) &&
+            session.favoriteKeys.has(model.key) ||
+            session.isApplied(model)) &&
           modelMatchesCatalogQuery({
             model,
             providerLabel: group.providerLabel,
@@ -1311,41 +1303,21 @@ function ThreadSettingsModelsScreen() {
   const searchToolbarInset = useSearchToolbarInset(search);
   const aixHarnessFilter =
     session.providerFilter?.tag === "aix-harness" ? session.providerFilter.providerKey : undefined;
-  const hierarchyEntries = session.providerGroups.map((group) => ({
-    providerKey: group.providerKey,
-    instanceId: ProviderInstanceId.make(group.providerKey),
-    driverKind: ProviderDriverKind.make(group.models[0]?.providerDriver ?? group.providerKey),
-    enabled: true,
-    ...(group.models[0]?.aixProfile ? { aixProfile: group.models[0].aixProfile } : {}),
-    ...(group.models[0]?.aixProfileLabel
-      ? { aixProfileLabel: group.models[0].aixProfileLabel }
-      : {}),
-  }));
-  const aixProfiles = groupAixProviderProfiles(hierarchyEntries);
   const selectedModelProfileId = session.displayedModelSelection
     ? session.providerGroups
         .flatMap((group) => group.models)
         .find((model) => model.selection.instanceId === session.displayedModelSelection?.instanceId)
         ?.aixProfile
     : undefined;
-  const aixProfileFilter =
-    session.projectScope === "work"
-      ? resolveAixProfileId({
-          profiles: aixProfiles,
-          rememberedProfileId: pickerFilterProfileId(session.providerFilter),
-          selectedModelProfileId,
-        })
-      : undefined;
-  const visibleEntrySet = new Set(
-    providerInstancesForProjectScope({
-      entries: hierarchyEntries,
-      scope: session.projectScope,
-      ...(aixProfileFilter ? { aixProfile: aixProfileFilter } : {}),
-      ...(session.displayedModelSelection
-        ? { selectedInstanceId: session.displayedModelSelection.instanceId }
-        : {}),
-    }).map((entry) => entry.providerKey),
-  );
+  const hierarchy = resolvePickerHierarchy({
+    entries: pickerInstancesFromModelGroups(session.providerGroups),
+    scope: session.projectScope,
+    rememberedProfileId: pickerFilterProfileId(session.providerFilter),
+    selectedModelProfileId,
+    selectedInstanceId: session.displayedModelSelection?.instanceId,
+  });
+  const { profiles: aixProfiles, profileId: aixProfileFilter } = hierarchy;
+  const visibleEntrySet = new Set(hierarchy.visibleEntries.map((entry) => entry.providerKey));
   const visibleProviderGroups = session.providerGroups.filter((group) =>
     visibleEntrySet.has(group.providerKey),
   );
@@ -1579,7 +1551,7 @@ export function ExistingThreadSettingsRouteScreen({
     <ThreadSettingsPickerScreen
       environmentId={selectedThread.environmentId}
       projectId={selectedThread.projectId}
-      projectScope={project?.scope}
+      projectScope={project?.scope ?? null}
       cwd={selectedThreadCwd}
       providerInstanceId={modelSelection.instanceId}
       {...(lockedProviderInstanceId ? { lockedProviderInstanceId } : {})}
@@ -1625,7 +1597,7 @@ export function NewTaskThreadSettingsRouteScreen() {
     <ThreadSettingsPickerScreen
       environmentId={flow.selectedEnvironmentId}
       projectId={flow.selectedProject?.id ?? null}
-      projectScope={flow.selectedProject ? flow.selectedProject.scope : null}
+      projectScope={flow.selectedProject?.scope ?? null}
       cwd={flow.workspaceCwd}
       {...(flow.selectedModel ? { providerInstanceId: flow.selectedModel.instanceId } : {})}
       providerGroups={flow.providerGroups}
