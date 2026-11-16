@@ -201,7 +201,17 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
 
   const activeEntry =
     props.instanceEntries.find((entry) => entry.instanceId === props.activeInstanceId) ?? null;
-  const hierarchyScope = props.projectScope ?? activeScope;
+  const baseHierarchyScope = props.projectScope ?? activeScope;
+  const [hierarchyScopeState, setHierarchyScopeState] = useState(() => ({
+    baseScope: baseHierarchyScope,
+    scope: baseHierarchyScope,
+  }));
+  const hierarchyScope =
+    hierarchyScopeState.baseScope === baseHierarchyScope
+      ? hierarchyScopeState.scope
+      : baseHierarchyScope;
+  const onHierarchyScopeChange = (scope: ProjectScope) =>
+    setHierarchyScopeState({ baseScope: baseHierarchyScope, scope });
   const hierarchyEntries = props.instanceEntries.filter(isProviderInstancePickerVisible);
   const [hierarchyProfileId, setHierarchyProfileId] = useState<string | undefined>(
     activeEntry?.aixProfile,
@@ -219,6 +229,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     profiles: aixProfiles,
     scope: hierarchyScope,
     profileId: resolvedProfileId,
+    onScopeChange: onHierarchyScopeChange,
     onProfileChange: setHierarchyProfileId,
   };
   const resetProfileId = resolveAixProfileId({
@@ -227,6 +238,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   });
   const resetHierarchyProfile = () => {
     setHierarchyProfileId(resetProfileId);
+    setHierarchyScopeState({ baseScope: baseHierarchyScope, scope: baseHierarchyScope });
   };
   const [wasOpen, setWasOpen] = useState(props.open === true);
   if (props.open === true && !wasOpen) {
@@ -570,7 +582,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                 {props.footer}
               </div>
             </DockedPickerContext>
-          ) : hierarchyScope === "work" && aixProfiles.length > 0 ? (
+          ) : aixProfiles.length > 0 ? (
             <div className="flex flex-col">
               {picker}
               <div className="flex shrink-0 items-center gap-2 border-t border-border/70 bg-muted/40 px-3 py-2">

@@ -98,6 +98,7 @@ function appendUnavailableDynamicModelSelection(
 function toAppModelOption(
   model: ServerProvider["models"][number],
   driverKind: ProviderDriverKind,
+  showCatalogFamily = true,
 ): AppModelOption {
   const option: AppModelOption = {
     slug: model.slug,
@@ -106,8 +107,13 @@ function toAppModelOption(
   };
   const shortName = resolveModelShortName(model, driverKind);
   if (shortName) option.shortName = shortName;
-  if (model.subProvider) option.subProvider = model.subProvider;
-  else if (model.catalogMetadata?.family) option.subProvider = model.catalogMetadata.family;
+  if (
+    model.subProvider &&
+    (showCatalogFamily || model.subProvider !== model.catalogMetadata?.family)
+  )
+    option.subProvider = model.subProvider;
+  else if (showCatalogFamily && model.catalogMetadata?.family)
+    option.subProvider = model.catalogMetadata.family;
   if (model.catalogMetadata) option.catalogMetadata = model.catalogMetadata;
   if (model.aliases) option.aliases = model.aliases;
   if (model.badge) option.badge = model.badge;
@@ -217,9 +223,10 @@ export function getAppModelOptionsForInstance(
   entry: ProviderInstanceEntry,
   selectedModel?: string | null,
 ): AppModelOption[] {
+  const isAixInstance = entry.aixProfile !== undefined || entry.instanceId.startsWith("aix-");
   const options: AppModelOption[] = entry.models
     .filter((model) => !model.isCustom)
-    .map((model) => toAppModelOption(model, entry.driverKind));
+    .map((model) => toAppModelOption(model, entry.driverKind, !isAixInstance));
   const seen = new Set(options.map((option) => option.slug));
   const builtInModelSlugs = new Set(
     Arr.filterMap(entry.models, (model) =>
@@ -239,7 +246,9 @@ export function getAppModelOptionsForInstance(
       slug: custom.slug,
       name: custom.name,
       isCustom: true,
-      ...(custom.catalogMetadata?.family ? { subProvider: custom.catalogMetadata.family } : {}),
+      ...(!isAixInstance && custom.catalogMetadata?.family
+        ? { subProvider: custom.catalogMetadata.family }
+        : {}),
       ...(custom.catalogMetadata ? { catalogMetadata: custom.catalogMetadata } : {}),
       ...(shortName ? { shortName } : {}),
     });

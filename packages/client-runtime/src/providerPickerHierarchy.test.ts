@@ -93,6 +93,13 @@ describe("provider picker hierarchy", () => {
         selectedInstanceId: ProviderInstanceId.make("codex"),
       }).map((item) => item.instanceId),
     ).toEqual(["aix-codex-ac", "aix-opencode-ac", "codex"]);
+    expect(
+      providerInstancesForProjectScope({
+        entries,
+        scope: "personal",
+        selectedInstanceId: ProviderInstanceId.make("aix-codex-ac"),
+      }).map((item) => item.instanceId),
+    ).toEqual(["codex", "aix-codex-ac"]);
   });
 
   it("resolves project picker scope only when the environment supports it", () => {
