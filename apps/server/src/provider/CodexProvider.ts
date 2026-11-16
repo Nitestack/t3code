@@ -480,7 +480,7 @@ function appendCustomCodexModels(
   const fallbackCapabilities = models.find((model) => model.capabilities)?.capabilities ?? null;
   const withCustom = providerModelsFromSettings(models, customModels, fallbackCapabilities);
   if (!aixManaged) return withCustom;
-  // An aix instance routes only through verified pairs, so built-ins it never verified are hidden.
+  // An aix instance offers only what its gateway catalog lists, so built-ins are hidden.
   const synced = new Set(readCustomModelEntries(customModels).map((entry) => entry.slug));
   return withCustom.filter((model) => synced.has(model.slug));
 }

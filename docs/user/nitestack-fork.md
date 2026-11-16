@@ -25,15 +25,14 @@ profile, such as `Work · Codex` or `Work · OpenCode`. A model's details show i
 window, maximum output, input and output prices per million tokens, and reasoning levels. Values the
 gateway does not report show as Unknown. The model ID sent to the gateway is the original ID.
 
-Only models that can run are offered:
+Each model runs in the agent that matches its family:
 
 - A direct Anthropic API profile offers Claude models only.
-- Native Codex and Claude Code are used only for model and endpoint combinations that were verified
-  with a real tool-using turn. Today that is `gpt-6.1-sol` on a LiteLLM Responses route for Codex and
-  `claude-opus-5-5` on the Anthropic API for Claude Code.
+- Claude models run in Claude Code, from a LiteLLM gateway or the Anthropic API.
+- GPT models from a LiteLLM gateway run in Codex. Open-weight `gpt-oss` models run in OpenCode.
 - Other chat models from a LiteLLM gateway run in OpenCode, which T3 configures for that profile. You
   do not need to install a provider login or write an OpenCode config for it.
-- Embedding, image, and generic wildcard routes are not listed.
+- Embedding, image, audio, and generic wildcard routes are not listed.
 
 If a selected model or profile stops working, the turn fails with an error. T3 never switches to a
 different model or agent for you.
