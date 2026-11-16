@@ -3357,8 +3357,10 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
                   current?.options,
                 );
               }
+            } else if (base.activeProvider) {
+              delete nextMap[base.activeProvider];
             }
-            const nextActiveProvider = normalized?.instanceId ?? base.activeProvider;
+            const nextActiveProvider = normalized?.instanceId ?? null;
             if (
               opts?.explicit !== true &&
               Equal.equals(base.modelSelectionByProvider, nextMap) &&

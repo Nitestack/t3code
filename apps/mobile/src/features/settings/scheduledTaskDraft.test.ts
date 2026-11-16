@@ -82,6 +82,30 @@ describe("scheduleDraftForTask", () => {
   });
 });
 
+it("does not choose a legacy catalog default for a scheduled task", () => {
+  const config = {
+    settings: DEFAULT_SERVER_SETTINGS,
+    providers: [
+      {
+        instanceId: ProviderInstanceId.make("codex"),
+        driver: ProviderDriverKind.make("codex"),
+        enabled: true,
+        installed: true,
+        auth: { status: "authenticated" },
+        models: [
+          { slug: "legacy", name: "Legacy", isLegacy: true, isDefault: true },
+          { slug: "current", name: "Current", isLegacy: false },
+        ],
+      },
+    ],
+  } as unknown as ServerConfig;
+
+  expect(scheduledTaskDefaultModel(config, null)).toEqual({
+    instanceId: ProviderInstanceId.make("codex"),
+    model: "current",
+  });
+});
+
 describe("scheduleFromDraft", () => {
   it("rejects an empty day selection rather than silently scheduling every day", () => {
     expect(scheduleFromDraft({ ...DEFAULT_SCHEDULE, weekdays: [] })).toBeNull();

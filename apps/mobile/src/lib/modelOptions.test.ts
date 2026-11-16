@@ -681,7 +681,7 @@ describe("mobile model options", () => {
     });
   });
 
-  it("keeps configured legacy model selections consistent with web", () => {
+  it("does not use a configured legacy model as a default", () => {
     const config = {
       providers: [
         {
@@ -709,7 +709,7 @@ describe("mobile model options", () => {
     const legacy = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" };
 
     expect(resolveDefaultableModelSelection(config, current, null)).toBe(current);
-    expect(resolveDefaultableModelSelection(config, legacy, null)).toBe(legacy);
+    expect(resolveDefaultableModelSelection(config, legacy, null)).toBeNull();
     expect(resolveDefaultableModelSelection(null, legacy, null)).toBe(legacy);
   });
 

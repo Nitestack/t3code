@@ -204,6 +204,8 @@ export function isModelSelectionInProjectScope(input: {
 export function resolveDraftModelSelectionForScope(input: {
   readonly scope: ProjectScope;
   readonly explicitSelection?: ModelSelection | null | undefined;
+  /** A model carried from the source route, before configured and last-used defaults. */
+  readonly carriedSelection?: ModelSelection | null | undefined;
   readonly stickySelection?: ModelSelection | null | undefined;
   /** The project's configured model, before scope and readiness are applied. */
   readonly normalDefault?: ModelSelection | null | undefined;
@@ -228,6 +230,8 @@ export function resolveDraftModelSelectionForScope(input: {
     const provider = providers.find((candidate) => candidate.instanceId === selection.instanceId);
     return provider && inScope(provider) && ready(provider) ? selection : null;
   };
+  const carried = selectable(input.carriedSelection);
+  if (carried) return carried;
   const configured = selectable(input.normalDefault);
   if (configured) return configured;
   const sticky = selectable(input.stickySelection);
@@ -242,6 +246,7 @@ export function resolveDraftModelSelectionAfterUsageLimitFallback(input: {
   readonly scope: ProjectScope;
   readonly exhaustedSelection: ModelSelection | null | undefined;
   readonly fallbackSelection: ModelSelection | null | undefined;
+  readonly carriedSelection?: ModelSelection | null | undefined;
   readonly normalDefault?: ModelSelection | null | undefined;
   readonly stickySelection?: ModelSelection | null | undefined;
   readonly orderedDefault?: ModelSelection | null | undefined;
@@ -274,9 +279,11 @@ export function resolveDraftModelSelectionAfterUsageLimitFallback(input: {
   const providers = input.providers.filter(
     (provider) => provider.instanceId !== input.exhaustedSelection?.instanceId,
   );
+  // Usage limits apply to an account, so remove the exhausted provider instance as a whole.
   return resolveDraftModelSelectionForScope({
     scope: input.scope,
     normalDefault: isExhausted(input.normalDefault) ? null : input.normalDefault,
+    carriedSelection: isExhausted(input.carriedSelection) ? null : input.carriedSelection,
     stickySelection: isExhausted(input.stickySelection) ? null : input.stickySelection,
     orderedDefault: isExhausted(input.orderedDefault) ? null : input.orderedDefault,
     providers,

@@ -50,7 +50,10 @@ import { useAtomValue } from "@effect/atom-react";
 import { defaultProjectFallbackReadyAtom } from "../state/projects";
 import { useThreadRouteTarget } from "./useThreadRouteTarget";
 import { readUnloadedThreadCount } from "../state/olderSettledShelf";
-import { resolveProjectDefaultProviderModelSelection } from "../providerInstances";
+import {
+  draftDefaultProvidersFor,
+  resolveProjectDefaultProviderModelSelection,
+} from "../providerInstances";
 import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
 import {
   resolveDraftModelSelectionAfterUsageLimitFallback,
@@ -177,6 +180,11 @@ export function createNewThreadHandler(router: AnyRouter) {
     );
     const environmentConfig = environmentServerConfigs.get(projectRef.environmentId);
     const providers = environmentConfig?.providers ?? [];
+    const resolverProviders = draftDefaultProvidersFor(
+      providers,
+      targetServerSettings,
+      projectRef.projectId,
+    );
     const projectScope = resolveModelPickerProjectScope(
       project?.scope,
       environmentConfig?.environment?.capabilities?.projectScope === true,
@@ -202,10 +210,11 @@ export function createNewThreadHandler(router: AnyRouter) {
     });
     const defaultModelSelection = resolveDraftModelSelectionForScope({
       scope: projectScope,
+      carriedSelection: carrySelectionForScope,
       normalDefault: configuredDefaultModelSelection,
       orderedDefault: orderedDefaultModelSelection,
-      stickySelection: carrySelectionForScope ?? stickySelectionForScope,
-      providers,
+      stickySelection: stickySelectionForScope,
+      providers: resolverProviders,
     });
     const fallbackResolution = resolveNewThreadModelSelection({
       defaultSelection: defaultModelSelection,
@@ -221,9 +230,10 @@ export function createNewThreadHandler(router: AnyRouter) {
           exhaustedSelection: defaultModelSelection,
           fallbackSelection: fallbackResolution.selection,
           normalDefault: configuredDefaultModelSelection,
-          stickySelection: carrySelectionForScope ?? stickySelectionForScope,
+          carriedSelection: carrySelectionForScope,
+          stickySelection: stickySelectionForScope,
           orderedDefault: orderedDefaultModelSelection,
-          providers,
+          providers: resolverProviders,
         })
       : defaultModelSelection;
     const resolveModelSelectionOverride = (destinationDraftId: DraftId) => {
@@ -236,16 +246,14 @@ export function createNewThreadHandler(router: AnyRouter) {
         scope: projectScope,
         providers,
       });
-      if (hasExplicitComposerModelSelection(carrySourceComposer) && carrySelection) {
-        return carrySelection;
-      }
       if (fallbackResolution.fallback) return projectDefaultModelSelection;
       return resolveDraftModelSelectionForScope({
         scope: projectScope,
         normalDefault: projectDefaultModelSelection,
-        stickySelection: carrySelection ?? stickySelectionForScope,
+        carriedSelection: carrySelection,
+        stickySelection: stickySelectionForScope,
         orderedDefault: orderedDefaultModelSelection,
-        providers,
+        providers: resolverProviders,
       });
     };
     const defaultRuntimeMode = projectSettings.settings.defaultRuntimeMode;

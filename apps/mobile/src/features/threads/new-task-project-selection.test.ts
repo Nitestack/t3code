@@ -1,4 +1,9 @@
-import { EnvironmentId, ProjectId } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  ProjectId,
+  ProviderInstanceId,
+  type ModelSelection,
+} from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
@@ -211,6 +216,7 @@ describe("newTaskDestination", () => {
     readonly current?: EnvironmentProject;
     readonly filtered?: EnvironmentProject;
     readonly last?: { readonly environmentId: string; readonly projectId: string };
+    readonly carriedSelection?: ModelSelection;
   }) {
     return newTaskDestination({
       projects: options.projects,
@@ -225,6 +231,7 @@ describe("newTaskDestination", () => {
         projectId: options.filtered.id,
       },
       lastProject: options.last,
+      carriedSelection: options.carriedSelection,
     });
   }
 
@@ -237,9 +244,18 @@ describe("newTaskDestination", () => {
         current: projects[1],
         filtered: projects[0],
         last: { environmentId: "environment", projectId: "remembered" },
+        carriedSelection: {
+          instanceId: ProviderInstanceId.make("claudeAgent"),
+          model: "claude-sonnet",
+        },
       }),
     ).toEqual({
-      draft: { requestId: "request", environmentId: "other-environment", projectId: "current" },
+      draft: {
+        requestId: "request",
+        environmentId: "other-environment",
+        projectId: "current",
+        carriedSelection: { instanceId: "claudeAgent", model: "claude-sonnet" },
+      },
     });
   });
 

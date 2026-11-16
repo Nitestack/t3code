@@ -220,6 +220,7 @@ import {
 } from "~/lib/sideChatPane";
 import {
   NO_PROVIDER_MODEL_SELECTION,
+  draftDefaultProvidersFor,
   providerInstanceEntriesFor,
   resolveProjectDefaultProviderModelSelection,
   shouldShowInstanceBadge,
@@ -807,9 +808,12 @@ export default function ChatView(props: ChatViewProps) {
     }
   }
   const nowMinute = useNowMinute();
+  const draftServerSettings = draftThread
+    ? (environmentById.get(draftThread.environmentId)?.serverConfig?.settings ?? settings)
+    : settings;
   const draftDefaultModelSelection = draftThread
     ? resolveProjectSettings(
-        settings,
+        draftServerSettings,
         fallbackDraftProject?.id ?? null,
         fallbackDraftProject ?? undefined,
       ).settings.defaultModelSelection
@@ -817,9 +821,16 @@ export default function ChatView(props: ChatViewProps) {
   const draftProviders = draftThread
     ? (providersByEnvironment.get(draftThread.environmentId) ?? [])
     : [];
+  const draftResolverProviders = draftThread
+    ? draftDefaultProvidersFor(draftProviders, draftServerSettings, draftThread.projectId)
+    : [];
   const draftNormalDefault = draftDefaultModelSelection ?? null;
   const draftOrderedDefault = draftThread
-    ? resolveProjectDefaultProviderModelSelection(draftProviders, settings, draftThread.projectId)
+    ? resolveProjectDefaultProviderModelSelection(
+        draftProviders,
+        draftServerSettings,
+        draftThread.projectId,
+      )
     : null;
   const draftEnvironment = draftThread ? environmentById.get(draftThread.environmentId) : null;
   const draftProjectScope = resolveModelPickerProjectScope(
@@ -838,10 +849,12 @@ export default function ChatView(props: ChatViewProps) {
     ? resolveDraftModelSelectionForScope({
         scope: draftProjectScope,
         explicitSelection: draftExplicitModelSelection,
+        carriedSelection:
+          draftExplicitModelSelection === null ? composerSelectedModelSelection : null,
         stickySelection: draftStickySelection,
         normalDefault: draftNormalDefault,
         orderedDefault: draftOrderedDefault,
-        providers: draftProviders,
+        providers: draftResolverProviders,
       })
     : null;
   const draftModelResolution =
@@ -861,9 +874,11 @@ export default function ChatView(props: ChatViewProps) {
         exhaustedSelection: draftScopedDefault,
         fallbackSelection: draftModelResolution.selection,
         normalDefault: draftNormalDefault,
+        carriedSelection:
+          draftExplicitModelSelection === null ? composerSelectedModelSelection : null,
         stickySelection: draftStickySelection,
         orderedDefault: draftOrderedDefault,
-        providers: draftProviders,
+        providers: draftResolverProviders,
       })
     : null;
   const draftFallback =
@@ -2667,13 +2682,14 @@ export default function ChatView(props: ChatViewProps) {
       : null;
   const composerBannerItems = (() => {
     const fallbackSelection = draftFallback?.selection;
-    const defaultSelection =
-      draftDefaultModelSelection ??
-      resolveProjectDefaultProviderModelSelection(
-        providerStatuses,
-        settings,
-        draftThread?.projectId ?? null,
-      );
+    const defaultSelection = draftThread
+      ? resolveDraftModelSelectionForScope({
+          scope: draftProjectScope,
+          normalDefault: draftNormalDefault,
+          orderedDefault: draftOrderedDefault,
+          providers: draftResolverProviders,
+        })
+      : null;
     const fallback =
       !isServerThread &&
       multipleModelSelections === null &&

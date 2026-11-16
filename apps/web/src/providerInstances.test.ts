@@ -7,6 +7,7 @@ import {
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import {
+  draftDefaultProvidersFor,
   applyProviderInstanceSettings,
   brandProviderInstanceEntries,
   deriveProviderEntriesByEnvironment,
@@ -172,6 +173,27 @@ describe("applyProviderInstanceSettings", () => {
 
     expect(codex?.enabled).toBe(true);
     expect(grok?.enabled).toBe(false);
+  });
+});
+
+describe("draftDefaultProvidersFor", () => {
+  it("applies the project's provider enablement before checking draft readiness", () => {
+    const instanceId = ProviderInstanceId.make("codex");
+    const projectId = ProjectId.make("project-a");
+    const entries = draftDefaultProvidersFor(
+      [provider({ provider: ProviderDriverKind.make("codex"), instanceId })],
+      {
+        providerInstances: {
+          [instanceId]: { driver: ProviderDriverKind.make("codex"), enabled: true },
+        },
+        projectSettingsOverrides: {
+          [projectId]: { providerInstances: { [instanceId]: { enabled: false } } },
+        },
+      },
+      projectId,
+    );
+
+    expect(entries[0]?.enabled).toBe(false);
   });
 });
 
@@ -349,6 +371,25 @@ describe("resolveSelectableProviderInstance", () => {
         status: "error",
       }),
     ];
+
+    expect(resolveSelectableProviderInstance(providers, undefined)).toBeUndefined();
+  });
+
+  it("does not use a non-ready instance as the display fallback", () => {
+    const warning = ProviderInstanceId.make("codex");
+    const notInstalled = ProviderInstanceId.make("claudeAgent");
+    const providers = [
+      provider({
+        provider: ProviderDriverKind.make("codex"),
+        instanceId: warning,
+        status: "warning",
+      }),
+      provider({
+        provider: ProviderDriverKind.make("claudeAgent"),
+        instanceId: notInstalled,
+        status: "ready",
+      }),
+    ].map((entry) => (entry.instanceId === notInstalled ? { ...entry, installed: false } : entry));
 
     expect(resolveSelectableProviderInstance(providers, undefined)).toBeUndefined();
   });

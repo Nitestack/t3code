@@ -37,8 +37,16 @@ export function scheduledTaskDefaultModel(
   const configured = resolveProjectSettings(settings, project?.id ?? null, project).settings
     .defaultModelSelection;
   const projectDefaultSelection =
-    resolveDefaultableModelSelection(config, configured, project?.id ?? null) ??
-    resolveDefaultableModelSelection(config, settings.defaultModelSelection, project?.id ?? null);
+    [configured, settings.defaultModelSelection]
+      .map((selection) => resolveDefaultableModelSelection(config, selection, project?.id ?? null))
+      .find((selection) => {
+        if (!selection) return false;
+        return (
+          config?.providers
+            .find((provider) => provider.instanceId === selection.instanceId)
+            ?.models.find((model) => model.slug === selection.model)?.isLegacy !== true
+        );
+      }) ?? null;
   return resolveNewTaskModelSelection({
     draftSelection: null,
     projectDefaultSelection,
@@ -48,7 +56,7 @@ export function scheduledTaskDefaultModel(
       projectDefaultSelection,
       undefined,
       project?.id ?? null,
-    ),
+    ).filter((option) => !option.isLegacy),
   });
 }
 
