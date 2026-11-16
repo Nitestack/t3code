@@ -124,7 +124,7 @@ import {
 } from "../hooks/useThreadActions";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useOrderWhileOpen } from "../hooks/useOrderWhileOpen";
-import { useProjectGroupUpdate, useProjectPin } from "../hooks/useProjectGroupUpdate";
+import { useProjectPin } from "../hooks/useProjectGroupUpdate";
 import { useSidebarProjectGroups } from "../hooks/useSidebarProjectGroups";
 import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
 import { registerSettleAndAdvance } from "../settleAndAdvance";
@@ -180,6 +180,7 @@ import {
   sidebarFolderExpansionKeys,
   buildBulkTitleRegenerationContextMenuItem,
   buildBulkUnpinContextMenuItem,
+  buildSidebarProjectContextMenuItems,
   deleteSelectedThreadEntries,
   filterSidebarProjectScopeItems,
   firstValidTimestampMs,
@@ -1274,15 +1275,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const {
     canPinProjectGroup: canPinProject,
     canMoveProjectGroupScope,
+    moveProjectGroupScope,
     setProjectGroupPinned,
     toggleProjectGroupPin,
   } = useProjectPin();
-  const { updateProjectGroup } = useProjectGroupUpdate();
   const handleProjectSettings = useStableCallback(
-    (
-      event: ReactMouseEvent<HTMLElement> | ReactKeyboardEvent<HTMLInputElement>,
-      projectGroup: SidebarProjectSnapshot,
-    ) => {
+    (event: ReactMouseEvent<HTMLElement>, projectGroup: SidebarProjectSnapshot) => {
       event.preventDefault();
       event.stopPropagation();
       suppressNextScopeChangeRef.current = true;
@@ -1294,33 +1292,19 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     if (isMobile) setOpenMobile(false);
     void handleNewThread(scopeProjectRef(group.environmentId, group.id));
   });
-  const handleProjectFolderContextMenu = useStableCallback(
+  const handleProjectContextMenu = useStableCallback(
     (group: SidebarProjectSnapshot, position: { x: number; y: number }) => {
       const api = readLocalApi();
       if (!api) return;
       void (async () => {
         const clicked = await settlePromise(() =>
           api.contextMenu.show(
-            [
-              { id: "new-thread", label: "New thread" },
-              { id: "copy-path", label: "Copy path" },
-              ...(canMoveProjectGroupScope(group)
-                ? [
-                    {
-                      id: "change-scope",
-                      label: group.scope === "work" ? "Move to Personal" : "Move to Work",
-                    },
-                  ]
-                : []),
-              ...(canPinProject(group)
-                ? [
-                    group.pinned
-                      ? { id: "unpin", label: "Unpin project", icon: "pin-off" }
-                      : { id: "pin", label: "Pin project", icon: "pin" },
-                  ]
-                : []),
-              { id: "project-settings", label: "Project settings", icon: "settings" },
-            ],
+            buildSidebarProjectContextMenuItems({
+              scope: group.scope ?? "personal",
+              pinned: group.pinned,
+              canMove: canMoveProjectGroupScope(group),
+              canPin: canPinProject(group),
+            }),
             position,
           ),
         );
@@ -1333,12 +1317,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             copyPathToClipboard(group.workspaceRoot, { path: group.workspaceRoot });
             return;
           case "change-scope":
-            if (!canMoveProjectGroupScope(group)) return;
-            void updateProjectGroup(
-              group.memberProjects,
-              { scope: group.scope === "work" ? "personal" : "work" },
-              "Move project",
-            );
+            void moveProjectGroupScope(group);
             return;
           case "pin":
           case "unpin":
@@ -1349,6 +1328,25 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             return;
         }
       })();
+    },
+  );
+  const handleProjectScopeRowContextMenu = useStableCallback(
+    (
+      event: ReactMouseEvent<HTMLElement> | ReactKeyboardEvent<HTMLInputElement>,
+      projectGroup: SidebarProjectSnapshot,
+    ) => {
+      event.preventDefault();
+      event.stopPropagation();
+      suppressNextScopeChangeRef.current = true;
+      const position =
+        "clientX" in event
+          ? { x: event.clientX, y: event.clientY }
+          : (() => {
+              const rect = event.currentTarget.getBoundingClientRect();
+              return { x: rect.left, y: rect.bottom };
+            })();
+      dispatchProjectScopeMenu({ type: "project-settings-opened" });
+      handleProjectContextMenu(projectGroup, position);
     },
   );
 
@@ -3153,7 +3151,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                         ) {
                           return;
                         }
-                        if (project) handleProjectSettings(event, project);
+                        if (project) handleProjectScopeRowContextMenu(event, project);
                       }}
                       onChange={(event) =>
                         dispatchProjectScopeMenu({
@@ -3178,7 +3176,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                             // The icon badge marks selection; Base UI's single value would shade one row.
                             data-selected={undefined}
                             onContextMenu={(event) => {
-                              if (project) handleProjectSettings(event, project);
+                              if (project) handleProjectScopeRowContextMenu(event, project);
                             }}
                           >
                             <ProjectScopeRowIcon isSelected={isSelected}>
@@ -3570,7 +3568,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                 hiddenThreads={folder.hiddenThreads}
                                 onToggle={toggleProjectFolder}
                                 onNewThread={startThreadInProjectFolder}
-                                onContextMenu={handleProjectFolderContextMenu}
+                                onContextMenu={handleProjectContextMenu}
                               />,
                             );
                             for (const thread of folder.threads) {

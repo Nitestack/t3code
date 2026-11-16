@@ -37,6 +37,7 @@ import {
   groupSidebarThreadsByProject,
   resolveSidebarFolderDot,
   sidebarFolderExpansionKeys,
+  buildSidebarProjectContextMenuItems,
 } from "./Sidebar.logic";
 import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
 import {
@@ -61,6 +62,37 @@ import {
 } from "./sidebar/routeReveal";
 
 const localEnvironmentId = EnvironmentId.make("environment-local");
+
+describe("buildSidebarProjectContextMenuItems", () => {
+  it("shares project actions and only offers scope and pin actions when allowed", () => {
+    expect(
+      buildSidebarProjectContextMenuItems({
+        scope: "personal",
+        pinned: false,
+        canMove: false,
+        canPin: false,
+      }),
+    ).toEqual([
+      { id: "new-thread", label: "New thread" },
+      { id: "copy-path", label: "Copy path" },
+      { id: "project-settings", label: "Project settings", icon: "settings" },
+    ]);
+    expect(
+      buildSidebarProjectContextMenuItems({
+        scope: "work",
+        pinned: true,
+        canMove: true,
+        canPin: true,
+      }),
+    ).toEqual([
+      { id: "new-thread", label: "New thread" },
+      { id: "copy-path", label: "Copy path" },
+      { id: "change-scope", label: "Move to Personal" },
+      { id: "unpin", label: "Unpin project", icon: "pin-off" },
+      { id: "project-settings", label: "Project settings", icon: "settings" },
+    ]);
+  });
+});
 
 describe("deleteSelectedThreadEntries", () => {
   const entries = [{ threadKey: "one" }, { threadKey: "two" }, { threadKey: "three" }] as const;
