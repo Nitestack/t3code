@@ -16,7 +16,7 @@ import {
 import { providerInstanceEntriesFor } from "../../providerInstances";
 import { useEnvironmentProviders, useEnvironments } from "../../state/environments";
 import { useProjects } from "../../state/entities";
-import { resolveProjectScope } from "@t3tools/client-runtime/environment";
+import { resolveModelPickerProjectScope } from "@t3tools/client-runtime/provider-picker-hierarchy";
 import { firstManagedDenial } from "../../state/managedPolicy";
 import { EMPTY_SERVER_PROVIDERS } from "../../state/server";
 import { resolveEnvModeLabel, WORKTREE_SUBMODULES_LABELS } from "../BranchToolbar.logic";
@@ -84,11 +84,12 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
   const projectScope =
     target?.projectId &&
     representative?.serverConfig?.environment.capabilities.projectScope === true
-      ? resolveProjectScope(
+      ? resolveModelPickerProjectScope(
           projects.find(
             (project) =>
               project.environmentId === target.environmentId && project.id === target.projectId,
           )?.scope,
+          true,
         )
       : undefined;
   const mixedModel = defaultModelSelectionsAreMixed(

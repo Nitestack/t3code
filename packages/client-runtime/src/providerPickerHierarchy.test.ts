@@ -11,6 +11,7 @@ import {
   pickerFilterProviderKey,
   providerInstancesForProjectScope,
   resolveScopedDraftModelSelection,
+  resolveModelPickerProjectScope,
   resolveAixProfileId,
 } from "./providerPickerHierarchy.ts";
 
@@ -90,6 +91,13 @@ describe("provider picker hierarchy", () => {
         selectedInstanceId: ProviderInstanceId.make("codex"),
       }).map((item) => item.instanceId),
     ).toEqual(["aix-codex-ac", "aix-opencode-ac", "codex"]);
+  });
+
+  it("resolves project picker scope only when the environment supports it", () => {
+    expect(resolveModelPickerProjectScope("work", true)).toBe("work");
+    expect(resolveModelPickerProjectScope("personal", true)).toBe("personal");
+    expect(resolveModelPickerProjectScope("work", false)).toBe("personal");
+    expect(resolveModelPickerProjectScope("unknown", true)).toBe("personal");
   });
 
   it("filters models by project scope while retaining a selected model from the other scope", () => {

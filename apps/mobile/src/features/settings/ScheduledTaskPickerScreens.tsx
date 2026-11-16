@@ -27,7 +27,7 @@ import {
   useScheduledTaskEditor,
 } from "./scheduled-task-editor";
 import { moveDraftToThread, unbindDraftFromThread } from "./scheduledTaskDraft";
-import { resolveProjectScope } from "@t3tools/client-runtime/environment";
+import { resolveModelPickerProjectScope } from "@t3tools/client-runtime/provider-picker-hierarchy";
 
 function MissingTaskDraft() {
   return (
@@ -74,7 +74,7 @@ export function ScheduledTaskModelPickerRouteScreen() {
       projectId={projectId}
       projectScope={
         projectId && config?.environment.capabilities.projectScope === true
-          ? resolveProjectScope(project?.scope)
+          ? resolveModelPickerProjectScope(project?.scope, true)
           : null
       }
       cwd={null}

@@ -4,6 +4,7 @@ import {
   type ProjectScope,
   type ModelSelection,
 } from "@t3tools/contracts";
+import { resolveProjectScope } from "./environment/scope.ts";
 
 export type PickerProviderInstance = {
   readonly instanceId: ProviderInstanceId;
@@ -19,6 +20,13 @@ export type PickerFilterState =
   | { readonly tag: "provider"; readonly providerKey: string }
   | { readonly tag: "aix-profile"; readonly profileId: string }
   | { readonly tag: "aix-harness"; readonly profileId: string; readonly providerKey: string };
+
+export function resolveModelPickerProjectScope(
+  projectScope: unknown,
+  projectScopeSupported: boolean,
+): ProjectScope {
+  return projectScopeSupported ? resolveProjectScope(projectScope) : "personal";
+}
 
 export const pickerFilterProfileId = (filter: PickerFilterState | null): string | undefined =>
   filter?.tag === "aix-profile" || filter?.tag === "aix-harness" ? filter.profileId : undefined;
