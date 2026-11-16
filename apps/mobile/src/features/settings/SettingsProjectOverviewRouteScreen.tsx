@@ -170,7 +170,10 @@ function ProjectOverviewContent(props: {
   const offline = memberTargets.some((target) => target === undefined);
   const canMoveProjectScope =
     environmentScopeEnabled &&
-    allMembers.every((member) => removableEnvironments.has(member.environmentId)) &&
+    allMembers.every(
+      (member, index) =>
+        memberTargets[index] === undefined || removableEnvironments.has(member.environmentId),
+    ) &&
     memberTargets.every(
       (target) =>
         target === undefined || supportsProjectScope(target.serverConfig.environment.capabilities),

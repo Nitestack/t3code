@@ -107,7 +107,8 @@ export function useProjectGroupUpdate() {
 
 /** Pin state for a project group, shared by every list that can pin or unpin a project. */
 export function useProjectPin() {
-  const { updateProjectGroup, canOrganizeProjectGroup } = useProjectGroupUpdate();
+  const { updateProjectGroup, canOrganizeProjectGroup, canSetProjectScope } =
+    useProjectGroupUpdate();
   const environments = [...new Set(useProjects().map((project) => project.environmentId))].map(
     (environmentId) => ({ environmentId }),
   );
@@ -122,6 +123,9 @@ export function useProjectPin() {
   const canPinProjectGroup = (group: PinnableGroup) =>
     canOrganizeProjectGroup(group.memberProjects) &&
     group.memberProjects.every((member) => operableEnvironmentIds.has(member.environmentId));
+  const canMoveProjectGroupScope = (group: PinnableGroup) =>
+    canSetProjectScope(group.memberProjects) &&
+    group.memberProjects.every((member) => operableEnvironmentIds.has(member.environmentId));
   const setProjectGroupPinned = (group: PinnableGroup, pinned: boolean) => {
     void updateProjectGroup(
       group.memberProjects,
@@ -131,6 +135,7 @@ export function useProjectPin() {
   };
   return {
     canPinProjectGroup,
+    canMoveProjectGroupScope,
     setProjectGroupPinned,
     toggleProjectGroupPin: (group: PinnableGroup) => setProjectGroupPinned(group, !group.pinned),
   };
