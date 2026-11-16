@@ -21,10 +21,11 @@ it("routes every catalog Claude model to Claude Code and every GPT Responses mod
     [
       route("claude-opus-5-5", "anthropic-direct-messages"),
       route("claude-sonnet-5-5", "anthropic-direct-messages"),
+      route("anthropic/claude-opus-5-5", "anthropic-direct-messages"),
       route("claude-opus-5-5", "litellm-anthropic-messages"),
       route("claude-haiku-5-5", "litellm-anthropic-messages"),
     ].map(outcome),
-  ).toEqual(Array(4).fill("claudeAgent"));
+  ).toEqual(Array(5).fill("claudeAgent"));
   expect(
     ["gpt-6.1-sol", "gpt-6-luna", "gpt-6.1-sol-2026", "openai/GPT-6.1-sol"].map((id) =>
       outcome(route(id, "litellm-openai-responses")),
@@ -113,6 +114,9 @@ it("rejects non-chat, generic wildcard, and empty IDs on every route", () => {
     "text-embedding-3-large",
     "gpt-image-1.5",
     "gpt-realtime",
+    "gpt-4o-realtime-preview",
+    "openai/gpt-4o-mini-realtime-preview",
+    "gpt-4o-audio-preview",
     "gpt-4o-mini-tts",
     "gpt-4o-transcribe",
     "a2a/assistant",

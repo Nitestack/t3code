@@ -116,8 +116,9 @@ export function knownNonChatId(id: string): boolean {
     name.startsWith("text-embedding-") ||
     name.startsWith("embedding-") ||
     name.startsWith("gpt-image-") ||
-    name.startsWith("gpt-realtime") ||
+    name.includes("realtime") ||
     name.startsWith("gpt-audio") ||
+    name.includes("-audio") ||
     name.startsWith("whisper-") ||
     name.startsWith("tts-") ||
     name.includes("-transcribe") ||
