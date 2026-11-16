@@ -13,7 +13,9 @@ import { normalizeProviderAccentColor } from "@t3tools/client-runtime/state/prov
 import {
   filterLimitPresentationsByGroup,
   usageLimitGroupsInPresentations,
+  resolveUsageLimitGroup,
   type UsageLimitGroup,
+  usageLimitEmptyMessage,
 } from "@t3tools/client-runtime/state/usage-grouping";
 import {
   formatResetsIn,
@@ -400,14 +402,7 @@ export function UsageLimitsSection({
   const groups = usageLimitGroupsInPresentations(selected);
   const { activeScope } = useClientEnvironmentScope();
   const [requestedGroup, setRequestedGroup] = useState<UsageLimitGroup | null>(null);
-  const group =
-    requestedGroup && groups.has(requestedGroup)
-      ? requestedGroup
-      : groups.has(activeScope)
-        ? activeScope
-        : groups.has("personal")
-          ? "personal"
-          : "work";
+  const group = resolveUsageLimitGroup(requestedGroup, groups, activeScope);
   return (
     <div className="space-y-5">
       {groups.size > 1 ? (
@@ -427,11 +422,7 @@ export function UsageLimitsSection({
       <UsageLimitsPooled
         presentations={filterLimitPresentationsByGroup(selected, group)}
         now={now}
-        emptyMessage={
-          group === "work"
-            ? "No AIX profile limits are available for the selected environments."
-            : "No personal subscription limits are available for the selected environments."
-        }
+        emptyMessage={usageLimitEmptyMessage(group)}
       />
     </div>
   );

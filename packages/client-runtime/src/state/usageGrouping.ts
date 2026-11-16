@@ -7,16 +7,38 @@ import {
 
 export type UsageLimitGroup = "personal" | "work";
 
+const isAixIdentity = (instanceId: string | undefined, profileName: string | undefined) =>
+  profileName !== undefined || instanceId?.startsWith("aix-") === true;
+
 export function usageLimitGroupForProvider(
   provider: Pick<ServerProvider, "instanceId" | "usageLimits">,
 ): UsageLimitGroup {
   const limits = provider.usageLimits;
-  const hasAixProfileMetadata =
-    limits?.profileName !== undefined ||
-    (limits?.windows.length === 1 &&
-      aixProfileNameFromWindowId(limits.windows[0]!.id) !== undefined);
-  return provider.instanceId.startsWith("aix-") || hasAixProfileMetadata ? "work" : "personal";
+  const [onlyWindow, ...otherWindows] = limits?.windows ?? [];
+  const legacyAixBudget =
+    onlyWindow !== undefined &&
+    otherWindows.length === 0 &&
+    aixProfileNameFromWindowId(onlyWindow.id) !== undefined;
+  return isAixIdentity(provider.instanceId, limits?.profileName) || legacyAixBudget
+    ? "work"
+    : "personal";
 }
+
+/** An explicit choice wins while that group has limits; otherwise the active scope, then Personal. */
+export function resolveUsageLimitGroup(
+  requested: UsageLimitGroup | null,
+  groups: ReadonlySet<UsageLimitGroup>,
+  activeScope: UsageLimitGroup,
+): UsageLimitGroup {
+  if (requested !== null && groups.has(requested)) return requested;
+  if (groups.has(activeScope)) return activeScope;
+  return groups.has("work") && !groups.has("personal") ? "work" : "personal";
+}
+
+export const usageLimitEmptyMessage = (group: UsageLimitGroup) =>
+  group === "work"
+    ? "No AIX profile limits are available for the selected environments."
+    : "No personal subscription limits are available for the selected environments.";
 
 export function groupLimitAccounts(accounts: readonly LimitAccount[]): {
   readonly personal: readonly LimitAccount[];
@@ -25,10 +47,9 @@ export function groupLimitAccounts(accounts: readonly LimitAccount[]): {
   const personal: LimitAccount[] = [];
   const work: LimitAccount[] = [];
   for (const account of accounts) {
-    (account.profileName !== undefined || account.providerInstanceId?.startsWith("aix-")
-      ? work
-      : personal
-    ).push(account);
+    (isAixIdentity(account.providerInstanceId, account.profileName) ? work : personal).push(
+      account,
+    );
   }
   return { personal, work };
 }

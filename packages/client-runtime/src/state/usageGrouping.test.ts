@@ -3,6 +3,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   type ServerProvider,
+  UsageLimitSourceId,
 } from "@t3tools/contracts";
 import type { LimitAccount } from "@t3tools/shared/usageLimits";
 import { describe, expect, it } from "vite-plus/test";
@@ -10,6 +11,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   filterLimitPresentationsByGroup,
   groupLimitAccounts,
+  resolveUsageLimitGroup,
   usageLimitGroupForProvider,
   usageLimitGroupsInPresentations,
 } from "./usageGrouping.ts";
@@ -105,18 +107,35 @@ describe("usage limit grouping", () => {
               }),
               provider({ usageLimits: { checkedAt, windows: [] } }),
             ],
-            usageLimitSources: [],
+            usageLimitSources: [
+              {
+                id: UsageLimitSourceId.make("hub"),
+                kind: "cliproxy" as const,
+                label: "hub",
+                checkedAt,
+                accounts: [],
+              },
+            ],
           },
         },
       ],
     ]);
 
     expect(usageLimitGroupsInPresentations(input)).toEqual(new Set(["personal", "work"]));
-    expect(
-      filterLimitPresentationsByGroup(input, "work").get(id)?.serverConfig?.providers,
-    ).toHaveLength(1);
-    expect(
-      filterLimitPresentationsByGroup(input, "personal").get(id)?.serverConfig?.providers,
-    ).toHaveLength(1);
+    const work = filterLimitPresentationsByGroup(input, "work").get(id)?.serverConfig;
+    const personal = filterLimitPresentationsByGroup(input, "personal").get(id)?.serverConfig;
+    expect(work?.providers.map((entry) => entry.instanceId)).toEqual(["aix-codex-work"]);
+    expect(work?.usageLimitSources).toEqual([]);
+    expect(personal?.providers.map((entry) => entry.instanceId)).toEqual(["codex"]);
+    expect(personal?.usageLimitSources?.map((source) => source.id)).toEqual(["hub"]);
+  });
+
+  it("shows the chosen group while it has limits, then the active scope, then Personal", () => {
+    const both = new Set(["personal", "work"] as const);
+    const workOnly = new Set(["work"] as const);
+    expect(resolveUsageLimitGroup("work", both, "personal")).toBe("work");
+    expect(resolveUsageLimitGroup(null, both, "work")).toBe("work");
+    expect(resolveUsageLimitGroup("personal", workOnly, "personal")).toBe("work");
+    expect(resolveUsageLimitGroup(null, new Set(), "work")).toBe("personal");
   });
 });

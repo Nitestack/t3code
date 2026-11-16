@@ -6,7 +6,9 @@ import { normalizeProviderAccentColor } from "@t3tools/client-runtime/state/prov
 import {
   filterLimitPresentationsByGroup,
   usageLimitGroupsInPresentations,
+  resolveUsageLimitGroup,
   type UsageLimitGroup,
+  usageLimitEmptyMessage,
 } from "@t3tools/client-runtime/state/usage-grouping";
 import {
   collectLimitAccounts,
@@ -428,14 +430,7 @@ export function UsageLimitsSection({
   const groups = usageLimitGroupsInPresentations(selected);
   const { activeScope } = useMobileEnvironmentScope();
   const [requestedGroup, setRequestedGroup] = useState<UsageLimitGroup | null>(null);
-  const group =
-    requestedGroup && groups.has(requestedGroup)
-      ? requestedGroup
-      : groups.has(activeScope)
-        ? activeScope
-        : groups.has("personal")
-          ? "personal"
-          : "work";
+  const group = resolveUsageLimitGroup(requestedGroup, groups, activeScope);
   const scopedPresentations = filterLimitPresentationsByGroup(selected, group);
   const pools = collectLimitPools(collectLimitAccounts(scopedPresentations), now);
   const notices = collectLimitNotices(scopedPresentations);
@@ -459,9 +454,7 @@ export function UsageLimitsSection({
         <Text className="py-12 text-center text-base text-foreground-muted">
           {selected.size === 0
             ? "Select an environment to see limits."
-            : group === "work"
-              ? "No AIX profile limits are available for the selected environments."
-              : "No personal subscription limits are available for the selected environments."}
+            : usageLimitEmptyMessage(group)}
         </Text>
       ) : null}
       {pools.map((pool) => {
@@ -527,7 +520,7 @@ export function UsageLimitsSection({
           </Pressable>
         </View>
       ))}
-      {notices.length > 0 || (failedLabels.length > 0 && groups.size <= 1) ? (
+      {notices.length > 0 || failedLabels.length > 0 ? (
         <View
           accessible
           accessibilityRole="alert"
@@ -545,7 +538,7 @@ export function UsageLimitsSection({
                 {notice}
               </Text>
             ))}
-            {failedLabels.length > 0 && groups.size <= 1 ? (
+            {failedLabels.length > 0 ? (
               <Text className="text-sm font-t3-medium text-warning-foreground">
                 {failedLabels.join(", ")} could not refresh limits. Showing the last known values.
               </Text>
