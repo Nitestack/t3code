@@ -1,7 +1,6 @@
 import type { EnvironmentId, ProjectId, ProjectScope } from "@t3tools/contracts";
 
 export type EnvironmentScope = ProjectScope;
-export type EnvironmentScopeAssignments = Readonly<Record<string, EnvironmentScope>>;
 
 export function isEnvironmentScope(value: unknown): value is EnvironmentScope {
   return value === "work" || value === "personal";
@@ -9,15 +8,6 @@ export function isEnvironmentScope(value: unknown): value is EnvironmentScope {
 
 export function resolveActiveEnvironmentScope(value: unknown): EnvironmentScope {
   return isEnvironmentScope(value) ? value : "personal";
-}
-
-export function normalizeEnvironmentScopeAssignments(value: unknown): EnvironmentScopeAssignments {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
-  return Object.fromEntries(
-    Object.entries(value).filter((entry): entry is [string, EnvironmentScope] =>
-      isEnvironmentScope(entry[1]),
-    ),
-  );
 }
 
 export interface ScopedProject {

@@ -1097,7 +1097,7 @@ function FolderBrowser(props: {
 
 export function AddProjectNewScreen(props: { readonly environmentId?: string | string[] }) {
   const openNewTaskDraft = useOpenNewTaskDraft();
-  const { activeScope } = useMobileEnvironmentScope();
+  const { activeScope, enabled: scopeEnabled } = useMobileEnvironmentScope();
   const navigation = useNavigation();
   const [selectedEnvironmentId, setSelectedEnvironmentId] = useState(
     () => stringParam(props.environmentId) as EnvironmentId | null,
@@ -1191,7 +1191,7 @@ export function AddProjectNewScreen(props: { readonly environmentId?: string | s
     setIsSubmitting(true);
     const result = await createNew({
       environmentId: environment.environmentId,
-      input: { name: trimmedName, scope },
+      input: { name: trimmedName, scope: scopeEnabled ? scope : "personal" },
     });
     if (AsyncResult.isFailure(result)) {
       submittingRef.current = false;
@@ -1276,14 +1276,16 @@ export function AddProjectNewScreen(props: { readonly environmentId?: string | s
             </Text>
           ) : null}
           {machineRows}
-          <SegmentedControl
-            selected={scope}
-            options={[
-              { value: "personal", label: "Personal" },
-              { value: "work", label: "Work" },
-            ]}
-            onSelect={setScope}
-          />
+          {scopeEnabled ? (
+            <SegmentedControl
+              selected={scope}
+              options={[
+                { value: "personal", label: "Personal" },
+                { value: "work", label: "Work" },
+              ]}
+              onSelect={setScope}
+            />
+          ) : null}
           {publishTarget !== null ? (
             <ListSection>
               <ListRow
@@ -1381,14 +1383,14 @@ export function AddProjectNewScreen(props: { readonly environmentId?: string | s
 
 export function AddProjectLocalFolderScreen(props: { readonly environmentId?: string | string[] }) {
   const environment = useEnvironmentFromParam(props.environmentId);
-  const { activeScope } = useMobileEnvironmentScope();
+  const { activeScope, enabled: scopeEnabled } = useMobileEnvironmentScope();
   const [scope, setScope] = useState(activeScope);
   const canCreateProject = useEnvironmentScope(
     environment?.environmentId ?? null,
     AuthOrchestrationOperateScope,
   );
   const navigation = useNavigation();
-  const createProject = useCreateProject(environment, scope);
+  const createProject = useCreateProject(environment, scopeEnabled ? scope : "personal");
   const { isBrowseNavigating, navigateToBrowsePath, pathInput, setPathInput, resolveHomePath } =
     useBrowsePathInput(environment);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -1428,14 +1430,16 @@ export function AddProjectLocalFolderScreen(props: { readonly environmentId?: st
             <ErrorBanner message="This connection cannot add projects." />
           ) : null}
           <ProjectPathInput value={pathInput} onChangeText={setPathInput} onSubmit={submitPath} />
-          <SegmentedControl
-            selected={scope}
-            options={[
-              { value: "personal", label: "Personal" },
-              { value: "work", label: "Work" },
-            ]}
-            onSelect={setScope}
-          />
+          {scopeEnabled ? (
+            <SegmentedControl
+              selected={scope}
+              options={[
+                { value: "personal", label: "Personal" },
+                { value: "work", label: "Work" },
+              ]}
+              onSelect={setScope}
+            />
+          ) : null}
           <PrimaryActionButton
             label="Add project"
             disabled={!canCreateProject || isBrowseNavigating || isSubmitting}
@@ -1464,7 +1468,7 @@ export function AddProjectDestinationScreen(props: {
   readonly prompt?: string | string[];
 }) {
   const openNewTaskDraft = useOpenNewTaskDraft();
-  const { activeScope } = useMobileEnvironmentScope();
+  const { activeScope, enabled: scopeEnabled } = useMobileEnvironmentScope();
   const [scope, setScope] = useState(activeScope);
   const startProjectClone = useAtomCommand(sourceControlEnvironment.startProjectClone, {
     reportFailure: false,
@@ -1539,7 +1543,7 @@ export function AddProjectDestinationScreen(props: {
         projectId: ProjectId.make(uuidv4()),
         title,
         createdAt: new Date().toISOString(),
-        scope,
+        scope: scopeEnabled ? scope : "personal",
         remoteUrl,
         destinationPath: resolved.path,
       },
@@ -1592,17 +1596,19 @@ export function AddProjectDestinationScreen(props: {
       ) : null}
       {environment ? (
         <>
-          <View className="gap-2">
-            <Text className="text-sm font-t3-medium text-foreground-muted">Project scope</Text>
-            <SegmentedControl
-              selected={scope}
-              options={[
-                { value: "personal", label: "Personal" },
-                { value: "work", label: "Work" },
-              ]}
-              onSelect={setScope}
-            />
-          </View>
+          {scopeEnabled ? (
+            <View className="gap-2">
+              <Text className="text-sm font-t3-medium text-foreground-muted">Project scope</Text>
+              <SegmentedControl
+                selected={scope}
+                options={[
+                  { value: "personal", label: "Personal" },
+                  { value: "work", label: "Work" },
+                ]}
+                onSelect={setScope}
+              />
+            </View>
+          ) : null}
           <ProjectPathInput value={pathInput} onChangeText={setPathInput} onSubmit={submitPath} />
           <PrimaryActionButton
             label="Clone project"

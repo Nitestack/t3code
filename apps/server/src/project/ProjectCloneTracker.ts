@@ -90,7 +90,6 @@ interface TrackedClone {
     readonly destinationPath: string;
     readonly repository: SourceControlRepositoryInfo | null;
     readonly protocol: SourceControlCloneProtocol;
-    readonly scope: ProjectCloneStartInput["scope"];
   };
 }
 
@@ -316,7 +315,6 @@ export const make = Effect.gen(function* () {
             destinationPath: prepared.destinationPath,
             repository: prepared.repository,
             protocol: input.protocol ?? "auto",
-            scope: input.scope,
           },
         });
         return [true, next] as const;

@@ -648,6 +648,22 @@ describe("project settings scope", () => {
   const primaryOption = () => page.getByRole("menuitemradio", { name: /^primary/ });
   const remoteOption = () => page.getByRole("menuitemradio", { name: /^remote/ });
 
+  it("lets a project move between Personal and Work from settings", async () => {
+    setup();
+    const project = state.projects[0]!;
+    await using _screen = await mountPanel();
+
+    const moveToWork = page.getByRole("button", { name: "Move to Work" });
+    await expect.element(moveToWork).toBeVisible();
+    await userEvent.click(moveToWork);
+    await vi.waitFor(() =>
+      expect(state.update).toHaveBeenCalledWith({
+        environmentId: primaryId,
+        input: { projectId: project.id, scope: "work" },
+      }),
+    );
+  });
+
   it("offers every environment while no project is selected", async () => {
     setup();
     state.projects = state.projects.filter((project) => project.environmentId === primaryId);

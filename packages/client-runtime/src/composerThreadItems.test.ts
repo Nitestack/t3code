@@ -148,6 +148,7 @@ it("keeps composer mentions in the active environment scope as it changes", () =
     threadIds: ["work-thread", "personal-thread"],
     environmentIds: [personal],
   });
+  expect(candidates(null)).not.toHaveProperty("searchProjectIds");
 });
 
 describe("matchComposerEnvironmentItems", () => {

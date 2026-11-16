@@ -116,6 +116,8 @@ function AddProjectToMachineDialog({ request }: { request: AddProjectToMachineRe
     (protocol === "ssh" ? sshUrl : protocol === "https" ? httpsUrl : null) ?? sourceUrl;
 
   const targetEnvironment = environments.find((env) => env.environmentId === target?.environmentId);
+  const canSetProjectScope =
+    targetEnvironment?.serverConfig?.environment.capabilities.projectOrganization === true;
   const defaultPath = getCloneDestinationPath(
     getAddProjectInitialQuery(targetEnvironment?.serverConfig?.settings.addProjectBaseDirectory),
     getCloneDirectoryPath(
@@ -229,7 +231,7 @@ function AddProjectToMachineDialog({ request }: { request: AddProjectToMachineRe
         title: project.title,
         remoteUrl,
         destinationPath: destinationPath.trim(),
-        scope,
+        scope: canSetProjectScope ? scope : "personal",
         files: [...selectedFiles.keys()],
       });
       close();
@@ -328,20 +330,22 @@ function AddProjectToMachineDialog({ request }: { request: AddProjectToMachineRe
               </div>
             </div>
 
-            <div className="flex flex-col gap-1.5">
-              <Label>Project scope</Label>
-              <ToggleGroup
-                aria-label="Project scope"
-                value={[scope]}
-                onValueChange={(next) => {
-                  const value = next[0];
-                  if (value === "personal" || value === "work") setScope(value);
-                }}
-              >
-                <Toggle value="personal">Personal</Toggle>
-                <Toggle value="work">Work</Toggle>
-              </ToggleGroup>
-            </div>
+            {canSetProjectScope ? (
+              <div className="flex flex-col gap-1.5">
+                <Label>Project scope</Label>
+                <ToggleGroup
+                  aria-label="Project scope"
+                  value={[scope]}
+                  onValueChange={(next) => {
+                    const value = next[0];
+                    if (value === "personal" || value === "work") setScope(value);
+                  }}
+                >
+                  <Toggle value="personal">Personal</Toggle>
+                  <Toggle value="work">Work</Toggle>
+                </ToggleGroup>
+              </div>
+            ) : null}
             <div className="flex flex-col gap-1.5">
               <Label>Clone over</Label>
               {sshUrl && httpsUrl ? (

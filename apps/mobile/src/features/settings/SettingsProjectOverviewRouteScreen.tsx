@@ -350,20 +350,22 @@ function ProjectOverviewContent(props: {
             ) : null}
           </View>
         </View>
-        <SettingsActionRow
-          icon="arrow.left.arrow.right"
-          label={representative.scope === "work" ? "Move to Personal" : "Move to Work"}
-          description={
-            offline
-              ? "Connect every machine with this project to change its scope."
-              : "Moves every checkout of this project between Personal and Work."
-          }
-          disabled={isOrganizing || offline}
-          loading={isOrganizing}
-          onPress={() =>
-            void organize({ scope: representative.scope === "work" ? "personal" : "work" })
-          }
-        />
+        {canOrganize ? (
+          <SettingsActionRow
+            icon="arrow.left.arrow.right"
+            label={representative.scope === "work" ? "Move to Personal" : "Move to Work"}
+            description={
+              offline
+                ? "Connect every machine with this project to change its scope."
+                : "Moves every checkout of this project between Personal and Work."
+            }
+            disabled={isOrganizing || offline}
+            loading={isOrganizing}
+            onPress={() =>
+              void organize({ scope: representative.scope === "work" ? "personal" : "work" })
+            }
+          />
+        ) : null}
       </SettingsSection>
 
       {canOrganize ? (

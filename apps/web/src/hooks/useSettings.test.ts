@@ -176,18 +176,15 @@ describe("persistClientSettingsPatch", () => {
 
     await persistClientSettingsPatch({
       activeEnvironmentScope: "work",
-      environmentScopeAssignments: { "env-a": "work", "env-b": "personal" },
     });
     expect(persisted).toMatchObject({
       activeEnvironmentScope: "work",
-      environmentScopeAssignments: { "env-a": "work", "env-b": "personal" },
     });
 
     __resetClientSettingsPersistenceForTests();
     await ensureClientSettingsHydrated();
     expect(getClientSettings()).toMatchObject({
       activeEnvironmentScope: "work",
-      environmentScopeAssignments: { "env-a": "work", "env-b": "personal" },
     });
   });
 

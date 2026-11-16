@@ -375,7 +375,12 @@ export function useComposerCommandMenu({
   useThreadSearch(
     trigger?.kind === "path" ? (composerCandidates?.searchEnvironmentIds ?? []) : [],
     trigger?.kind === "path" ? trigger.query : "",
-    { projectIds: composerCandidates?.searchProjectIds ?? [], titlesOnly: true },
+    {
+      ...(composerCandidates?.searchProjectIds === undefined
+        ? {}
+        : { projectIds: composerCandidates.searchProjectIds }),
+      titlesOnly: true,
+    },
   );
   const pullRequestSearch = useComposerPullRequestSearch({
     environmentId,

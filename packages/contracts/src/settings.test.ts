@@ -44,27 +44,21 @@ const encodeServerSettingsPatch = Schema.encodeSync(ServerSettingsPatch);
 const decodeClaudeSettings = Schema.decodeUnknownSync(ClaudeSettings);
 
 describe("ClientSettings environment scope preferences", () => {
-  it("defaults old settings and unclassified environments to personal", () => {
+  it("defaults old settings to Personal", () => {
     expect(decodeClientSettings({}).activeEnvironmentScope).toBe("personal");
-    expect(decodeClientSettings({}).environmentScopeAssignments).toEqual({});
   });
 
-  it("persists active scope and independent environment classifications", () => {
-    const settings = decodeClientSettings({
-      activeEnvironmentScope: "work",
-      environmentScopeAssignments: { "env-a": "work", "env-b": "personal" },
-    });
-    expect(encodeClientSettings(settings)).toMatchObject({
-      activeEnvironmentScope: "work",
-      environmentScopeAssignments: { "env-a": "work", "env-b": "personal" },
-    });
+  it("ignores the removed environment scope setting in persisted settings and patches", () => {
+    expect(
+      decodeClientSettings({ environmentScopeAssignments: { "env-a": "work" } }),
+    ).not.toHaveProperty("environmentScopeAssignments");
+    expect(decodeClientSettingsPatch({ environmentScopeAssignments: { "env-a": "work" } })).toEqual(
+      {},
+    );
   });
 
-  it("rejects invalid scopes in settings and patches", () => {
+  it("rejects invalid active scopes", () => {
     expect(() => decodeClientSettings({ activeEnvironmentScope: "other" })).toThrow();
-    expect(() =>
-      decodeClientSettingsPatch({ environmentScopeAssignments: { "env-a": "other" } }),
-    ).toThrow();
   });
 });
 

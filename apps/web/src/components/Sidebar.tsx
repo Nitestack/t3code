@@ -1302,10 +1302,14 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             [
               { id: "new-thread", label: "New thread" },
               { id: "copy-path", label: "Copy path" },
-              {
-                id: "change-scope",
-                label: group.scope === "work" ? "Move to Personal" : "Move to Work",
-              },
+              ...(canPinProject(group)
+                ? [
+                    {
+                      id: "change-scope",
+                      label: group.scope === "work" ? "Move to Personal" : "Move to Work",
+                    },
+                  ]
+                : []),
               ...(canPinProject(group)
                 ? [
                     group.pinned

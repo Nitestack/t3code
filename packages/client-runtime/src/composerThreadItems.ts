@@ -110,7 +110,7 @@ export function composerMenuCandidatesForScope(input: {
   readonly scope: EnvironmentScope | null;
 }): {
   readonly searchEnvironmentIds: ReadonlyArray<EnvironmentId>;
-  readonly searchProjectIds: ReadonlyArray<ProjectId>;
+  readonly searchProjectIds?: ReadonlyArray<ProjectId>;
   readonly linkedEnvironments: ReadonlyMap<EnvironmentId, string>;
   readonly shells: ReadonlyArray<ComposerThreadCandidate>;
   readonly environments: ReadonlyArray<ComposerEnvironmentCandidate>;
@@ -122,7 +122,6 @@ export function composerMenuCandidatesForScope(input: {
   if (input.scope === null) {
     return {
       searchEnvironmentIds: searchTargets.map(({ environmentId }) => environmentId),
-      searchProjectIds: [],
       linkedEnvironments: input.linkedEnvironments,
       shells: input.shells,
       environments: input.environments,

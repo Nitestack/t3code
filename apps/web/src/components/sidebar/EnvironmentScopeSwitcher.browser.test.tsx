@@ -24,7 +24,6 @@ describe("EnvironmentScopeSwitcher", () => {
     stack.defer(() => __setClientSettingsForTests(previousSettings));
     __setClientSettingsForTests({
       ...DEFAULT_CLIENT_SETTINGS,
-      environmentScopeAssignments: {},
     });
     const container = document.createElement("div");
     container.style.width = "216px";

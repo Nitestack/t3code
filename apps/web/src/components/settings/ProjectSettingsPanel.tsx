@@ -620,6 +620,25 @@ function ProjectDetail({
           {canOrganize ? (
             <>
               <SettingsRow
+                title="Project scope"
+                description="Controls whether this project appears in Personal or Work."
+                control={
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={isOrganizing}
+                    onClick={() =>
+                      void organize(
+                        { scope: group.scope === "work" ? "personal" : "work" },
+                        "Failed to move project",
+                      )
+                    }
+                  >
+                    Move to {group.scope === "work" ? "Personal" : "Work"}
+                  </Button>
+                }
+              />
+              <SettingsRow
                 title="Pin"
                 description="Pinned projects come first in project pickers."
                 control={

@@ -80,14 +80,12 @@ describe("mobile preferences state", () => {
 
       registry.set(state.updatePreferencesAtom, {
         activeEnvironmentScope: "work",
-        environmentScopeAssignments: { "env-a": "work", "env-b": "personal" },
       });
       yield* AtomRegistry.getResult(registry, state.updatePreferencesAtom, {
         suspendOnWaiting: true,
       });
       expect(persisted).toMatchObject({
         activeEnvironmentScope: "work",
-        environmentScopeAssignments: { "env-a": "work", "env-b": "personal" },
       });
 
       unmountUpdate();
@@ -103,7 +101,6 @@ describe("mobile preferences state", () => {
         }),
       ).toMatchObject({
         activeEnvironmentScope: "work",
-        environmentScopeAssignments: { "env-a": "work", "env-b": "personal" },
       });
       unmountRestored();
       restoredRegistry.dispose();

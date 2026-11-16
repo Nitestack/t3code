@@ -75,6 +75,7 @@ vi.mock("react-native", () => ({
   ScrollView: "ScrollView",
   View: "View",
 }));
+vi.mock("../../components/ui/SegmentedControl", () => ({ SegmentedControl: "SegmentedControl" }));
 vi.mock("../environment-scope/useMobileEnvironmentScope", () => ({
   useMobileEnvironmentScope: () => ({
     enabled: false,

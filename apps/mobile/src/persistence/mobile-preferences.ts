@@ -14,11 +14,7 @@ import {
   PullRequestMergeMethod,
   type SidebarProjectGroupingMode,
 } from "@t3tools/contracts";
-import {
-  isEnvironmentScope,
-  normalizeEnvironmentScopeAssignments,
-  type EnvironmentScope,
-} from "@t3tools/client-runtime/environment";
+import { isEnvironmentScope, type EnvironmentScope } from "@t3tools/client-runtime/environment";
 import { ToolCallVisibility } from "@t3tools/contracts/settings";
 import type { AndroidNavigationStyle } from "../lib/androidNavigationStyle";
 import type { ComposerEnterBehavior } from "../lib/composerEnterBehavior";
@@ -102,7 +98,6 @@ const isThreadProject = Schema.is(ThreadProject);
 
 export interface Preferences {
   readonly activeEnvironmentScope?: EnvironmentScope;
-  readonly environmentScopeAssignments?: Readonly<Record<string, EnvironmentScope>>;
   readonly navigationTabOrder?: readonly string[];
   readonly hiddenNavigationTabs?: readonly string[];
   readonly pullRequestHideTestFiles?: boolean;
@@ -195,7 +190,6 @@ const isPullRequestMergeMethod = Schema.is(PullRequestMergeMethod);
 function sanitizePreferences(parsed: Preferences): Preferences {
   const preferences: {
     activeEnvironmentScope?: EnvironmentScope;
-    environmentScopeAssignments?: Readonly<Record<string, EnvironmentScope>>;
     navigationTabOrder?: readonly string[];
     hiddenNavigationTabs?: readonly string[];
     pullRequestHideTestFiles?: boolean;
@@ -238,11 +232,6 @@ function sanitizePreferences(parsed: Preferences): Preferences {
 
   if (isEnvironmentScope(parsed.activeEnvironmentScope)) {
     preferences.activeEnvironmentScope = parsed.activeEnvironmentScope;
-  }
-  if (parsed.environmentScopeAssignments !== undefined) {
-    preferences.environmentScopeAssignments = normalizeEnvironmentScopeAssignments(
-      parsed.environmentScopeAssignments,
-    );
   }
 
   if (Array.isArray(parsed.hiddenNavigationTabs)) {

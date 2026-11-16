@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vite-plus/test";
 
 vi.mock("react-native", () => ({ Alert: { alert: vi.fn() } }));
+vi.mock("../../state/entities", () => ({ useProjects: () => [] }));
 vi.mock("../environment-scope/useMobileEnvironmentScope", () => ({
   useMobileEnvironmentScope: () => ({
     enabled: false,

@@ -145,7 +145,9 @@ export function useComposerMenuItems({
   // Mounts older settled threads matching the mention, here and on linked machines, which shells
   // may leave out.
   useThreadSearch(isPathTrigger ? composerCandidates.searchEnvironmentIds : [], pathTriggerQuery, {
-    projectIds: composerCandidates.searchProjectIds,
+    ...(composerCandidates.searchProjectIds === undefined
+      ? {}
+      : { projectIds: composerCandidates.searchProjectIds }),
     titlesOnly: true,
   });
   const offersMachines = useAtomValue(offersLinkedEnvironmentsAtom(environmentId));
