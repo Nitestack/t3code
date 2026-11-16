@@ -2,7 +2,7 @@
 
 This runbook covers stable upstream syncs and version-matched Windows, Android, and Nix builds for
 `Nitestack/t3code`. The fork has no store builds or iOS build. Users can install it from a signed
-Android APK, a Windows installer, source, or the pinned Nix flake, as the
+Android APK, a Windows installer, source, or the latest-release or pinned Nix flake ref, as the
 [fork guide](../user/nitestack-fork.md) explains.
 
 The Nix package is `t3code-<version>` and uses the upstream `t3` and `t3code-desktop` commands,
@@ -207,9 +207,12 @@ with `publish` unchecked to build the Windows installer, signed APK, and same-ve
 Download the resulting Actions artifact and test it locally. No tag or release is created by this
 step. After explicit authorization, dispatch the stable workflow for the reviewed exact source with
 `publish` checked and `artifact_run_id` set to the accepted build-only run. It creates
-`vX.Y.Z` titled `T3 Code vX.Y.Z` from those same tested installer bytes. The notes identify the
-fork commit, source branch, upstream base, and build-only run, and the Nix command resolves the fork
-repository.
+`vX.Y.Z` titled `T3 Code vX.Y.Z` from those same tested installer bytes. This first successful
+publication also creates the `release` branch. Later publications move it only when the new release
+is a fast-forward; publishing an older release leaves it unchanged. The branch never force-moves.
+Use `github:Nitestack/t3code/release` to follow the latest published Nix build, or pin a release tag
+for reproducibility. `main` includes unreleased fork changes. The notes identify the fork commit,
+source branch, upstream base, and build-only run, and the Nix command resolves the fork repository.
 
 Publishing reserves the tag before it creates the release. If a publish run fails between the
 two, the tag remains without a release and blocks that version for every source commit. Confirm on

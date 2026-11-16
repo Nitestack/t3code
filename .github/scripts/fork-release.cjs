@@ -40,6 +40,15 @@ function assertForkReleaseTagTarget({ tag, expectedSha, actualSha }) {
   return true;
 }
 
+function decideReleaseBranchUpdate(compareStatus) {
+  if (compareStatus === "ahead") return "update";
+  if (compareStatus === "identical") return "noop";
+  if (compareStatus === "behind" || compareStatus === "diverged") return "skip";
+  throw new Error(
+    `GitHub returned an unsupported release branch comparison status: ${compareStatus}`,
+  );
+}
+
 function resolveForkUpstreamBase({
   markerContents,
   explicitBase = "",
@@ -598,6 +607,7 @@ module.exports = {
   buildForkBuildInfo,
   buildForkNixBuildSummary,
   buildForkReleaseNotes,
+  decideReleaseBranchUpdate,
   requiredReleaseAssets,
   resolveForkUpstreamBase,
   resolveForkRelease,

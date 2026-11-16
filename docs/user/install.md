@@ -136,15 +136,32 @@ directory as upstream, so install it instead of upstream T3 Code, not next to it
 exception: its hidden package ID differs, so both Android apps can be installed. A stable release
 tag points to the fork integration commit on `main`, with fork changes and upstream through the
 matching stable tag; metadata records that upstream tag's peeled commit as the stable base. The
-flake reads the application version from the source and pins nixpkgs in `flake.lock`:
+flake reads the application version from the source and pins nixpkgs in `flake.lock`.
+
+To follow the latest published release, use the moving `release` branch, which appears after the
+first published release:
+
+```bash
+nix profile add 'github:Nitestack/t3code/release'
+```
+
+For NixOS or Home Manager, set the flake input to `github:Nitestack/t3code/release` and run
+`nix flake update t3code` before rebuilding to pick up a newer release. To pin a reproducible
+version, use a release tag:
+
+```nix
+inputs.t3code.url = "github:Nitestack/t3code/<release-tag>";
+```
+
+The `main` branch includes unreleased fork changes. A full commit SHA can also select a reviewed
+unreleased build. The profile equivalent for a pinned release is:
 
 ```bash
 nix profile add 'github:Nitestack/t3code/<release-tag>'
 ```
 
-Use a tag from the fork's [Releases page](https://github.com/Nitestack/t3code/releases), and the
-newer tag when updating. Older version tags in the repository are upstream's own and do not
-contain this build.
+Use a tag from the fork's [Releases page](https://github.com/Nitestack/t3code/releases). Older
+version tags in the repository are upstream's own and do not contain this build.
 
 For NixOS, add `inputs.t3code.packages.x86_64-linux.default` to
 `environment.systemPackages`. In Home Manager, point the T3 Code module at the same package:
@@ -153,8 +170,8 @@ For NixOS, add `inputs.t3code.packages.x86_64-linux.default` to
 programs.t3code.package = inputs.t3code.packages.x86_64-linux.default;
 ```
 
-Update the pinned input to the desired release tag and rebuild so its lock file records the new
-source. For a reviewed unreleased build, a full fork commit SHA can be used in place of a tag.
+For the moving input, `nix flake update t3code` records the latest release branch commit in the lock
+file. For a pinned input, change the tag and update the lock file deliberately.
 
 ### T3 Code fork (Windows and Android)
 

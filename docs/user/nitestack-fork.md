@@ -107,7 +107,7 @@ Compared with upstream T3 Code at
 - An aix profile's LiteLLM key budget in the usage limits panel.
 - A client-side Work/Personal view on web, desktop, and the fork's Android app.
 - A separately signed Android APK with its own package ID, and no fork iOS build.
-- A pinned Nix flake with the `t3code-<version>` package and the usual T3 Code commands.
+- A Nix flake with the `t3code-<version>` package and the usual T3 Code commands.
 - Upstream sync limited to stable releases and proposed as reviewable pull requests.
 
 ## Run the source checkout
@@ -130,9 +130,11 @@ including an original T3 server. For NixOS development, see the
 
 ## Nix install
 
-The repository has a pinned source flake for `x86_64-linux` and builds the application from a
-reviewed source commit; there is no published binary package. The flake provides the standard `t3`
-and `t3code-desktop` commands. Follow the [Nix install instructions](./install.md#t3-code-fork-nix).
+The repository flake builds the application from source for `x86_64-linux`. Use
+`github:Nitestack/t3code/release` to follow the latest published release, or pin a release tag for a
+reproducible version. The `release` branch appears after the first published release; `main`
+includes unreleased fork changes. The flake provides the standard `t3` and `t3code-desktop`
+commands. Follow the [Nix install instructions](./install.md#t3-code-fork-nix).
 Nix installs the application only. It does not configure aix profiles or place API keys or resolved
 endpoints in the store. Use this package in place of upstream T3 Code because both use the same
 default state directory; it does not configure or test an aix profile.
@@ -148,7 +150,8 @@ and same-version Nix package. The tag and build source are that fork commit; the
 peeled commit is recorded as the stable base. The workflow defaults to an Actions artifact without
 a tag or GitHub release. Public publication requires explicit authorization and keeps the upstream
 version, tag, and release title. See the [fork release runbook](../operations/fork-release.md) for
-details.
+details. Each successful publication advances the `release` branch only when the new commit is a
+fast-forward.
 
 Fork `main` takes only published upstream stable tags; never merge upstream `main`. A tag is synced
 only when it contains every upstream commit already present in fork `main`, so the first release is
