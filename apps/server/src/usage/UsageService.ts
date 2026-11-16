@@ -205,7 +205,7 @@ export const make = Effect.gen(function* () {
       WHERE driver = 'claudeAgent'
         AND (
           provider_instance_id LIKE 'aix-%'
-          OR ${sql.in("provider_instance_id", aixInstanceIds)}
+          OR ${aixInstanceIds.length > 0 ? sql.in("provider_instance_id", aixInstanceIds) : sql`0`}
         )
         AND json_extract(payload_json, '$.nativeThreadRef.driver') = 'claudeAgent'
         AND json_extract(payload_json, '$.nativeThreadRef.nativeId') IS NOT NULL
@@ -1029,10 +1029,9 @@ export const make = Effect.gen(function* () {
           ),
         ),
     );
-    const aixClaudeSessionIds =
-      hasClaudeSessions && aixClaudeInstanceIds.length > 0
-        ? yield* readAixClaudeSessionIds(aixClaudeInstanceIds)
-        : new Set<string>();
+    const aixClaudeSessionIds = hasClaudeSessions
+      ? yield* readAixClaudeSessionIds(aixClaudeInstanceIds)
+      : new Set<string>();
     // Usage two transcripts share counts in the first one, so saved files take the order an exact
     // scan reads them in: walked files in walk order, then the directory's deleted files.
     for (const { provider, dir, walked } of fromMemory ? [] : scannedDirs) {

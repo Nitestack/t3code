@@ -168,6 +168,12 @@ const layerCursorUsageAccounts = <E, R>(
   reader: Layer.Layer<CursorAccountReader.CursorAccountReader, E, R>,
 ) => Layer.fresh(CursorUsageAccounts.layer).pipe(Layer.provide(reader));
 
+// Building into the test scope keeps the in-memory database open for services the test keeps using.
+const provideBuilt =
+  <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>
+  <A, E, R>(self: Effect.Effect<A, E, R>) =>
+    Layer.build(layer).pipe(Effect.flatMap((context) => Effect.provideContext(self, context)));
+
 const makeWithCursor = (read: CursorAccountReader.CursorAccountReader["Service"]["read"]) =>
   Effect.gen(function* () {
     const context = yield* Layer.build(
@@ -523,7 +529,10 @@ describe("Codex usage history", () => {
 });
 
 describe("UsageService", () => {
-  it.effect("classifies aix Codex and Claude transcripts as Work", () =>
+  it.effect.each([
+    { case: "configured", configured: true },
+    { case: "deleted", configured: false },
+  ])("classifies aix Codex and Claude transcripts as Work ($case instance)", ({ configured }) =>
     Effect.gen(function* () {
       const { home, settings } = yield* setup;
       const codexSessions = NodePath.join(home, "codex", "sessions");
@@ -567,13 +576,15 @@ describe("UsageService", () => {
       });
       const scopedSettings = {
         ...settings,
-        providerInstances: {
-          ...settings.providerInstances,
-          [ProviderInstanceId.make("aix-claudeAgent-personal")]: {
-            driver: ProviderDriverKind.make("claudeAgent"),
-            config: { aixProfile: "personal" },
-          },
-        },
+        providerInstances: configured
+          ? {
+              ...settings.providerInstances,
+              [ProviderInstanceId.make("aix-claudeAgent-personal")]: {
+                driver: ProviderDriverKind.make("claudeAgent"),
+                config: { aixProfile: "personal" },
+              },
+            }
+          : settings.providerInstances,
       };
       const summary = yield* Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
@@ -2283,7 +2294,7 @@ describe("UsageService", () => {
           }
         });
         const service = yield* UsageService.make.pipe(
-          Effect.provide(layerService({ prefix: "usage-service-opencode", home, settings })),
+          provideBuilt(layerService({ prefix: "usage-service-opencode", home, settings })),
         );
         const summary = yield* service.readSummary(WINDOW);
         assert.strictEqual(summary.buckets[0]?.provider, "opencode");
@@ -2325,7 +2336,7 @@ describe("UsageService", () => {
         await NodeFSP.writeFile(NodePath.join(directory, "msg_unpriced.json"), unpriced);
       });
       const service = yield* UsageService.make.pipe(
-        Effect.provide(layerService({ prefix: "usage-service-unpriced-tokens", home, settings })),
+        provideBuilt(layerService({ prefix: "usage-service-unpriced-tokens", home, settings })),
       );
       const summary = yield* service.readSummary(WINDOW);
       const model = mergeUsage(
@@ -2369,7 +2380,7 @@ describe("UsageService", () => {
         await NodeFSP.symlink(instanceRoot, alias, "junction");
       });
       const service = yield* UsageService.make.pipe(
-        Effect.provide(
+        provideBuilt(
           layerService({
             prefix: "usage-service-opencode-instances",
             home,
@@ -2444,7 +2455,7 @@ describe("UsageService", () => {
         );
       });
       const service = yield* UsageService.make.pipe(
-        Effect.provide(
+        provideBuilt(
           layerService({
             prefix: "usage-service-aliased-roots-test",
             home,
@@ -2509,7 +2520,7 @@ describe("UsageService", () => {
         environment: [{ name: "ANTIGRAVITY_DATA_DIR", value: dataDir, sensitive: false }],
       });
       const service = yield* UsageService.make.pipe(
-        Effect.provide(
+        provideBuilt(
           layerService({
             prefix: "usage-service-antigravity-instances-test",
             home,
@@ -2594,7 +2605,7 @@ describe("UsageService", () => {
         );
       });
       const service = yield* UsageService.make.pipe(
-        Effect.provide(
+        provideBuilt(
           layerService({
             prefix: "usage-service-accounts-test",
             home,
@@ -2780,7 +2791,7 @@ describe("UsageService", () => {
         const { transcript, settings, home } = yield* setup;
         yield* Effect.promise(() => NodeFSP.writeFile(transcript, claudeLine(1, 5)));
         const service = yield* UsageService.make.pipe(
-          Effect.provide(
+          provideBuilt(
             layerService({
               prefix: "usage-service-inherited-homes-test",
               home,
@@ -3818,7 +3829,7 @@ describe("UsageService", () => {
         await NodeFSP.utimes(transcript, lastWrite, lastWrite);
       });
       const service = yield* UsageService.make.pipe(
-        Effect.provide(layerService({ prefix: "usage-service-saved-window-test", home, settings })),
+        provideBuilt(layerService({ prefix: "usage-service-saved-window-test", home, settings })),
       );
       const first = yield* service.readSummary(WINDOW);
       yield* Effect.promise(() =>
@@ -3945,7 +3956,7 @@ describe("UsageService", () => {
             );
           },
         });
-        const service = yield* UsageService.make.pipe(Effect.provide(serviceLayer));
+        const service = yield* UsageService.make.pipe(provideBuilt(serviceLayer));
 
         const summary = yield* service.readSummary(WINDOW);
         assert.strictEqual(summary.pricing.status, "fresh");
@@ -3960,7 +3971,7 @@ describe("UsageService", () => {
         );
         assert.strictEqual(requests[1]?.headers.accept, "application/vnd.github.raw+json");
 
-        const restarted = yield* UsageService.make.pipe(Effect.provide(serviceLayer));
+        const restarted = yield* UsageService.make.pipe(provideBuilt(serviceLayer));
         const cached = yield* restarted.readSummary(WINDOW);
         assert.strictEqual(cached.pricing.status, "cached");
         assert.deepStrictEqual(cached.buckets, summary.buckets);
@@ -3993,9 +4004,9 @@ describe("UsageService", () => {
         summary.buckets.find((bucket) => bucket.model === "claude-new-model")?.costUsd;
 
       // Rates fetched for this scan are fresh: no second request for the models they lack.
-      const first = yield* (yield* UsageService.make.pipe(
-        Effect.provide(serviceLayer),
-      )).readSummary(WINDOW);
+      const first = yield* (yield* UsageService.make.pipe(provideBuilt(serviceLayer))).readSummary(
+        WINDOW,
+      );
       assert.strictEqual(newModelCost(first), 0);
       assert.strictEqual(requests.length, 1);
 
@@ -4005,7 +4016,7 @@ describe("UsageService", () => {
         "claude-new-model": { input_cost_per_token: 2e-5, output_cost_per_token: 1e-4 },
       };
       yield* TestClock.adjust(Duration.hours(1));
-      const service = yield* UsageService.make.pipe(Effect.provide(serviceLayer));
+      const service = yield* UsageService.make.pipe(provideBuilt(serviceLayer));
       const refreshed = yield* service.readSummary(WINDOW);
       assert.strictEqual(refreshed.pricing.status, "fresh");
       assert.closeTo(newModelCost(refreshed) ?? -1, 10 * 2e-5 + 5 * 1e-4, 1e-12);
@@ -4022,7 +4033,7 @@ describe("UsageService", () => {
     Effect.gen(function* () {
       const { settings, home } = yield* setup;
       const service = yield* UsageService.make.pipe(
-        Effect.provide(layerService({ prefix: "usage-service-interruption-test", home, settings })),
+        provideBuilt(layerService({ prefix: "usage-service-interruption-test", home, settings })),
       );
 
       let orphanedAt: number | undefined;
