@@ -10,6 +10,13 @@ import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import { UsageLimitSourceId } from "./usageLimitSourceId.ts";
 
 /** Stable per-provider ids let sparse updates merge with full probes. */
+export const ServerProviderUsageAmounts = Schema.Struct({
+  currency: Schema.Literal("USD"),
+  spent: Schema.Finite,
+  total: Schema.Finite,
+});
+export type ServerProviderUsageAmounts = typeof ServerProviderUsageAmounts.Type;
+
 export const ServerProviderUsageWindow = Schema.Struct({
   id: TrimmedNonEmptyString,
   kind: Schema.Literals(["session", "weekly", "monthly", "other"]),
@@ -18,6 +25,8 @@ export const ServerProviderUsageWindow = Schema.Struct({
   modelIds: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   providerIds: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   usedPercent: Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 100 })),
+  /** Optional concrete currency amounts for budget windows; older servers omit them. */
+  amounts: Schema.optional(ServerProviderUsageAmounts),
   resetsAt: Schema.optional(IsoDateTime),
   windowDurationMins: Schema.optional(NonNegativeInt),
 });

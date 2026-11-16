@@ -89,6 +89,7 @@ export function keyInfoUsageLimits(input: {
         kind: "other",
         label: "Gateway budget",
         usedPercent: clampPercent((spend / maxBudget) * 100),
+        amounts: { currency: "USD", spent: spend, total: maxBudget },
         ...(resetsAt === undefined ? {} : { resetsAt }),
         ...(windowDurationMins === undefined ? {} : { windowDurationMins }),
       },

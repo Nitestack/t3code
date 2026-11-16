@@ -21,6 +21,7 @@ import {
   type LimitAccount,
   type LimitPoolWindow,
 } from "@t3tools/shared/usageLimits";
+import { formatUsd } from "@t3tools/shared/usageFormat";
 import { Fragment, type ReactNode, useId, useState } from "react";
 import { Linking, Pressable, View } from "react-native";
 import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
@@ -183,6 +184,7 @@ function PoolWindowCard({
 }) {
   const navigation = useNavigation();
   const [barWidth, setBarWidth] = useState(0);
+  const amounts = pool.members.length === 1 ? pool.members[0]?.window.amounts : undefined;
   // Each segment needs room for its account, percent and reset to label itself.
   const segmentWidth = barWidth / Math.max(pool.columns.length, 1);
   const inlineLabels = wide && segmentWidth >= 96;
@@ -204,12 +206,20 @@ function PoolWindowCard({
           {label !== null ? (
             <Text className="text-sm font-t3-medium text-foreground">{label ?? pool.label}</Text>
           ) : null}
-          <View className="flex-row items-baseline gap-1.5">
-            <Text className="text-3xl font-t3-bold tabular-nums text-foreground">
-              {pool.remainingPercent}%
+          {amounts ? (
+            <Text className="text-sm font-t3-medium tabular-nums text-foreground">
+              {formatUsd(amounts.spent)} spent ·{" "}
+              {formatUsd(Math.max(0, amounts.total - amounts.spent))} left of{" "}
+              {formatUsd(amounts.total)}
             </Text>
-            <Text className="text-sm text-foreground-muted">left</Text>
-          </View>
+          ) : (
+            <View className="flex-row items-baseline gap-1.5">
+              <Text className="text-3xl font-t3-bold tabular-nums text-foreground">
+                {pool.remainingPercent}%
+              </Text>
+              <Text className="text-sm text-foreground-muted">left</Text>
+            </View>
+          )}
         </View>
         {pool.pace ? (
           <Text className="text-xs text-foreground-tertiary">{PACE_LABEL[pool.pace]}</Text>
@@ -427,6 +437,12 @@ export function UsageLimitsSection({
       : new Map([...presentations].filter(([id]) => selectedEnvironmentIds.has(id)));
   const scopedPresentations = filterLimitPresentationsByGroup(selected, scope);
   const pools = collectLimitPools(collectLimitAccounts(scopedPresentations), now);
+  const profileCounts = new Map<string, number>();
+  for (const pool of pools) {
+    if (pool.profileName) {
+      profileCounts.set(pool.profileName, (profileCounts.get(pool.profileName) ?? 0) + 1);
+    }
+  }
   const notices = collectLimitNotices(scopedPresentations);
   const externalLinks = collectExternalUsageLinks(scopedPresentations);
   const colors = useProviderColors();
@@ -455,12 +471,11 @@ export function UsageLimitsSection({
                     pool.driver}
                 </Text>
               </View>
-              {pool.profileName ? (
+              {pool.profileName &&
+              (profileCounts.get(pool.profileName) ?? 0) > 1 &&
+              pool.accounts[0]?.environments[0]?.label ? (
                 <Text className="-mt-2 px-1 text-xs text-foreground-muted">
-                  Work profile
-                  {pool.accounts[0]?.environments[0]?.label
-                    ? ` · ${pool.accounts[0].environments[0].label}`
-                    : ""}
+                  {pool.accounts[0].environments[0].label}
                 </Text>
               ) : null}
               {windows.map((window) => {
