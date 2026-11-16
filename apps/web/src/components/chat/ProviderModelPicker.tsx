@@ -33,7 +33,10 @@ import {
   shouldShowInstanceBadge,
   type ProviderInstanceEntry,
 } from "../../providerInstances";
-import { resolvePickerHierarchy } from "@t3tools/client-runtime/provider-picker-hierarchy";
+import {
+  resolveAixProfileId,
+  resolvePickerHierarchy,
+} from "@t3tools/client-runtime/provider-picker-hierarchy";
 import { ModelPickerHierarchyContext } from "./ModelPickerHierarchyContext";
 import { ModelPickerHierarchyFooterControls } from "./ModelPickerHierarchyFooter";
 import { ComposerControl, type ComposerControlSize } from "./ComposerControl";
@@ -199,33 +202,33 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   const activeEntry =
     props.instanceEntries.find((entry) => entry.instanceId === props.activeInstanceId) ?? null;
   const hierarchyScope = props.projectScope ?? activeScope;
-  const availableHierarchy = resolvePickerHierarchy({
-    entries: props.instanceEntries.filter(isProviderInstancePickerVisible),
-    scope: hierarchyScope,
-    selectedModelProfileId: activeEntry?.aixProfile,
-    selectedInstanceId: props.activeInstanceId,
-  });
-  const aixProfiles = availableHierarchy.profiles;
+  const hierarchyEntries = props.instanceEntries.filter(isProviderInstancePickerVisible);
   const [hierarchyProfileId, setHierarchyProfileId] = useState<string | undefined>(
-    activeEntry?.aixProfile ?? aixProfiles[0]?.id,
+    activeEntry?.aixProfile,
   );
-  const [wasOpen, setWasOpen] = useState(props.open === true);
-  const resolvedProfileId = resolvePickerHierarchy({
-    entries: props.instanceEntries.filter(isProviderInstancePickerVisible),
+  const resolvedHierarchy = resolvePickerHierarchy({
+    entries: hierarchyEntries,
     scope: hierarchyScope,
     rememberedProfileId: hierarchyProfileId,
     selectedModelProfileId: activeEntry?.aixProfile,
     selectedInstanceId: props.activeInstanceId,
-  }).profileId;
+  });
+  const aixProfiles = resolvedHierarchy.profiles;
+  const resolvedProfileId = resolvedHierarchy.profileId;
   const hierarchy = {
     profiles: aixProfiles,
     scope: hierarchyScope,
     profileId: resolvedProfileId,
     onProfileChange: setHierarchyProfileId,
   };
+  const resetProfileId = resolveAixProfileId({
+    profiles: aixProfiles,
+    selectedModelProfileId: activeEntry?.aixProfile,
+  });
   const resetHierarchyProfile = () => {
-    setHierarchyProfileId(availableHierarchy.profileId);
+    setHierarchyProfileId(resetProfileId);
   };
+  const [wasOpen, setWasOpen] = useState(props.open === true);
   if (props.open === true && !wasOpen) {
     setWasOpen(true);
     resetHierarchyProfile();
@@ -257,7 +260,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     activeEntry !== null && shouldShowInstanceBadge(activeEntry, props.instanceEntries);
 
   const setIsMenuOpen = (open: boolean) => {
-    if (open) resetHierarchyProfile();
+    if (open && props.open === undefined) resetHierarchyProfile();
     props.onOpenChange?.(open);
     if (props.open === undefined) {
       setUncontrolledIsMenuOpen(open);
@@ -411,7 +414,6 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
         setIsMenuOpen(open);
       }}
       onOpenChangeComplete={(open) => {
-        if (open) resetHierarchyProfile();
         const target = takeOpenTarget(triggerRef.current);
         if (open && docked && target) openTarget(target);
       }}

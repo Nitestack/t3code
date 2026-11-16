@@ -298,6 +298,7 @@ function sameSidebarProviderEntries(
       other.accentColor !== entry.accentColor ||
       other.acpRegistryAgentId !== entry.acpRegistryAgentId ||
       other.acpRegistryIconUrl !== entry.acpRegistryIconUrl ||
+      other.aixProfile !== entry.aixProfile ||
       other.models !== entry.models
     ) {
       return false;

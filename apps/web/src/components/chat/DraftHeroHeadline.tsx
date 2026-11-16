@@ -54,6 +54,10 @@ import { TriageDraftHero } from "./TriageDraftHero";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { resolveProjectDefaultProviderModelSelection } from "../../providerInstances";
 import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
+import {
+  resolveDraftModelSelectionForScope,
+  resolveModelPickerProjectScope,
+} from "@t3tools/client-runtime/provider-picker-hierarchy";
 
 const ADD_PROJECT_VALUE = "add-project";
 
@@ -206,25 +210,37 @@ export function DraftHeroHeadline({
         ? resolveProjectSettings(environmentSettings, project.id, project).settings
             .defaultModelSelection
         : project.defaultModelSelection;
+      const providers = providersByEnvironment.get(project.environmentId) ?? [];
+      const scope = resolveModelPickerProjectScope(
+        project.scope,
+        environmentConfig?.environment?.capabilities?.projectScope === true,
+      );
+      const normalDefault =
+        defaultSelection ??
+        (useComposerDraftStore.getState().stickyActiveProvider !== null || !environmentSettings
+          ? null
+          : resolveProjectDefaultProviderModelSelection(
+              providers,
+              environmentSettings,
+              project.id,
+            ));
       const fallbackResolution = resolveNewThreadModelSelection({
-        defaultSelection:
-          defaultSelection ??
-          (useComposerDraftStore.getState().stickyActiveProvider !== null || !environmentSettings
-            ? null
-            : resolveProjectDefaultProviderModelSelection(
-                providersByEnvironment.get(project.environmentId) ?? [],
-                environmentSettings,
-                project.id,
-              )),
+        defaultSelection: resolveDraftModelSelectionForScope({
+          scope,
+          normalDefault,
+          providers,
+        }),
         fallbackSelection: environmentSettings?.fallbackModelSelection ?? null,
-        providers: providersByEnvironment.get(project.environmentId) ?? [],
+        providers,
         ...(environmentSettings ? { settings: environmentSettings } : {}),
         projectId: project.id,
         now: Date.now(),
       });
-      const defaultModelSelection = fallbackResolution.fallback
-        ? fallbackResolution.selection
-        : defaultSelection;
+      const defaultModelSelection = resolveDraftModelSelectionForScope({
+        scope,
+        normalDefault: fallbackResolution.fallback ? fallbackResolution.selection : normalDefault,
+        providers,
+      });
       if (defaultModelSelection) {
         setModelSelection(draftId, defaultModelSelection, {
           replaceOptions: true,

@@ -2,7 +2,10 @@ import { ChildThreadApprovals } from "./chat/ChildThreadApprovals";
 import { workspaceAreaProps } from "../lib/workspaceFocus";
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
 import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
-import { resolveDraftModelSelectionForScope } from "@t3tools/client-runtime/provider-picker-hierarchy";
+import {
+  resolveDraftModelSelectionForScope,
+  resolveModelPickerProjectScope,
+} from "@t3tools/client-runtime/provider-picker-hierarchy";
 import { queuedRunEditBlockedReason } from "@t3tools/client-runtime/queued-run-edit";
 import { ScrollToEndButton, WorkspaceFileDropOverlay } from "./chat/TimelineOverlays";
 import { usePasteToFocusComposer } from "./chat/usePasteToFocusComposer";
@@ -113,7 +116,6 @@ import {
 } from "@t3tools/client-runtime/state/threads";
 import {
   parseScopedThreadKey,
-  resolveProjectScope,
   scopedThreadKey,
   scopeProjectRef,
   scopeThreadRef,
@@ -824,7 +826,11 @@ export default function ChatView(props: ChatViewProps) {
       : null;
   const draftScopedDefault = draftThread
     ? resolveDraftModelSelectionForScope({
-        scope: resolveProjectScope(fallbackDraftProject?.scope),
+        scope: resolveModelPickerProjectScope(
+          fallbackDraftProject?.scope,
+          environmentById.get(draftThread.environmentId)?.serverConfig?.environment?.capabilities
+            ?.projectScope === true,
+        ),
         explicitSelection: draftExplicitModelSelection,
         stickySelection: composerSelectedModelSelection,
         normalDefault: draftNormalDefault,
@@ -2356,7 +2362,7 @@ export default function ChatView(props: ChatViewProps) {
     publishComposerOverlayHeightStable,
   ]);
 
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- observes the composer overlay element's size before paint and publishes its height
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- observes the composer overlay element size before paint and publishes its height
   useLayoutEffect(() => {
     if (!composerOverlayElement) return;
 
@@ -3740,9 +3746,11 @@ export default function ChatView(props: ChatViewProps) {
                                 projectScope={
                                   activeProject === null
                                     ? null
-                                    : serverConfig?.environment.capabilities.projectScope === true
-                                      ? resolveProjectScope(activeProject.scope)
-                                      : "personal"
+                                    : resolveModelPickerProjectScope(
+                                        activeProject.scope,
+                                        serverConfig?.environment.capabilities.projectScope ===
+                                          true,
+                                      )
                                 }
                                 projectName={activeProject?.title}
                                 compactThreadUnavailable={compactThreadUnavailable}

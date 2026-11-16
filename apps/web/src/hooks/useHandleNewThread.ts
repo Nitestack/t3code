@@ -52,6 +52,10 @@ import { useThreadRouteTarget } from "./useThreadRouteTarget";
 import { readUnloadedThreadCount } from "../state/olderSettledShelf";
 import { resolveProjectDefaultProviderModelSelection } from "../providerInstances";
 import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
+import {
+  resolveDraftModelSelectionForScope,
+  resolveModelPickerProjectScope,
+} from "@t3tools/client-runtime/provider-picker-hierarchy";
 import { filterProjectsByScope } from "@t3tools/client-runtime/environment";
 import { useClientEnvironmentScope } from "../environmentScope";
 
@@ -170,26 +174,42 @@ export function createNewThreadHandler(router: AnyRouter) {
       project?.id ?? null,
       project,
     );
+    const environmentConfig = environmentServerConfigs.get(projectRef.environmentId);
+    const providers = environmentConfig?.providers ?? [];
+    const projectScope = resolveModelPickerProjectScope(
+      project?.scope,
+      environmentConfig?.environment?.capabilities?.projectScope === true,
+    );
     const configuredDefaultModelSelection = projectSettings.settings.defaultModelSelection ?? null;
+    const normalDefaultModelSelection =
+      configuredDefaultModelSelection ??
+      (carryModelSelection || useComposerDraftStore.getState().stickyActiveProvider !== null
+        ? null
+        : resolveProjectDefaultProviderModelSelection(
+            providers,
+            targetServerSettings,
+            projectRef.projectId,
+          ));
+    const defaultModelSelection = resolveDraftModelSelectionForScope({
+      scope: projectScope,
+      normalDefault: normalDefaultModelSelection,
+      providers,
+    });
     const fallbackResolution = resolveNewThreadModelSelection({
-      defaultSelection:
-        configuredDefaultModelSelection ??
-        (carryModelSelection || useComposerDraftStore.getState().stickyActiveProvider !== null
-          ? null
-          : resolveProjectDefaultProviderModelSelection(
-              environmentServerConfigs.get(projectRef.environmentId)?.providers ?? [],
-              targetServerSettings,
-              projectRef.projectId,
-            )),
+      defaultSelection: defaultModelSelection,
       fallbackSelection: targetServerSettings.fallbackModelSelection ?? null,
-      providers: environmentServerConfigs.get(projectRef.environmentId)?.providers ?? [],
+      providers,
       settings: targetServerSettings,
       projectId: projectRef.projectId,
       now: Date.now(),
     });
-    const projectDefaultModelSelection = fallbackResolution.fallback
-      ? fallbackResolution.selection
-      : configuredDefaultModelSelection;
+    const projectDefaultModelSelection = resolveDraftModelSelectionForScope({
+      scope: projectScope,
+      normalDefault: fallbackResolution.fallback
+        ? fallbackResolution.selection
+        : defaultModelSelection,
+      providers,
+    });
     const defaultRuntimeMode = projectSettings.settings.defaultRuntimeMode;
     const resolveModelSelectionOverride = (destinationDraftId: DraftId) =>
       resolveNewThreadModelSelectionOverride({

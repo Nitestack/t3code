@@ -438,7 +438,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   const { favorites } = useEnvironmentModelPreferences(props.environmentId);
   const hierarchyScope = pickerHierarchy?.scope ?? "personal";
   const aixProfiles = pickerHierarchy?.profiles ?? [];
-  const selectedAixProfile = pickerHierarchy?.profileId ?? aixProfiles[0]?.id;
+  const selectedAixProfile =
+    pickerHierarchy?.profileId ?? (hierarchyScope === "work" ? aixProfiles[0]?.id : undefined);
   const hierarchySelectionKey = `${hierarchyScope}:${selectedAixProfile ?? ""}`;
   const activeEntry = props.instanceEntries.find(
     (entry) => entry.instanceId === props.activeInstanceId,

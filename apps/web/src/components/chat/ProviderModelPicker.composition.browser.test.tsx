@@ -25,17 +25,16 @@ function Picker({
   keybindings = [],
   withAix = false,
   withSecondAix = false,
-  controlled = false,
+  controlledOpen,
   projectScope = "personal",
 }: {
   keybindings?: ResolvedKeybindingsConfig;
   withAix?: boolean;
   withSecondAix?: boolean;
-  controlled?: boolean;
+  controlledOpen?: boolean;
   projectScope?: "personal" | "work";
 }) {
   const [model, setModel] = useState("original");
-  const [open, setOpen] = useState(false);
   const modelOptionsByInstance = new Map([
     [
       instanceId,
@@ -60,7 +59,7 @@ function Picker({
         environmentId={null}
         activeInstanceId={instanceId}
         projectScope={projectScope}
-        {...(controlled ? { open, onOpenChange: setOpen } : {})}
+        {...(controlledOpen !== undefined ? { open: controlledOpen } : {})}
         model={model}
         lockedProvider={null}
         instanceEntries={deriveProviderInstanceEntries([
@@ -227,19 +226,30 @@ it("selects the matching harness when the Work profile changes", async () => {
 });
 
 it("resets the Work profile before a controlled picker reopens", async () => {
-  await using _screen = await render(
-    <Picker withAix withSecondAix controlled projectScope="work" />,
-  );
-  const trigger = page.getByRole("button", { name: "Choose model" });
-  await trigger.click();
+  function ParentControlledPicker() {
+    const [open, setOpen] = useState(false);
+    return (
+      <>
+        <button type="button" onClick={() => setOpen(true)}>
+          Open picker
+        </button>
+        <button type="button" onClick={() => setOpen(false)}>
+          Close picker
+        </button>
+        <Picker withAix withSecondAix controlledOpen={open} projectScope="work" />
+      </>
+    );
+  }
+  await using _screen = await render(<ParentControlledPicker />);
+  await page.getByRole("button", { name: "Open picker" }).click();
   await page.getByRole("button", { name: "Work profile: adCare" }).click();
   await page.getByRole("menuitemradio", { name: "Engineering" }).click();
   await expect
     .element(page.getByRole("button", { name: "Work profile: Engineering" }))
     .toBeVisible();
-  await userEvent.keyboard("{Escape}");
+  await page.getByRole("button", { name: "Close picker" }).click();
   await expect.element(page.getByPlaceholder("Search models...")).not.toBeInTheDocument();
-  await trigger.click();
+  await page.getByRole("button", { name: "Open picker" }).click();
   await expect.element(page.getByRole("button", { name: "Work profile: adCare" })).toBeVisible();
 });
 

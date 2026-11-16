@@ -136,6 +136,7 @@ export type SidebarProviderEntry = Pick<
   | "acpRegistryAgentId"
   | "acpRegistryIconUrl"
   | "models"
+  | "aixProfile"
 >;
 function compactSidebarTimeLabel(label: string): string {
   if (label === "just now") return "now";

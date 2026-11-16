@@ -1,7 +1,9 @@
 import { ActiveNewTaskContext } from "../../state/active-new-task";
 import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
-import { resolveDraftModelSelectionForScope } from "@t3tools/client-runtime/provider-picker-hierarchy";
-import { resolveProjectScope } from "@t3tools/client-runtime/environment";
+import {
+  resolveDraftModelSelectionForScope,
+  resolveModelPickerProjectScope,
+} from "@t3tools/client-runtime/provider-picker-hierarchy";
 import { useNowMinuteMs } from "../../lib/clock";
 import * as Dialog from "../../components/ui/Dialog";
 import React, { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
@@ -528,7 +530,10 @@ export function NewTaskFlowProvider(
   });
   const scopedDefaultModel = selectedEnvironmentServerConfig
     ? resolveDraftModelSelectionForScope({
-        scope: resolveProjectScope(selectedProject?.scope),
+        scope: resolveModelPickerProjectScope(
+          selectedProject?.scope,
+          selectedEnvironmentServerConfig?.environment?.capabilities?.projectScope === true,
+        ),
         explicitSelection: draftModelSelection,
         stickySelection: stickyModelSelection,
         normalDefault: selectedDefaultModel,
