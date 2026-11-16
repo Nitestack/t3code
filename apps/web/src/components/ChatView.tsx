@@ -2,7 +2,7 @@ import { ChildThreadApprovals } from "./chat/ChildThreadApprovals";
 import { workspaceAreaProps } from "../lib/workspaceFocus";
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
 import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
-import { resolveScopedDraftModelSelection } from "@t3tools/client-runtime/provider-picker-hierarchy";
+import { resolveDraftModelSelectionForScope } from "@t3tools/client-runtime/provider-picker-hierarchy";
 import { queuedRunEditBlockedReason } from "@t3tools/client-runtime/queued-run-edit";
 import { ScrollToEndButton, WorkspaceFileDropOverlay } from "./chat/TimelineOverlays";
 import { usePasteToFocusComposer } from "./chat/usePasteToFocusComposer";
@@ -823,12 +823,13 @@ export default function ChatView(props: ChatViewProps) {
       ? composerSelectedModelSelection
       : null;
   const draftScopedDefault = draftThread
-    ? (draftExplicitModelSelection ??
-      resolveScopedDraftModelSelection({
+    ? resolveDraftModelSelectionForScope({
         scope: resolveProjectScope(fallbackDraftProject?.scope),
+        explicitSelection: draftExplicitModelSelection,
+        stickySelection: composerSelectedModelSelection,
         normalDefault: draftNormalDefault,
         providers: draftProviders,
-      }))
+      })
     : null;
   const draftModelResolution =
     draftThread && draftExplicitModelSelection === null

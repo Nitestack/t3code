@@ -1,6 +1,6 @@
 import { ActiveNewTaskContext } from "../../state/active-new-task";
 import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
-import { resolveScopedDraftModelSelection } from "@t3tools/client-runtime/provider-picker-hierarchy";
+import { resolveDraftModelSelectionForScope } from "@t3tools/client-runtime/provider-picker-hierarchy";
 import { resolveProjectScope } from "@t3tools/client-runtime/environment";
 import { useNowMinuteMs } from "../../lib/clock";
 import * as Dialog from "../../components/ui/Dialog";
@@ -526,18 +526,18 @@ export function NewTaskFlowProvider(
     stickySelection: stickyModelSelection,
     modelOptions,
   });
-  const scopedDefaultModel =
-    draftModelSelection === null && selectedEnvironmentServerConfig
-      ? resolveScopedDraftModelSelection({
-          scope: resolveProjectScope(selectedProject?.scope),
-          normalDefault: selectedDefaultModel,
-          providers: selectedEnvironmentServerConfig.providers,
-        })
-      : selectedDefaultModel;
+  const scopedDefaultModel = selectedEnvironmentServerConfig
+    ? resolveDraftModelSelectionForScope({
+        scope: resolveProjectScope(selectedProject?.scope),
+        explicitSelection: draftModelSelection,
+        stickySelection: stickyModelSelection,
+        normalDefault: selectedDefaultModel,
+        providers: selectedEnvironmentServerConfig.providers,
+      })
+    : selectedDefaultModel;
   const selectedModel = resolveNewThreadModelSelection({
     defaultSelection: scopedDefaultModel,
-    explicitSelection:
-      draftModelSelection ?? (projectDefaultModelSelection ? null : stickyModelSelection),
+    explicitSelection: draftModelSelection,
     fallbackSelection: selectedEnvironmentServerConfig?.settings.fallbackModelSelection ?? null,
     providers: selectedEnvironmentServerConfig?.providers ?? [],
     ...(selectedEnvironmentServerConfig

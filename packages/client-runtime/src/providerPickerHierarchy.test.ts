@@ -11,6 +11,7 @@ import {
   pickerFilterProviderKey,
   providerInstancesForProjectScope,
   resolveScopedDraftModelSelection,
+  resolveDraftModelSelectionForScope,
   resolveModelPickerProjectScope,
   resolveAixProfileId,
 } from "./providerPickerHierarchy.ts";
@@ -209,5 +210,69 @@ describe("provider picker hierarchy", () => {
         providers,
       }),
     ).toEqual({ instanceId: ProviderInstanceId.make("codex"), model: "gpt-default" });
+  });
+
+  it("uses a sticky selection only when it belongs to the draft scope", () => {
+    const providers = [
+      {
+        instanceId: ProviderInstanceId.make("codex"),
+        driver: ProviderDriverKind.make("codex"),
+        enabled: true,
+        installed: true,
+        status: "ready",
+        models: [{ slug: "gpt-default", isDefault: true }, { slug: "gpt-6.1" }],
+      },
+      {
+        instanceId: ProviderInstanceId.make("aix-codex-ac"),
+        driver: ProviderDriverKind.make("codex"),
+        enabled: true,
+        installed: true,
+        status: "ready",
+        aixProfile: "ac",
+        models: [{ slug: "gpt-aix-default", isDefault: true }, { slug: "gpt-6.1" }],
+      },
+    ];
+    const personalSticky = {
+      instanceId: ProviderInstanceId.make("codex"),
+      model: "gpt-6.1",
+    };
+    const workSticky = {
+      instanceId: ProviderInstanceId.make("aix-codex-ac"),
+      model: "gpt-6.1",
+    };
+
+    expect(
+      resolveDraftModelSelectionForScope({
+        scope: "work",
+        stickySelection: personalSticky,
+        normalDefault: personalSticky,
+        providers,
+      }),
+    ).toEqual({ instanceId: ProviderInstanceId.make("aix-codex-ac"), model: "gpt-6.1" });
+    expect(
+      resolveDraftModelSelectionForScope({
+        scope: "personal",
+        stickySelection: workSticky,
+        normalDefault: workSticky,
+        providers,
+      }),
+    ).toEqual({ instanceId: ProviderInstanceId.make("codex"), model: "gpt-default" });
+    expect(
+      resolveDraftModelSelectionForScope({
+        scope: "work",
+        stickySelection: workSticky,
+        normalDefault: null,
+        providers,
+      }),
+    ).toEqual(workSticky);
+    expect(
+      resolveDraftModelSelectionForScope({
+        scope: "work",
+        explicitSelection: personalSticky,
+        stickySelection: workSticky,
+        normalDefault: null,
+        providers,
+      }),
+    ).toEqual(personalSticky);
   });
 });

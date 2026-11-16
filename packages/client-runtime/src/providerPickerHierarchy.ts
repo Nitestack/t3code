@@ -231,6 +231,35 @@ export function resolveScopedDraftModelSelection(input: {
   return defaultSelectionForProvider(profileProviders[0]!);
 }
 
+export function resolveDraftModelSelectionForScope(input: {
+  readonly scope: ProjectScope;
+  readonly explicitSelection?: ModelSelection | null | undefined;
+  readonly stickySelection?: ModelSelection | null | undefined;
+  readonly normalDefault: ModelSelection | null | undefined;
+  readonly providers: ReadonlyArray<DraftDefaultProvider>;
+}): ModelSelection | null {
+  if (input.explicitSelection) return input.explicitSelection;
+  const stickyProvider = input.stickySelection
+    ? input.providers.find((provider) => provider.instanceId === input.stickySelection?.instanceId)
+    : undefined;
+  const stickyProfile = stickyProvider
+    ? (stickyProvider.aixProfile ??
+      aixMetadataFromInstanceId(stickyProvider.instanceId, stickyProvider.driver)?.aixProfile)
+    : undefined;
+  const stickyIsWork =
+    stickyProfile !== undefined || input.stickySelection?.instanceId.startsWith("aix-") === true;
+  const stickyBelongsToScope =
+    input.stickySelection !== null &&
+    input.stickySelection !== undefined &&
+    (input.scope === "work" ? stickyIsWork : !stickyIsWork);
+  if (stickyBelongsToScope) return input.stickySelection ?? null;
+  return resolveScopedDraftModelSelection({
+    scope: input.scope,
+    normalDefault: input.normalDefault,
+    providers: input.providers,
+  });
+}
+
 function defaultSelectionForProvider(provider: DraftDefaultProvider): ModelSelection {
   const model = provider.models.find((candidate) => candidate.isDefault) ?? provider.models[0];
   return { instanceId: provider.instanceId, model: model?.slug ?? "" };
