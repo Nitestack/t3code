@@ -10,7 +10,7 @@ import { CLAUDE_SYNTHETIC_MODEL } from "../provider/Drivers/claudeUsage.ts";
 import { mergeUsageCopies } from "./usageAggregation.ts";
 import { GUARD_LENGTH, type TranscriptParsePosition } from "./usageTranscriptReader.ts";
 
-const USAGE_SCAN_CACHE_VERSION = 17 as const;
+const USAGE_SCAN_CACHE_VERSION = 18 as const;
 const SPEED_COMPATIBLE_SINCE_VERSION = 4;
 
 /**
@@ -18,8 +18,9 @@ const SPEED_COMPATIBLE_SINCE_VERSION = 4;
  * replace it, dropping saved usage for deleted transcripts. Separate files keep
  * the newer one; older files are removed once it is saved.
  */
-export const SCAN_CACHE_FILE_NAME = "usage-scan-cache-v17.json";
+export const SCAN_CACHE_FILE_NAME = "usage-scan-cache-v18.json";
 export const LEGACY_SCAN_CACHE_FILE_NAMES = [
+  "usage-scan-cache-v17.json",
   "usage-scan-cache-v16.json",
   "usage-scan-cache-v15.json",
   "usage-scan-cache-v14.json",
@@ -66,6 +67,13 @@ type SerializedRecord = readonly [
   rateModelIndex?: number | null,
   unresolvedServiceTierTurnId?: string | null,
   cacheCreation1hTokens?: number,
+  scope?: "work",
+];
+
+type SerializedRecordTail = readonly [
+  unresolvedServiceTierTurnId?: string | null,
+  cacheCreation1hTokens?: number,
+  scope?: "work",
 ];
 
 interface SerializedFile {
@@ -109,27 +117,33 @@ function intern(table: string[], index: Map<string, number>, value: string): num
 }
 
 function serializeFile(entry: CachedFile, tables: InternTables): SerializedFile {
-  const serializeRecord = (record: UsageRecord): SerializedRecord => [
-    record.timestampMs,
-    intern(tables.models, tables.modelIndex, record.model),
-    intern(tables.sessions, tables.sessionIndex, record.sessionId),
-    record.totals.uncachedInputTokens,
-    record.totals.cachedInputTokens,
-    record.totals.cacheCreationTokens,
-    record.totals.outputTokens,
-    record.totals.reasoningTokens,
-    record.dedupeKey,
-    record.reportedCostUsd,
-    SPEEDS.indexOf(record.speed),
-    record.rateModel === undefined
-      ? null
-      : intern(tables.models, tables.modelIndex, record.rateModel),
-    ...(record.cacheCreation1hTokens !== undefined
-      ? ([record.unresolvedServiceTierTurnId ?? null, record.cacheCreation1hTokens] as const)
-      : record.unresolvedServiceTierTurnId !== undefined
-        ? ([record.unresolvedServiceTierTurnId] as const)
-        : ([] as const)),
-  ];
+  const serializeRecord = (record: UsageRecord): SerializedRecord => {
+    const tail: SerializedRecordTail =
+      record.scope === "work"
+        ? [record.unresolvedServiceTierTurnId ?? null, record.cacheCreation1hTokens ?? 0, "work"]
+        : record.cacheCreation1hTokens !== undefined
+          ? [record.unresolvedServiceTierTurnId ?? null, record.cacheCreation1hTokens]
+          : record.unresolvedServiceTierTurnId !== undefined
+            ? [record.unresolvedServiceTierTurnId]
+            : [];
+    return [
+      record.timestampMs,
+      intern(tables.models, tables.modelIndex, record.model),
+      intern(tables.sessions, tables.sessionIndex, record.sessionId),
+      record.totals.uncachedInputTokens,
+      record.totals.cachedInputTokens,
+      record.totals.cacheCreationTokens,
+      record.totals.outputTokens,
+      record.totals.reasoningTokens,
+      record.dedupeKey,
+      record.reportedCostUsd,
+      SPEEDS.indexOf(record.speed),
+      record.rateModel === undefined
+        ? null
+        : intern(tables.models, tables.modelIndex, record.rateModel),
+      ...tail,
+    ];
+  };
   return {
     s: entry.size,
     m: entry.mtimeMs,
@@ -201,6 +215,7 @@ export function decodeScanCache(
   const decodeRecords = (
     rows: readonly unknown[],
     provider: UsageProviderKind,
+    legacyCodexAix: boolean,
   ): UsageRecord[] | null => {
     const records: UsageRecord[] = [];
     for (const row of rows) {
@@ -220,6 +235,7 @@ export function decodeScanCache(
         rateModelIndex,
         unresolvedServiceTierTurnId,
         cacheCreation1h = 0,
+        scope,
       ] = row as SerializedRecord;
       const speed = typeof speedIndex === "number" ? SPEEDS[speedIndex] : undefined;
 
@@ -262,6 +278,7 @@ export function decodeScanCache(
         ...(cacheCreation1h > 0 ? { cacheCreation1hTokens: cacheCreation1h } : {}),
         reportedCostUsd: typeof reportedCostUsd === "number" ? reportedCostUsd : null,
         speed,
+        ...(scope === "work" || legacyCodexAix ? { scope: "work" as const } : {}),
         ...(version >= 7 && unresolvedServiceTierTurnId != null
           ? { unresolvedServiceTierTurnId }
           : {}),
@@ -311,7 +328,7 @@ export function decodeScanCache(
     // Keep history for deleted rollouts, but re-parse incompatible reducer state.
     // v13 adds Claude 1-hour cache writes; v14 uses Codex request ledgers.
     // v15 repairs skipped Codex requests whose counters rewound; clean v14 entries stay served.
-    // v17 keys Grok turns by time, restoring turns previously dropped as repeats.
+    // v17 keys Grok turns by time; v18 persists usage scope.
     const legacy =
       (entry.p === "claude" && version < 13) ||
       (entry.p === "grok" && version < 17) ||
@@ -327,8 +344,13 @@ export function decodeScanCache(
     const resumable = !legacy && !(entry.p === "codex" && version < 16);
 
     const provider = entry.p;
-    const records = decodeRecords(entry.r, provider);
-    const tailRecords = decodeRecords(entry.t, provider);
+    const legacyCodexAix =
+      provider === "codex" &&
+      typeof entry.cs === "object" &&
+      entry.cs !== null &&
+      (entry.cs as Record<string, unknown>).modelProvider === "t3_aix";
+    const records = decodeRecords(entry.r, provider, legacyCodexAix);
+    const tailRecords = decodeRecords(entry.t, provider, legacyCodexAix);
     if (records === null || tailRecords === null) continue;
 
     cache.set(path, {

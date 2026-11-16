@@ -156,7 +156,13 @@ function bucketsForSource(summary: UsageSummary, source: UsageSource): readonly 
 }
 
 function bucketKey(bucket: UsageBucket): string {
-  return JSON.stringify([bucket.day, bucket.hourStart ?? null, bucket.provider, bucket.model]);
+  return JSON.stringify([
+    bucket.day,
+    bucket.hourStart ?? null,
+    bucket.provider,
+    bucket.model,
+    bucket.scope ?? "personal",
+  ]);
 }
 
 function claimSources(

@@ -1,7 +1,13 @@
 import { AppActivityIndicator } from "../../components/ui/AppActivityIndicator";
 import { ChatGptUsageSummary } from "./ChatGptUsageSummary";
 import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
-import { EnvironmentId, USAGE_CONTRACT_VERSION, type UsageProviderKind } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  USAGE_CONTRACT_VERSION,
+  type UsageProviderKind,
+  type UsageScope,
+} from "@t3tools/contracts";
+import { useAtomValue } from "@effect/atom-react";
 import { type RouteProp, useIsFocused, useRoute } from "@react-navigation/native";
 import {
   updatingProvidersLabel,
@@ -12,6 +18,8 @@ import {
   isCompatibleUsageContractVersion,
   isModelCostUnknown,
   type DailyTotals,
+  mergeUsage,
+  type EnvironmentUsage,
   type MergedUsage,
 } from "@t3tools/shared/usageMerge";
 import {
@@ -27,7 +35,7 @@ import {
   makeWindow,
   usageSourceMessages,
 } from "@t3tools/shared/usageFormat";
-import { useRef, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import { View } from "react-native";
 import { RefreshControl } from "../../components/ui/RefreshControl";
 import Animated, { FadeIn, ReduceMotion } from "react-native-reanimated";
@@ -39,12 +47,20 @@ import { AppText as Text } from "../../components/ui/AppText";
 import { useWorkspaceSettledContentWidth } from "../layout/workspace-content-width";
 import { cn } from "../../lib/cn";
 import { SettingsScreen } from "../settings/components/SettingsScreen";
+import { useMobileEnvironmentScope } from "../environment-scope/useMobileEnvironmentScope";
 import { useUsage, type EnvironmentUsageStatus } from "../../state/usage";
+import { environmentPresentations } from "../../state/presentation";
 import { SettingsSection } from "../settings/components/SettingsSection";
 import { UsageDailyChart } from "./UsageDailyChart";
 import { toggleUsageEnvironment } from "./usageEnvironmentSelection";
 import { useRefreshLimits } from "./UsageLimitsSection";
 import { UsageLimitsSection } from "./UsageLimitsPooled";
+import {
+  filterUsageSummaryByScope,
+  resolveUsageLimitGroup,
+  usageLimitGroupsInPresentations,
+  usageScopeGroupsInBuckets,
+} from "@t3tools/client-runtime/state/usage-grouping";
 import type { UsageChartMetric } from "./usageChartData";
 import { PROVIDER_LABEL, useProviderColors, useUsageMixColors } from "./usageProviders";
 
@@ -103,9 +119,44 @@ function UsageScreen(props: {
   const isPast24Hours = windowDays === 1;
   const [selectedEnvironmentIds, setSelectedEnvironmentIds] =
     useState<ReadonlySet<EnvironmentId> | null>(null);
-  const { merged, environments, selectedEnvironments, isPending, refresh } = useUsage(
+  const { environments, selectedEnvironments, isPending, refresh } = useUsage(
     window,
     selectedEnvironmentIds,
+  );
+  const presentationsWithProviders = useAtomValue(
+    environmentPresentations.presentationsWithProvidersAtom,
+  );
+  const scopeLimitPresentations =
+    selectedEnvironmentIds === null
+      ? presentationsWithProviders
+      : new Map([...presentationsWithProviders].filter(([id]) => selectedEnvironmentIds.has(id)));
+  const scopeGroups = new Set([
+    ...usageScopeGroupsInBuckets(
+      selectedEnvironments.flatMap((environment) => environment.summary?.buckets ?? []),
+    ),
+    ...usageLimitGroupsInPresentations(scopeLimitPresentations),
+  ]);
+  const { activeScope } = useMobileEnvironmentScope();
+  const [requestedScope, setRequestedScope] = useState<UsageScope | null>(null);
+  const scope = resolveUsageLimitGroup(requestedScope, scopeGroups, activeScope);
+  const scopedEnvironments = useMemo<EnvironmentUsage[]>(
+    () =>
+      selectedEnvironments.flatMap(({ environmentId, label, summary }) =>
+        summary === null
+          ? []
+          : [
+              {
+                environmentId,
+                label,
+                summary: filterUsageSummaryByScope(summary, scope),
+              },
+            ],
+      ),
+    [selectedEnvironments, scope],
+  );
+  const scopedMerged = useMemo(
+    () => mergeUsage(scopedEnvironments, USAGE_CONTRACT_VERSION),
+    [scopedEnvironments],
   );
   const isFocused = useIsFocused();
   const limits = useRefreshLimits(selectedEnvironmentIds, isFocused && view === "limits");
@@ -122,13 +173,13 @@ function UsageScreen(props: {
       ? enumerateHourStarts(window.sinceTime, window.untilTime)
       : days;
   const chartTotals: readonly DailyTotals[] = isPast24Hours
-    ? merged.hourly.map((hour) => ({
+    ? scopedMerged.hourly.map((hour) => ({
         day: hour.hourStart,
         costUsd: hour.costUsd,
         totalTokens: hour.totalTokens,
         byProvider: hour.byProvider,
       }))
-    : merged.daily;
+    : scopedMerged.daily;
 
   const [refreshingUsage, setRefreshingUsage] = useState(false);
   const refreshingRef = useRef(false);
@@ -164,7 +215,7 @@ function UsageScreen(props: {
   };
 
   const chart = {
-    merged,
+    merged: scopedMerged,
     days: chartDays,
     daily: chartTotals,
     metric,
@@ -173,7 +224,7 @@ function UsageScreen(props: {
     isPast24Hours,
     timeZone: window.timeZone,
   };
-  const providers = <ProviderSection merged={merged} metric={metric} compact={wide} />;
+  const providers = <ProviderSection merged={scopedMerged} metric={metric} compact={wide} />;
 
   const showEnvironmentFilter = environments.length > 0 || selectedEnvironmentIds !== null;
   const selectEnvironment = (value: string) => {
@@ -212,6 +263,21 @@ function UsageScreen(props: {
     <SettingsScreen
       title="Usage"
       menus={showEnvironmentFilter ? [environmentMenu] : undefined}
+      trailing={
+        scopeGroups.size > 1 ? (
+          <SegmentedControl
+            options={[
+              { value: "personal", label: "Personal" },
+              { value: "work", label: "Work" },
+            ]}
+            selected={scope}
+            onSelect={(value) => {
+              if (value === "personal" || value === "work") setRequestedScope(value);
+            }}
+            size="compact"
+          />
+        ) : undefined
+      }
       workspaceRoot={props.workspace}
     >
       <ScrollView
@@ -272,6 +338,7 @@ function UsageScreen(props: {
                 failedLabels={limits.failedLabels}
                 selectedEnvironmentIds={selectedEnvironmentIds}
                 wide={wide}
+                scope={scope}
               />
             ) : (
               <>
@@ -283,11 +350,13 @@ function UsageScreen(props: {
                     size="compact"
                   />
                 )}
-                <ChatGptUsageSummary selectedEnvironmentIds={selectedEnvironmentIds} />
-                {merged.duplicateSources.length > 0 ? (
+                {scope === "personal" ? (
+                  <ChatGptUsageSummary selectedEnvironmentIds={selectedEnvironmentIds} />
+                ) : null}
+                {scopedMerged.duplicateSources.length > 0 ? (
                   <Text className="text-sm text-foreground-muted">
                     Counted once across environments sharing a transcript directory:{" "}
-                    {merged.duplicateSources.join(", ")}
+                    {scopedMerged.duplicateSources.join(", ")}
                   </Text>
                 ) : null}
                 {isPending ? (
@@ -324,7 +393,7 @@ function UsageScreen(props: {
                         <View className="flex-row gap-6">
                           <View className="w-72 gap-6">
                             <View className="rounded-[24px] border-continuous bg-grouped-card p-4">
-                              <UsageSummary merged={merged} metric={metric} />
+                              <UsageSummary merged={scopedMerged} metric={metric} />
                             </View>
                             {providers}
                           </View>
@@ -344,12 +413,12 @@ function UsageScreen(props: {
                         </>
                       )}
                       <TotalsSection
-                        merged={merged}
+                        merged={scopedMerged}
                         isPast24Hours={isPast24Hours}
                         columns={width >= 900 ? 6 : wide ? 3 : 2}
                       />
-                      <CostSection merged={merged} wide={wide} />
-                      <ModelsSection merged={merged} metric={metric} columns={wide ? 2 : 1} />
+                      <CostSection merged={scopedMerged} wide={wide} />
+                      <ModelsSection merged={scopedMerged} metric={metric} columns={wide ? 2 : 1} />
                     </UsageUpdating>
                   </>
                 )}

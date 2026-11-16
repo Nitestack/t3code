@@ -25,6 +25,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
+import * as SqlClient from "effect/sql/SqlClient";
 import { HttpClient, HttpClientResponse } from "effect/http";
 
 import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
@@ -107,6 +108,7 @@ interface TranscriptSource {
   readonly volumeId: string;
   readonly physicalSourceId?: string;
   readonly fileName?: string;
+  readonly scope?: "personal" | "work";
 }
 
 const RatesCacheFile = Schema.Struct({
@@ -173,6 +175,7 @@ export const make = Effect.gen(function* () {
   const httpClient = yield* HttpClient.HttpClient;
   const hostEnvironment = yield* HostProcess.Environment;
   const hostPlatform = yield* HostProcess.Platform;
+  const sql = yield* SqlClient.SqlClient;
   const hostScope = hostEnvironment[DESKTOP_HOST_SCOPE_ENV]?.trim();
   // A mount or a directory's on-disk name does not change under a running server.
   // A miss is not cached: the directory may not exist yet.
@@ -192,6 +195,32 @@ export const make = Effect.gen(function* () {
     });
   const hostname = yield* HostProcess.Hostname;
   const readerContext = yield* Effect.context<BuiltInUsageReadersEnv>();
+
+  const readAixClaudeSessionIds = Effect.fn("UsageService.readAixClaudeSessionIds")(function* (
+    aixInstanceIds: readonly string[],
+  ) {
+    const rows = yield* sql<{ readonly session_id: string | null }>`
+      SELECT DISTINCT json_extract(payload_json, '$.nativeThreadRef.nativeId') AS session_id
+      FROM orchestration_v2_projection_provider_threads
+      WHERE driver = 'claudeAgent'
+        AND (
+          provider_instance_id LIKE 'aix-%'
+          OR ${aixInstanceIds.length > 0 ? sql.in("provider_instance_id", aixInstanceIds) : sql`0`}
+        )
+        AND json_extract(payload_json, '$.nativeThreadRef.driver') = 'claudeAgent'
+        AND json_extract(payload_json, '$.nativeThreadRef.nativeId') IS NOT NULL
+    `.pipe(
+      Effect.mapError(
+        (cause) =>
+          new UsageReadError({
+            reason: "scanFailed",
+            detail: "Claude session ownership could not be read.",
+            cause,
+          }),
+      ),
+    );
+    return new Set(rows.flatMap(({ session_id }) => (session_id === null ? [] : [session_id])));
+  });
 
   const fileCache: ScanCache = new Map();
   // Reads from concurrent windows can still hold the original record after it is corrected.
@@ -372,13 +401,31 @@ export const make = Effect.gen(function* () {
     return yield* Effect.forEach(
       entries,
       Effect.fnUntraced(function* ([instanceId, instance, configured]) {
+        const decodedConfig = Option.getOrUndefined(decodeConfig(instance.config ?? {}));
+        let environment = yield* mergeProviderInstanceEnvironment(
+          instance.environment,
+          hostEnvironment,
+        );
+        const aixProfile =
+          driver.driverKind === "opencode"
+            ? (decodedConfig as { readonly aixProfile?: string } | undefined)?.aixProfile
+            : undefined;
+        if (aixProfile !== undefined) {
+          environment = { ...environment };
+          delete environment.OPENCODE_DATA_DIR;
+          environment.XDG_DATA_HOME = path.join(
+            config.stateDir,
+            "providers",
+            "opencode",
+            "aix",
+            aixProfile,
+            "data",
+          );
+        }
         const instanceConfig: ProviderUsageInstance<Config> = {
           instanceId,
-          config: Option.getOrUndefined(decodeConfig(instance.config ?? {})),
-          environment: yield* mergeProviderInstanceEnvironment(
-            instance.environment,
-            hostEnvironment,
-          ),
+          config: decodedConfig,
+          environment,
           configured,
         };
         return instanceConfig;
@@ -400,12 +447,19 @@ export const make = Effect.gen(function* () {
         yield* usageInstances(driver, settings),
         (instance) => reader.directories(instance, { awaitRefresh }),
       );
-      for (const { dir: directory, fileName, refreshing } of directories.flat()) {
+      for (const { dir: directory, fileName, refreshing, scope } of directories.flat()) {
         if (refreshing) {
           const key = `${provider}\0${directory}`;
           if (seen.has(key)) continue;
           seen.add(key);
-          pending.push({ provider, dir: directory, volumeId: "", files: [], refreshing });
+          pending.push({
+            provider,
+            dir: directory,
+            volumeId: "",
+            files: [],
+            refreshing,
+            ...(scope === undefined ? {} : { scope }),
+          });
           continue;
         }
         const sourceKey = provider + "\0" + directory;
@@ -442,6 +496,7 @@ export const make = Effect.gen(function* () {
           volumeId,
           ...(sourceId === undefined ? {} : { physicalSourceId: sourceId }),
           ...(fileName === undefined ? {} : { fileName }),
+          ...(scope === undefined ? {} : { scope }),
         });
       }
     }
@@ -607,6 +662,7 @@ export const make = Effect.gen(function* () {
     const identity = (record: UsageRecord) =>
       encodeUsageRecordKey([
         record.provider,
+        record.scope ?? "personal",
         record.sessionId,
         record.timestampMs,
         record.model,
@@ -684,6 +740,7 @@ export const make = Effect.gen(function* () {
     readonly hostId?: string;
     readonly status?: UsageSource["status"];
     readonly message?: string;
+    readonly scope?: "personal" | "work";
     readonly files:
       | readonly {
           readonly path: string;
@@ -706,6 +763,7 @@ export const make = Effect.gen(function* () {
       provider,
       dir,
       volumeId,
+      ...(source.scope === undefined ? {} : { scope: source.scope }),
       ...(physicalSourceId === undefined ? {} : { physicalSourceId }),
     };
     const exists = yield* fileSystem
@@ -908,7 +966,6 @@ export const make = Effect.gen(function* () {
       [collect, provisional ? Effect.void : ensureRates(false)],
       { concurrency: 2 },
     );
-
     const priceOverrides = createOverrideRateTable(settings.usagePriceOverrides);
     const modelAliases = resolveModelAliases(settings.usageModelAliases);
     const sources: UsageSource[] = [];
@@ -951,6 +1008,30 @@ export const make = Effect.gen(function* () {
       }
       return retainedFiles;
     });
+    const aixClaudeInstanceIds = Object.entries(settings.providerInstances).flatMap(
+      ([instanceId, instance]) => {
+        if (instance.driver !== "claudeAgent") return [];
+        const instanceConfig = instance.config;
+        return instanceId.startsWith("aix-") ||
+          (typeof instanceConfig === "object" &&
+            instanceConfig !== null &&
+            "aixProfile" in instanceConfig)
+          ? [instanceId]
+          : [];
+      },
+    );
+    const hasClaudeSessions = filesByDir.some(
+      (files, index) =>
+        scannedDirs[index]?.provider === "claude" &&
+        files.some((file) =>
+          file.records.some(
+            (record) => record.provider === "claude" && record.sessionId.length > 0,
+          ),
+        ),
+    );
+    const aixClaudeSessionIds = hasClaudeSessions
+      ? yield* readAixClaudeSessionIds(aixClaudeInstanceIds)
+      : new Set<string>();
     // Usage two transcripts share counts in the first one, so saved files take the order an exact
     // scan reads them in: walked files in walk order, then the directory's deleted files.
     for (const { provider, dir, walked } of fromMemory ? [] : scannedDirs) {
@@ -1072,6 +1153,7 @@ export const make = Effect.gen(function* () {
       // Distinct per directory. Buckets carry per-cell session counts, but a
       // session spans days and models, so clients total this figure instead.
       const sessionIds = new Set<string>();
+      const sessionIdsByScope = { personal: new Set<string>(), work: new Set<string>() };
       let counted = false;
 
       for (const file of filesByDir[index] ?? []) {
@@ -1084,6 +1166,12 @@ export const make = Effect.gen(function* () {
         const eventOccurrences = new Map<string, number>();
         for (const rawRecord of file.records) {
           const record = correctedRecord(rawRecord);
+          const scope =
+            record.provider === "claude"
+              ? aixClaudeSessionIds.has(record.sessionId)
+                ? "work"
+                : "personal"
+              : (record.scope ?? scannedDirs[index]?.scope ?? "personal");
           let usageRecord = record;
           if (
             sharedSessionProviders.has(record.provider) &&
@@ -1101,9 +1189,13 @@ export const make = Effect.gen(function* () {
             eventOccurrences.set(key, occurrence);
             usageRecord = { ...record, dedupeKey: key + ":" + occurrence };
           }
-          if (aggregator.add(usageRecord, dir)) {
+          usageRecord = { ...usageRecord, scope };
+          if (aggregator.add(usageRecord, dir, scope)) {
             counted = true;
-            if (record.sessionId.length > 0) sessionIds.add(record.sessionId);
+            if (record.sessionId.length > 0) {
+              sessionIds.add(record.sessionId);
+              sessionIdsByScope[scope].add(record.sessionId);
+            }
           }
         }
       }
@@ -1130,6 +1222,10 @@ export const make = Effect.gen(function* () {
         skippedFiles,
         malformedRecords,
         distinctSessions: sessionIds.size,
+        distinctSessionsByScope: {
+          personal: sessionIdsByScope.personal.size,
+          work: sessionIdsByScope.work.size,
+        },
         message:
           malformedRecords > 0
             ? [sourceMessage, formatMalformedUsageWarning(malformedRecords)]

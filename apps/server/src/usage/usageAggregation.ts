@@ -49,6 +49,7 @@ const QUARTER_HOUR_MS = 15 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
 
 interface MutableBucket {
+  scope: NonNullable<UsageBucket["scope"]>;
   totals: { -readonly [K in keyof UsageTokenTotals]: number };
   costUsd: number;
   cacheSavingsUsd: number;
@@ -225,6 +226,7 @@ export class UsageAggregator {
     readonly provider: string;
     readonly model: string;
     readonly source: string;
+    readonly scope: NonNullable<UsageBucket["scope"]>;
     readonly bucket: MutableBucket;
   } | null = null;
   #duplicatesDropped = 0;
@@ -246,7 +248,7 @@ export class UsageAggregator {
     }
   }
 
-  add(input: UsageRecord, sourcePath?: string): boolean {
+  add(input: UsageRecord, sourcePath?: string, sourceScope?: UsageBucket["scope"]): boolean {
     if (!keepsUsageRecord(this.#options.modelFilter, input)) return false;
     const record = this.#mapModel(input);
     if (record.dedupeKey !== null) {
@@ -263,7 +265,11 @@ export class UsageAggregator {
       }
     }
 
-    const bucket = this.#placeInWindow(record, sourcePath ?? "");
+    const bucket = this.#placeInWindow(
+      record,
+      sourcePath ?? "",
+      record.scope ?? sourceScope ?? "personal",
+    );
     if (record.dedupeKey !== null) this.#seen.set(record.dedupeKey, { record, bucket });
     if (bucket === null) {
       this.#outOfWindow += 1;
@@ -275,7 +281,11 @@ export class UsageAggregator {
     return true;
   }
 
-  #placeInWindow(record: UsageRecord, source: string): MutableBucket | null {
+  #placeInWindow(
+    record: UsageRecord,
+    source: string,
+    scope: NonNullable<UsageBucket["scope"]>,
+  ): MutableBucket | null {
     if (
       this.#hourlyWindow !== null &&
       (record.timestampMs < this.#hourlyWindow.sinceTimeMs ||
@@ -296,7 +306,7 @@ export class UsageAggregator {
       this.#hourlyWindow === null
         ? -1
         : Math.floor((record.timestampMs - this.#hourlyWindow.sinceTimeMs) / HOUR_MS);
-    return this.#bucketFor(day, hourIndex, record.provider, record.model, source);
+    return this.#bucketFor(day, hourIndex, record.provider, record.model, source, scope);
   }
 
   #accumulate(bucket: MutableBucket, record: UsageRecord): void {
@@ -361,6 +371,7 @@ export class UsageAggregator {
     provider: string,
     model: string,
     source: string,
+    scope: NonNullable<UsageBucket["scope"]>,
   ): MutableBucket {
     const last = this.#lastBucket;
     if (
@@ -369,6 +380,7 @@ export class UsageAggregator {
       last.hourIndex === hourIndex &&
       last.provider === provider &&
       last.model === model &&
+      last.scope === scope &&
       last.source === source
     ) {
       return last.bucket;
@@ -376,7 +388,7 @@ export class UsageAggregator {
     const window = this.#hourlyWindow;
     const hourStart =
       window === null ? "" : new Date(window.sinceTimeMs + hourIndex * HOUR_MS).toISOString();
-    const key = `${day}\u0000${hourStart}\u0000${provider}\u0000${model}\u0000${source}`;
+    const key = `${day}\u0000${hourStart}\u0000${provider}\u0000${model}\u0000${source}\u0000${scope}`;
     let bucket = this.#buckets.get(key);
     if (bucket === undefined) {
       bucket = {
@@ -392,10 +404,11 @@ export class UsageAggregator {
         unpricedTokens: 0,
         providerReportedRecords: 0,
         sessions: new Set<string>(),
+        scope,
       };
       this.#buckets.set(key, bucket);
     }
-    this.#lastBucket = { day, hourIndex, provider, model, source, bucket };
+    this.#lastBucket = { day, hourIndex, provider, model, source, scope, bucket };
     return bucket;
   }
 
@@ -406,8 +419,14 @@ export class UsageAggregator {
     this.#seen.clear();
     const buckets: UsageBucket[] = [];
     for (const [key, bucket] of this.#buckets) {
-      const [day = "", hourStart = "", provider = "", model = "", sourcePath = ""] =
-        key.split("\u0000");
+      const [
+        day = "",
+        hourStart = "",
+        provider = "",
+        model = "",
+        sourcePath = "",
+        scope = "personal",
+      ] = key.split("\u0000");
       const category = bucket.categoryCostUsd;
       const fastCostUsd = roundUsd(bucket.fastCostUsd);
       const ultrafastCostUsd = roundUsd(bucket.ultrafastCostUsd);
@@ -415,6 +434,7 @@ export class UsageAggregator {
       buckets.push({
         day: day as UsageDay,
         ...(hourStart === "" ? {} : { hourStart }),
+        scope: bucket.scope ?? (scope === "work" ? "work" : "personal"),
         provider: provider as UsageBucket["provider"],
         model,
         ...(sourcePath === "" ? {} : { sourcePath }),

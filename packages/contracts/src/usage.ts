@@ -32,6 +32,9 @@ export type UsageResolution = typeof UsageResolution.Type;
 export const UsageCostSource = Schema.Literals(["providerReported", "modelPriced", "unpriced"]);
 export type UsageCostSource = typeof UsageCostSource.Type;
 
+export const UsageScope = Schema.Literals(["personal", "work"]);
+export type UsageScope = typeof UsageScope.Type;
+
 /** Sum uncached input, cache reads, and cache writes for input totals; reasoning is already included in output. */
 export const UsageTokenTotals = Schema.Struct({
   uncachedInputTokens: NonNegativeInt,
@@ -53,6 +56,8 @@ export type UsageCategoryCost = typeof UsageCategoryCost.Type;
 export const UsageBucket = Schema.Struct({
   day: UsageDay,
   hourStart: Schema.optional(TrimmedNonEmptyString),
+  /** Absent from older servers; clients treat it as Personal. */
+  scope: Schema.optional(UsageScope),
   provider: UsageProviderKind,
   model: TrimmedNonEmptyString,
   sourcePath: Schema.optional(TrimmedNonEmptyString),
@@ -99,6 +104,10 @@ export const UsageSource = Schema.Struct({
   malformedRecords: NonNegativeInt,
   /** Total this count; bucket counts double-count sessions spanning days or models. */
   distinctSessions: NonNegativeInt,
+  /** Optional per-scope counts let clients scope the headline without summing bucket counts. */
+  distinctSessionsByScope: Schema.optional(
+    Schema.Struct({ personal: NonNegativeInt, work: NonNegativeInt }),
+  ),
   message: Schema.NullOr(TrimmedNonEmptyString),
   /** Cached response during refresh; repeat with awaitRefresh for fresh data. */
   refreshing: Schema.optionalKey(Schema.Literal(true)),

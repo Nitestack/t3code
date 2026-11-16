@@ -7,6 +7,7 @@ import {
   USAGE_CONTRACT_VERSION,
   type EnvironmentId,
   type UsageProviderKind,
+  type UsageScope,
   type UsageSummaryInput,
 } from "@t3tools/contracts";
 import { CircleAlertIcon, ChevronDownIcon, InfoIcon, SlidersHorizontalIcon } from "lucide-react";
@@ -38,7 +39,8 @@ import { primaryServerKeybindingsAtom, serverEnvironment } from "../../state/ser
 import { isCommandPaletteOpen } from "../../commandPaletteBus";
 import { isModelPickerOpen } from "../../modelPickerVisibility";
 import { shortcutLabelForCommand } from "../../keybindings";
-import { useUsage, type EnvironmentUsageStatus } from "../../state/usage";
+import { mergeAnsweredUsage, useUsage, type EnvironmentUsageStatus } from "../../state/usage";
+import { useClientEnvironmentScope } from "../../environmentScope";
 import { useAtomCommand } from "../../state/use-atom-command";
 import {
   enumerateDays,
@@ -77,7 +79,8 @@ import {
   WorkspaceBreadcrumbText,
 } from "../WorkspaceBreadcrumb";
 import { WorkspacePageContainer } from "../WorkspacePageContainer";
-import { UsageLimitsSection } from "./UsageLimits";
+import { UsageLimitsSection, usageLimitPresentationsForSelection } from "./UsageLimits";
+import { UsageScopeControl } from "./UsageScopeControl";
 import { UsagePriceOverrides } from "./UsagePriceOverrides";
 import { UsageProviderChart } from "./UsageProviderChart";
 import { SpeedPremium, UsageModelDialog } from "./UsageModelDialog";
@@ -106,6 +109,12 @@ import {
   saveUsagePagePreferences,
   type UsagePagePreferences,
 } from "./usagePagePreferences";
+import {
+  filterUsageSummaryByScope,
+  resolveUsageLimitGroup,
+  usageLimitGroupsInPresentations,
+  usageScopeGroupsInBuckets,
+} from "@t3tools/client-runtime/state/usage-grouping";
 
 function isUsageMetric(value: string | null | undefined): value is UsageMetric {
   return METRIC_OPTIONS.some((option) => option.value === value);
@@ -222,6 +231,31 @@ export function UsagePage() {
   const presentationsWithProviders = useAtomValue(
     environmentPresentations.presentationsWithProvidersAtom,
   );
+  const scopeLimitPresentations = usageLimitPresentationsForSelection(
+    presentationsWithProviders,
+    selectedEnvironmentIds,
+    hiddenProviders,
+  );
+  const scopeGroups = new Set([
+    ...usageScopeGroupsInBuckets(
+      (shown?.environments ?? selectedEnvironments).flatMap((environment) =>
+        (environment.summary?.buckets ?? []).filter(
+          (bucket) => !hiddenProviders.has(bucket.provider),
+        ),
+      ),
+    ),
+    ...usageLimitGroupsInPresentations(scopeLimitPresentations),
+  ]);
+  const { activeScope } = useClientEnvironmentScope();
+  const [requestedScope, setRequestedScope] = useState<UsageScope | null>(null);
+  const scope = resolveUsageLimitGroup(requestedScope, scopeGroups, activeScope);
+  const scopedEnvironments = (shown?.environments ?? selectedEnvironments).map((environment) => ({
+    ...environment,
+    ...(environment.summary === null
+      ? {}
+      : { summary: filterUsageSummaryByScope(environment.summary, scope) }),
+  }));
+  const scopedMerged = mergeAnsweredUsage(scopedEnvironments);
   const refreshProviders = useAtomCommand(serverEnvironment.refreshProviders, {
     reportFailure: false,
   });
@@ -410,6 +444,7 @@ export function UsagePage() {
             ))}
           </ToggleGroup>
         )}
+        <UsageScopeControl groups={scopeGroups} scope={scope} onChange={setRequestedScope} />
         <ToggleGroup
           aria-label="Usage metric"
           variant="segmented"
@@ -437,6 +472,12 @@ export function UsagePage() {
         </Button>
       </div>
       <div className="ms-auto flex shrink-0 items-center justify-end gap-1 @4xl/usage-header:hidden">
+        <UsageScopeControl
+          groups={scopeGroups}
+          scope={scope}
+          compact
+          onChange={setRequestedScope}
+        />
         {showingLimits ? null : (
           <Select value={String(windowDays)} onValueChange={(value) => selectWindow(Number(value))}>
             <SelectTrigger
@@ -521,6 +562,7 @@ export function UsagePage() {
                 selectedEnvironmentIds={selectedEnvironmentIds}
                 hiddenProviders={hiddenProviders}
                 now={limitsNow}
+                scope={scope}
               />
             ) : shown === null ? (
               <UsageSkeleton />
@@ -535,7 +577,7 @@ export function UsagePage() {
               </div>
             ) : (
               <UsageOverview
-                merged={merged}
+                merged={scopedMerged}
                 shownWindow={shownWindow}
                 hour12={hour12}
                 days={days}
@@ -545,7 +587,7 @@ export function UsagePage() {
                 selectedEnvironments={selectedEnvironments}
                 hiddenProviders={hiddenProviders}
                 refreshingUsage={refreshingUsage}
-                showChatGptSharing={showChatGptSharing}
+                showChatGptSharing={scope === "personal" && showChatGptSharing}
                 onSelectModel={selectUsageModel}
               />
             )}
@@ -554,8 +596,8 @@ export function UsagePage() {
       </div>
       {showingLimits ? null : (
         <UsageModelDialogHost
-          models={merged.models}
-          environments={selectedEnvironments}
+          models={scopedMerged.models}
+          environments={scopedEnvironments}
           metric={metric === "tokens" ? "tokens" : "cost"}
           chartWindow={{
             days,

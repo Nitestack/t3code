@@ -13,6 +13,7 @@ export type UsageSpeed = "standard" | "fast" | "ultrafast";
 
 export interface UsageRecord {
   readonly provider: UsageProviderKind;
+  readonly scope?: "personal" | "work";
   readonly timestampMs: number;
   readonly model: string;
   readonly rateModel?: string;
@@ -87,6 +88,7 @@ export interface ProviderUsageInstance<Config> {
 
 export interface ProviderUsageScan {
   readonly dir: string;
+  readonly scope?: "personal" | "work";
   readonly volumeId?: string;
   readonly hostId?: string;
   readonly status?: UsageSource["status"];
@@ -130,6 +132,7 @@ export type ProviderUsageReader<Config, R> =
           readonly dir: string;
           readonly fileName?: string;
           readonly refreshing?: true;
+          readonly scope?: "personal" | "work";
         }>,
         never,
         R

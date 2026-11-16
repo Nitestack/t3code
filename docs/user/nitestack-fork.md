@@ -103,7 +103,7 @@ Compared with upstream T3 Code at
   enabled with `T3CODE_AIX=1`.
 - Model details for aix models: family, context window, prices, reasoning levels, refresh, and a
   stale-catalog warning.
-- An aix profile's LiteLLM key budget in the usage limits panel.
+- The Usage dialog's Work scope includes aix limits, cost, and tokens; only aix Claude sessions run through T3 count as Work.
 - A client-side Work/Personal view on web, desktop, and the fork's Android app.
 - A separately signed Android APK with its own package ID, and no fork iOS build.
 - A Nix flake with the `t3code-<version>` package and the usual T3 Code commands.

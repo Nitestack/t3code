@@ -1,4 +1,9 @@
-import { isProviderAvailable, type ServerProvider } from "@t3tools/contracts";
+import {
+  isProviderAvailable,
+  type ServerProvider,
+  type UsageBucket,
+  type UsageSummary,
+} from "@t3tools/contracts";
 import {
   aixProfileNameFromWindowId,
   type LimitAccount,
@@ -6,6 +11,40 @@ import {
 } from "@t3tools/shared/usageLimits";
 
 export type UsageLimitGroup = "personal" | "work";
+export type UsageScope = UsageLimitGroup;
+
+function usageScopeForBucket(bucket: Pick<UsageBucket, "scope">): UsageScope {
+  return bucket.scope === "work" ? "work" : "personal";
+}
+
+export function usageScopeGroupsInBuckets(
+  buckets: readonly Pick<UsageBucket, "scope">[],
+): ReadonlySet<UsageScope> {
+  return new Set(buckets.map(usageScopeForBucket));
+}
+
+export function filterUsageBucketsByScope(
+  buckets: readonly UsageBucket[],
+  scope: UsageScope,
+): readonly UsageBucket[] {
+  return buckets.filter((bucket) => usageScopeForBucket(bucket) === scope);
+}
+
+export function filterUsageSummaryByScope<T extends Pick<UsageSummary, "buckets" | "sources">>(
+  summary: T,
+  scope: UsageScope,
+): T {
+  return {
+    ...summary,
+    buckets: filterUsageBucketsByScope(summary.buckets, scope),
+    sources: summary.sources.map((source) => ({
+      ...source,
+      distinctSessions:
+        source.distinctSessionsByScope?.[scope] ??
+        (scope === "personal" ? source.distinctSessions : 0),
+    })),
+  };
+}
 
 const isAixIdentity = (instanceId: string | undefined, profileName: string | undefined) =>
   profileName !== undefined || instanceId?.startsWith("aix-") === true;

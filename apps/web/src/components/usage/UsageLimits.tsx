@@ -12,13 +12,12 @@ import { useAtomValue } from "@effect/atom-react";
 import { normalizeProviderAccentColor } from "@t3tools/client-runtime/state/provider-instance-display";
 import {
   filterLimitPresentationsByGroup,
-  usageLimitGroupsInPresentations,
-  resolveUsageLimitGroup,
   type UsageLimitGroup,
   usageLimitEmptyMessage,
 } from "@t3tools/client-runtime/state/usage-grouping";
 import {
   formatResetsIn,
+  type LimitPresentations,
   type LimitPace,
   paceOf,
   paceRemainingPercent,
@@ -33,7 +32,6 @@ import { usePrimarySettings } from "../../hooks/useSettings";
 import { observeResize } from "../../lib/observeResize";
 import { environmentPresentations } from "../../state/presentation";
 import { useEnvironmentScope, readEnvironmentScope } from "../../state/session";
-import { useClientEnvironmentScope } from "../../environmentScope";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { formatUpcomingTimestamp } from "../../timestampFormat";
@@ -47,7 +45,6 @@ import {
   AlertDialogTitle,
 } from "../ui/alert-dialog";
 import { Button } from "../ui/button";
-import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { UsageLimitsPooled } from "./UsageLimitsPooled";
 import { PROVIDER_PRESENTATION } from "./usageProviders";
@@ -57,6 +54,42 @@ const PACE: Record<LimitPace, { readonly label: string; readonly icon: typeof Ga
   on: { label: "On pace with the window", icon: GaugeIcon },
   under: { label: "Under pace: headroom left for the rest of the window", icon: TrendingDownIcon },
 };
+
+export function usageLimitPresentationsForSelection(
+  presentations: LimitPresentations,
+  selectedEnvironmentIds: ReadonlySet<EnvironmentId> | null,
+  hiddenProviders: ReadonlySet<UsageProviderKind>,
+): LimitPresentations {
+  const hiddenDrivers = new Set<ServerProvider["driver"]>(
+    [...hiddenProviders].map((provider) => PROVIDER_PRESENTATION[provider].driverKind),
+  );
+  const isVisible = (driver: ServerProvider["driver"]) => !hiddenDrivers.has(driver);
+  return new Map(
+    [...presentations].flatMap(([id, presentation]) => {
+      if (selectedEnvironmentIds !== null && !selectedEnvironmentIds.has(id)) return [];
+      const config = presentation.serverConfig;
+      if (hiddenDrivers.size === 0 || config === null) return [[id, presentation] as const];
+      return [
+        [
+          id,
+          {
+            ...presentation,
+            serverConfig: {
+              ...config,
+              providers: config.providers.filter((provider) => isVisible(provider.driver)),
+              usageLimitSources: config.usageLimitSources?.flatMap((source) => {
+                const accounts = source.accounts.filter((account) => isVisible(account.driver));
+                return accounts.length === 0 && source.accounts.length > 0
+                  ? []
+                  : [{ ...source, accounts }];
+              }),
+            },
+          },
+        ] as const,
+      ];
+    }),
+  );
+}
 
 export function barColor(driver: ServerProvider["driver"]): string {
   const presentation = Object.values(PROVIDER_PRESENTATION).find(
@@ -364,65 +397,25 @@ export function UsageLimitsSection({
   selectedEnvironmentIds,
   hiddenProviders,
   now,
+  scope,
 }: {
   readonly selectedEnvironmentIds: ReadonlySet<EnvironmentId> | null;
   readonly hiddenProviders: ReadonlySet<UsageProviderKind>;
   readonly now: number;
+  readonly scope: UsageLimitGroup;
 }) {
   const presentations = useAtomValue(environmentPresentations.presentationsWithProvidersAtom);
-  const hiddenDrivers = new Set<ServerProvider["driver"]>(
-    [...hiddenProviders].map((provider) => PROVIDER_PRESENTATION[provider].driverKind),
+  const selected = usageLimitPresentationsForSelection(
+    presentations,
+    selectedEnvironmentIds,
+    hiddenProviders,
   );
-  const isVisible = (driver: ServerProvider["driver"]) => !hiddenDrivers.has(driver);
-  const selected = new Map(
-    [...presentations].flatMap(([id, presentation]) => {
-      if (selectedEnvironmentIds !== null && !selectedEnvironmentIds.has(id)) return [];
-      const config = presentation.serverConfig;
-      if (hiddenDrivers.size === 0 || config === null) return [[id, presentation] as const];
-      return [
-        [
-          id,
-          {
-            ...presentation,
-            serverConfig: {
-              ...config,
-              providers: config.providers.filter((provider) => isVisible(provider.driver)),
-              usageLimitSources: config.usageLimitSources?.flatMap((source) => {
-                const accounts = source.accounts.filter((account) => isVisible(account.driver));
-                return accounts.length === 0 && source.accounts.length > 0
-                  ? []
-                  : [{ ...source, accounts }];
-              }),
-            },
-          },
-        ] as const,
-      ];
-    }),
-  );
-  const groups = usageLimitGroupsInPresentations(selected);
-  const { activeScope } = useClientEnvironmentScope();
-  const [requestedGroup, setRequestedGroup] = useState<UsageLimitGroup | null>(null);
-  const group = resolveUsageLimitGroup(requestedGroup, groups, activeScope);
   return (
     <div className="space-y-5">
-      {groups.size > 1 ? (
-        <ToggleGroup
-          aria-label="Usage scope"
-          variant="segmented"
-          value={[group]}
-          onValueChange={(next) => {
-            const value = next[0];
-            if (value === "personal" || value === "work") setRequestedGroup(value);
-          }}
-        >
-          <Toggle value="personal">Personal</Toggle>
-          <Toggle value="work">Work</Toggle>
-        </ToggleGroup>
-      ) : null}
       <UsageLimitsPooled
-        presentations={filterLimitPresentationsByGroup(selected, group)}
+        presentations={filterLimitPresentationsByGroup(selected, scope)}
         now={now}
-        emptyMessage={usageLimitEmptyMessage(group)}
+        emptyMessage={usageLimitEmptyMessage(scope)}
       />
     </div>
   );

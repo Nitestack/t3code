@@ -773,12 +773,16 @@ describe("openCodeUsageReader", () => {
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("does not scan host OpenCode roots for aix-managed instances", () =>
+  it.effect("scans isolated aix data roots as Work", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
       const temp = yield* fileSystem.makeTempDirectoryScoped({
         prefix: "usage-aix-instance-test-",
       });
+      const dataHome = path.join(temp, "data");
+      const isolatedRoot = path.join(dataHome, "opencode");
+      yield* fileSystem.makeDirectory(isolatedRoot, { recursive: true });
       if (openCodeUsageReader.kind !== "scan") throw new Error("Expected an OpenCode scan reader");
       const sources = yield* openCodeUsageReader
         .scan({
@@ -787,8 +791,7 @@ describe("openCodeUsageReader", () => {
               instanceId: ProviderInstanceId.make("aix-opencode-work"),
               config: { aixProfile: "work" } as OpenCodeSettings,
               environment: {
-                OPENCODE_DATA_DIR: temp,
-                XDG_DATA_HOME: temp,
+                XDG_DATA_HOME: dataHome,
                 HOME: temp,
               },
               configured: true,
@@ -804,7 +807,10 @@ describe("openCodeUsageReader", () => {
           Effect.provideService(HostProcess.HomeDirectory, temp),
         );
 
-      assert.deepStrictEqual(sources, []);
+      assert.deepStrictEqual(
+        sources.map(({ dir, scope }) => ({ dir, scope })),
+        [{ dir: isolatedRoot, scope: "work" }],
+      );
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 });
