@@ -376,9 +376,11 @@ export function createNewThreadHandler(router: AnyRouter) {
           const modelSelectionOverride = resolveModelSelectionOverride(
             emptyStoredDraftThread.draftId,
           );
-          setModelSelection(emptyStoredDraftThread.draftId, modelSelectionOverride, {
-            replaceOptions: true,
-          });
+          if (modelSelectionOverride || environmentConfig) {
+            setModelSelection(emptyStoredDraftThread.draftId, modelSelectionOverride, {
+              replaceOptions: true,
+            });
+          }
         }
         // Remapping physical projects clears workspace context; preserve the branch and worktree.
         setLogicalProjectDraftThreadId(
@@ -489,7 +491,10 @@ export function createNewThreadHandler(router: AnyRouter) {
       });
       applyStickyState(draftId, projectScope);
       const modelSelectionOverride = resolveModelSelectionOverride(draftId);
-      setModelSelection(draftId, modelSelectionOverride, { replaceOptions: true });
+      // Without a loaded config nothing can resolve; keep what the draft already has.
+      if (modelSelectionOverride || environmentConfig) {
+        setModelSelection(draftId, modelSelectionOverride, { replaceOptions: true });
+      }
       seedPrompt(draftId);
       await router.navigate({
         to: "/draft/$draftId",

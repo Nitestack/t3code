@@ -33,6 +33,7 @@ const testState = vi.hoisted(() => {
     readonly modelSelectionExplicit?: boolean;
   } | null = null;
   let forceUsageFallback = false;
+  let serverConfigsLoaded = true;
   let openDraftRoute: { readonly kind: "draft"; readonly draftId: string } | null = null;
   let sourceThreadRoute: { readonly kind: "server"; readonly threadRef: object } | null = null;
   let sourceThread: {
@@ -111,6 +112,12 @@ const testState = vi.hoisted(() => {
     get forceUsageFallback() {
       return forceUsageFallback;
     },
+    get serverConfigsLoaded() {
+      return serverConfigsLoaded;
+    },
+    unloadServerConfigs() {
+      serverConfigsLoaded = false;
+    },
     useUsageFallback() {
       forceUsageFallback = true;
     },
@@ -154,6 +161,7 @@ const testState = vi.hoisted(() => {
       sourceThread = null;
       sourceComposer = null;
       forceUsageFallback = false;
+      serverConfigsLoaded = true;
       draftsWithUserText = new Set();
       projectRemoved = false;
       connectedEnvironmentIds = ["environment-primary", "environment-ssh"];
@@ -181,19 +189,26 @@ const testState = vi.hoisted(() => {
 });
 
 const testServerConfigs = () =>
-  new Map([
-    [
-      "environment-primary",
-      {
-        settings: {
-          ...testState.targetSettings,
-          newWorktreesStartFromOrigin: !testState.targetSettings.newWorktreesStartFromOrigin,
-        },
-        providers: testState.providers,
-      },
-    ],
-    ["environment-ssh", { settings: testState.targetSettings, providers: testState.providers }],
-  ]);
+  new Map(
+    testState.serverConfigsLoaded
+      ? [
+          [
+            "environment-primary",
+            {
+              settings: {
+                ...testState.targetSettings,
+                newWorktreesStartFromOrigin: !testState.targetSettings.newWorktreesStartFromOrigin,
+              },
+              providers: testState.providers,
+            },
+          ],
+          [
+            "environment-ssh",
+            { settings: testState.targetSettings, providers: testState.providers },
+          ],
+        ]
+      : [],
+  );
 
 vi.mock("../rpc/atomRegistry", () => ({
   appAtomRegistry: {
@@ -446,6 +461,24 @@ describe("useNewThreadHandler", () => {
     expect(testState.draftStore.setModelSelection).toHaveBeenCalledWith("draft-delayed", null, {
       replaceOptions: true,
     });
+  });
+
+  it("keeps the stored model selection while the environment config is not loaded", async () => {
+    testState.reset(null);
+    testState.unloadServerConfigs();
+
+    const pending = useNewThreadHandler()({
+      environmentId: "environment-ssh",
+      projectId: "project-remote",
+    } as never);
+    testState.completeProjectFileRead(null);
+    await pending;
+
+    expect(testState.draftStore.setModelSelection).not.toHaveBeenCalledWith(
+      expect.anything(),
+      null,
+      expect.anything(),
+    );
   });
 
   it("does not carry an exhausted explicit source model into a new draft", async () => {
