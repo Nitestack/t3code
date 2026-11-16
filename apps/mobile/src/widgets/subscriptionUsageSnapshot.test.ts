@@ -101,6 +101,16 @@ describe("subscription widget snapshots", () => {
       windows: [{ label: "5 hours", remaining: 60 }],
     });
   });
+  it("does not show a Personal placeholder for an AIX-only provider", () => {
+    const profile = provider({
+      instanceId: ProviderInstanceId.make("aix-codex-work"),
+      usageLimits: { checkedAt, profileName: "work", windows: [] },
+    });
+
+    expect(buildSubscriptionUsageSnapshot(presentations([profile]), deepLink).providers).toEqual(
+      [],
+    );
+  });
   it("uses upstream deduplication for a native account also present in a proxy hub", () => {
     const input = new Map([
       [

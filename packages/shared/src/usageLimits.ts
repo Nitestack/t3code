@@ -318,6 +318,7 @@ function hubIdentity(environmentId: EnvironmentId, source: UsageLimitSourceSnaps
 
 export interface LimitAccount {
   readonly key: string;
+  readonly providerInstanceId?: ServerProvider["instanceId"] | undefined;
   readonly driver: ServerProvider["driver"];
   readonly displayName: string | null;
   readonly profileName?: string | undefined;
@@ -433,6 +434,7 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
         : `${environmentId}:${provider.instanceId}`;
       merge(profileName ? key : (resolveKey(nativeReport(provider)) ?? key), {
         key,
+        providerInstanceId: provider.instanceId,
         driver: provider.driver,
         displayName: profileName ?? (provider.displayName?.trim() || null),
         ...(profileName ? { profileName } : {}),

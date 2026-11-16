@@ -5,6 +5,10 @@ import {
   type LimitPoolWindow,
   type LimitPresentations,
 } from "@t3tools/shared/usageLimits";
+import {
+  groupLimitAccounts,
+  usageLimitGroupForProvider,
+} from "@t3tools/client-runtime/state/usage-grouping";
 
 import type { WidgetTheme } from "./widgetTheme";
 
@@ -148,6 +152,7 @@ export function buildSubscriptionUsageSnapshot(
           (provider) =>
             provider.enabled &&
             provider.installed &&
+            usageLimitGroupForProvider(provider) === "personal" &&
             provider.usageLimits?.unavailable?.reason !== "unsupported",
         )
         .map((provider) => provider.driver),
@@ -155,7 +160,7 @@ export function buildSubscriptionUsageSnapshot(
   );
   return {
     ...subscriptionUsageProps(
-      collectLimitAccounts(presentations),
+      groupLimitAccounts(collectLimitAccounts(presentations)).personal,
       0,
       configuredDrivers,
       maxWindowsPerProvider,
