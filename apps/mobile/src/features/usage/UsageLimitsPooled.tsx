@@ -4,6 +4,11 @@ import { EnvironmentId } from "@t3tools/contracts";
 import { providerClients } from "@t3tools/client-runtime/provider-clients";
 import { normalizeProviderAccentColor } from "@t3tools/client-runtime/state/provider-instance-display";
 import {
+  filterLimitPresentationsByGroup,
+  usageLimitGroupsInPresentations,
+  type UsageLimitGroup,
+} from "@t3tools/client-runtime/state/usage-grouping";
+import {
   collectLimitAccounts,
   collectExternalUsageLinks,
   collectLimitNotices,
@@ -29,6 +34,8 @@ import { SettingsScreen } from "../settings/components/SettingsScreen";
 import { environmentPresentations } from "../../state/presentation";
 import { ResetCredits } from "./UsageLimitsSection";
 import { usageProviderKind, useProviderColors } from "./usageProviders";
+import { SegmentedControl } from "../../components/ui/SegmentedControl";
+import { useMobileEnvironmentScope } from "../environment-scope/useMobileEnvironmentScope";
 
 const PACE_LABEL = { ahead: "Ahead of pace", on: "On pace", under: "Under pace" } as const;
 const PROFILE_LIMIT_COLOR = "#8e8e93";
@@ -418,20 +425,43 @@ export function UsageLimitsSection({
     selectedEnvironmentIds === null
       ? presentations
       : new Map([...presentations].filter(([id]) => selectedEnvironmentIds.has(id)));
-  const pools = collectLimitPools(collectLimitAccounts(selected), now);
-  const notices = collectLimitNotices(selected);
-  const externalLinks = collectExternalUsageLinks(selected);
+  const groups = usageLimitGroupsInPresentations(selected);
+  const { activeScope } = useMobileEnvironmentScope();
+  const [requestedGroup, setRequestedGroup] = useState<UsageLimitGroup | null>(null);
+  const group =
+    requestedGroup && groups.has(requestedGroup)
+      ? requestedGroup
+      : groups.has(activeScope)
+        ? activeScope
+        : groups.has("personal")
+          ? "personal"
+          : "work";
+  const scopedPresentations = filterLimitPresentationsByGroup(selected, group);
+  const pools = collectLimitPools(collectLimitAccounts(scopedPresentations), now);
+  const notices = collectLimitNotices(scopedPresentations);
+  const externalLinks = collectExternalUsageLinks(scopedPresentations);
   const colors = useProviderColors();
   return (
     <View className="gap-6">
-      {pools.length === 0 &&
-      notices.length === 0 &&
-      failedLabels.length === 0 &&
-      externalLinks.length === 0 ? (
+      {groups.size > 1 ? (
+        <SegmentedControl
+          options={[
+            { value: "personal", label: "Personal" },
+            { value: "work", label: "Work" },
+          ]}
+          selected={group}
+          onSelect={(value) => {
+            if (value === "personal" || value === "work") setRequestedGroup(value);
+          }}
+        />
+      ) : null}
+      {pools.length === 0 && notices.length === 0 && externalLinks.length === 0 ? (
         <Text className="py-12 text-center text-base text-foreground-muted">
           {selected.size === 0
             ? "Select an environment to see limits."
-            : "No provider on the selected environments reports subscription limits."}
+            : group === "work"
+              ? "No AIX profile limits are available for the selected environments."
+              : "No personal subscription limits are available for the selected environments."}
         </Text>
       ) : null}
       {pools.map((pool) => {
@@ -497,7 +527,7 @@ export function UsageLimitsSection({
           </Pressable>
         </View>
       ))}
-      {notices.length > 0 || failedLabels.length > 0 ? (
+      {notices.length > 0 || (failedLabels.length > 0 && groups.size <= 1) ? (
         <View
           accessible
           accessibilityRole="alert"
@@ -515,7 +545,7 @@ export function UsageLimitsSection({
                 {notice}
               </Text>
             ))}
-            {failedLabels.length > 0 ? (
+            {failedLabels.length > 0 && groups.size <= 1 ? (
               <Text className="text-sm font-t3-medium text-warning-foreground">
                 {failedLabels.join(", ")} could not refresh limits. Showing the last known values.
               </Text>

@@ -295,6 +295,10 @@
       "types": "./src/state/usage.ts",
       "default": "./src/state/usage.ts"
     },
+    "./state/usage-grouping": {
+      "types": "./src/state/usageGrouping.ts",
+      "default": "./src/state/usageGrouping.ts"
+    },
     "./state/usage-progress": {
       "types": "./src/state/usageProgress.ts",
       "default": "./src/state/usageProgress.ts"
