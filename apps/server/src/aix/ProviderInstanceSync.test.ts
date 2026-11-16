@@ -29,7 +29,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { OpenCodeSettings } from "@t3tools/provider-opencode/settings";
 import { AixDiscoveryError } from "../provider/AixDiscovery.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
-import { type CatalogModel, ModelCatalogFetchError } from "./ModelCatalog.ts";
+import { type CatalogModel, ModelCatalogFetchError, normalizeModelInfo } from "./ModelCatalog.ts";
 import {
   type AixSyncCache,
   type AixSyncSource,
@@ -119,6 +119,57 @@ describe("routeAixModels", () => {
     ]);
     expect(routes.get(CODEX)?.map((model) => model.id)).toEqual(["openai/gpt-6-luna"]);
     expect(routes.get(OPENCODE)?.map((model) => model.id)).toEqual(["openai/gpt-oss-120b"]);
+  });
+
+  it("routes real gateway prefix wildcard models to Claude Code after catalog normalization", () => {
+    const gatewayIds = [
+      "claude-fable-5-1*",
+      "claude-haiku-4-5*",
+      "claude-haiku-5-5*",
+      "claude-opus-4-6*",
+      "claude-opus-4-7*",
+      "claude-opus-4-8*",
+      "claude-opus-5",
+      "claude-opus-5-5*",
+      "claude-sonnet-4-6*",
+      "claude-sonnet-5",
+      "claude-sonnet-5-5*",
+      "gpt-6.1-sol*",
+    ];
+    const entries = gatewayIds.map((id) => ({
+      model_name: id,
+      litellm_params: { model: id },
+      model_info: { litellm_provider: "Google", mode: "chat" },
+    }));
+    entries.push({
+      model_name: "claude-opus-5-5",
+      litellm_params: { model: "claude-opus-5-5" },
+      model_info: { litellm_provider: "Google", mode: "chat" },
+    });
+
+    const models = normalizeModelInfo(entries, undefined, gatewayIds);
+    const routes = routeAixModels("litellm", models);
+
+    expect(
+      routes
+        .get(CLAUDE_CODE)
+        ?.map(({ id }) => id)
+        .sort(),
+    ).toEqual([
+      "claude-fable-5-1",
+      "claude-haiku-4-5",
+      "claude-haiku-5-5",
+      "claude-opus-4-6",
+      "claude-opus-4-7",
+      "claude-opus-4-8",
+      "claude-opus-5",
+      "claude-opus-5-5",
+      "claude-sonnet-4-6",
+      "claude-sonnet-5",
+      "claude-sonnet-5-5",
+    ]);
+    expect(routes.get(CODEX)?.map(({ id }) => id)).toEqual(["gpt-6.1-sol"]);
+    expect(models.filter(({ id }) => id === "claude-opus-5-5")).toHaveLength(1);
   });
 
   it("never routes non-chat models to OpenCode", () => {
