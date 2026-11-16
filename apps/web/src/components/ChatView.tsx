@@ -20,6 +20,7 @@ import {
   deriveAvailableRevertTurnCounts,
   deriveThreadPendingBackgroundTasks,
   presentThreadShellFromProjection,
+  resolveDraftFallbackBannerDefault,
 } from "./ChatView.logic";
 import { usePullRequestDraftThread } from "./chat/usePullRequestDraftThread";
 import { usePullRequestLinking } from "../hooks/usePullRequestLinking";
@@ -2682,12 +2683,10 @@ export default function ChatView(props: ChatViewProps) {
       : null;
   const composerBannerItems = (() => {
     const fallbackSelection = draftFallback?.selection;
-    const defaultSelection = draftThread
-      ? resolveDraftModelSelectionForScope({
-          scope: draftProjectScope,
-          normalDefault: draftNormalDefault,
-          orderedDefault: draftOrderedDefault,
-          providers: draftResolverProviders,
+    const defaultBannerSelection = draftThread
+      ? resolveDraftFallbackBannerDefault({
+          selection: draftScopedDefault,
+          providers: draftProviders,
         })
       : null;
     const fallback =
@@ -2706,7 +2705,7 @@ export default function ChatView(props: ChatViewProps) {
     const fallbackItems: ComposerBannerStackItem[] =
       fallback &&
       fallbackSelection &&
-      defaultSelection &&
+      defaultBannerSelection &&
       fallbackWindow !== dismissedFallbackWindow
         ? [
             modelFallbackBannerItem({
@@ -2715,14 +2714,15 @@ export default function ChatView(props: ChatViewProps) {
                   .find((provider) => provider.instanceId === fallbackSelection.instanceId)
                   ?.models.find((model) => model.slug === fallbackSelection.model)?.name ??
                 fallbackSelection.model,
-              defaultProviderName: fallback.provider.displayName ?? fallback.provider.driver,
-              defaultModelName:
-                fallback.provider.models.find((model) => model.slug === defaultSelection.model)
-                  ?.name ?? defaultSelection.model,
+              defaultProviderName: defaultBannerSelection.providerName,
+              defaultModelName: defaultBannerSelection.modelName,
               resetsAt: fallback.resetsAt,
               timestampFormat,
               onUseDefault: () =>
-                onProviderModelSelectStable(defaultSelection.instanceId, defaultSelection.model),
+                onProviderModelSelectStable(
+                  defaultBannerSelection.selection.instanceId,
+                  defaultBannerSelection.selection.model,
+                ),
               onDismiss: () => setDismissedFallbackWindow(fallbackWindow),
             }),
           ]

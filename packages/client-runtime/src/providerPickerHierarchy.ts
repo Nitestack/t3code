@@ -265,7 +265,7 @@ export function resolveDraftModelSelectionAfterUsageLimitFallback(input: {
     : undefined;
   if (
     fallback &&
-    !isExhausted(fallback) &&
+    fallback.instanceId !== input.exhaustedSelection?.instanceId &&
     fallbackProvider &&
     isModelSelectionInProjectScope({
       scope: input.scope,

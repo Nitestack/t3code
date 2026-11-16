@@ -139,6 +139,7 @@ function project(environment: string, id: string): EnvironmentProject {
 function serverConfig(options: {
   readonly defaultModelSelection?: ModelSelection | null;
   readonly hideCodexDefault?: boolean;
+  readonly withoutCodexDefault?: boolean;
 }) {
   const models = (values: ReadonlyArray<{ slug: string; isDefault?: boolean }>) =>
     values.map((model) => ({
@@ -166,7 +167,11 @@ function serverConfig(options: {
         installed: true,
         status: "ready",
         auth: { status: "authenticated" },
-        models: models([{ slug: "hidden-default", isDefault: true }, { slug: "codex-visible" }]),
+        models: models(
+          options.withoutCodexDefault
+            ? [{ slug: "codex-first" }, { slug: "codex-second" }]
+            : [{ slug: "hidden-default", isDefault: true }, { slug: "codex-visible" }],
+        ),
       },
       {
         instanceId: ProviderInstanceId.make("claudeAgent"),
@@ -368,8 +373,19 @@ it("uses the provider-order default after excluding hidden model defaults", asyn
   await screen.render(true);
 
   expect(screen.current.selectedModel).toEqual({
-    instanceId: ProviderInstanceId.make("claudeAgent"),
-    model: "claude-default",
+    instanceId: ProviderInstanceId.make("codex"),
+    model: "codex-visible",
+  });
+});
+
+it("uses the first ready provider's first model when it has no default model", async () => {
+  using screen = setup();
+  mocks.serverConfig.mockReturnValue(serverConfig({ withoutCodexDefault: true }) as never);
+  await screen.render(true);
+
+  expect(screen.current.selectedModel).toEqual({
+    instanceId: ProviderInstanceId.make("codex"),
+    model: "codex-first",
   });
 });
 

@@ -542,25 +542,32 @@ export function NewTaskFlowProvider(
           : provider.enabled,
       }))
     : [];
-  const orderedDefault = modelOptions.find((option) => {
-    const provider = resolverProviders.find(
-      (candidate) => candidate.instanceId === option.selection.instanceId,
-    );
-    return (
-      option.isDefault &&
-      !option.isUnavailable &&
-      provider !== undefined &&
+  const firstReadyProvider = resolverProviders.find(
+    (provider) =>
       provider.enabled &&
       provider.installed &&
       provider.availability !== "unavailable" &&
       provider.status === "ready" &&
       isModelSelectionInProjectScope({
         scope: projectScope,
-        selection: option.selection,
+        selection: { instanceId: provider.instanceId, model: "" },
         providers: resolverProviders,
-      })
-    );
-  })?.selection;
+      }),
+  );
+  const firstReadyProviderOptions = firstReadyProvider
+    ? modelOptions.filter(
+        (option) =>
+          option.selection.instanceId === firstReadyProvider.instanceId && !option.isUnavailable,
+      )
+    : [];
+  const isCustomModelOption = (option: (typeof firstReadyProviderOptions)[number]) =>
+    firstReadyProvider?.models.find((model) => model.slug === option.selection.model)?.isCustom ===
+    true;
+  const orderedDefault =
+    firstReadyProviderOptions.find((option) => option.isDefault && !isCustomModelOption(option))
+      ?.selection ??
+    firstReadyProviderOptions.find((option) => !isCustomModelOption(option))?.selection ??
+    firstReadyProviderOptions[0]?.selection;
 
   const scopedDefaultModel = selectedEnvironmentServerConfig
     ? resolveDraftModelSelectionForScope({

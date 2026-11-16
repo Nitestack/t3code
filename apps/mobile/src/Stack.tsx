@@ -1,5 +1,7 @@
-import { isDraftThreadRoute } from "./features/threads/thread-route-state";
-import type { ModelSelection } from "@t3tools/contracts";
+import {
+  decodeDraftCarriedSelection,
+  isDraftThreadRoute,
+} from "./features/threads/thread-route-state";
 import { ComponentCatalogScreen } from "./features/development/ComponentCatalogScreen";
 import { PullRequestGuideStopScreen } from "./features/pull-requests/guide/PullRequestGuideScreen";
 import { PullRequestInlineCommentScreen } from "./features/pull-requests/PullRequestInlineCommentScreen";
@@ -405,7 +407,7 @@ function RootStackLayout(props: {
       | {
           draft?: {
             draftId?: string | string[];
-            carriedSelection?: ModelSelection;
+            carriedSelection?: unknown;
           };
         }
       | undefined
@@ -419,7 +421,7 @@ function RootStackLayout(props: {
       active={draftRouteOnTop}
       flowKey={draftRoute === undefined ? undefined : newTaskFlowKey(draftRoute)}
       routeDraftId={routeDraftId}
-      carriedSelection={draftParams?.carriedSelection}
+      carriedSelection={decodeDraftCarriedSelection(draftParams?.carriedSelection)}
     >
       <HardwareKeyboardCommandProvider pathname={pathname}>
         <ShowcaseReadyMarker />

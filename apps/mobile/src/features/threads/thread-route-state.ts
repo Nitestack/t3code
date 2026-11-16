@@ -1,3 +1,7 @@
+import { ModelSelection as ModelSelectionSchema, type ModelSelection } from "@t3tools/contracts";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
+
 export type NewTaskDraftRouteParams = {
   readonly requestId?: string;
   readonly environmentId?: string | string[];
@@ -8,8 +12,14 @@ export type NewTaskDraftRouteParams = {
   readonly cloning?: string | string[];
   readonly draftId?: string | string[];
   readonly incomingShareId?: string | string[];
-  readonly carriedSelection?: import("@t3tools/contracts").ModelSelection;
+  readonly carriedSelection?: ModelSelection;
 };
+
+const decodeCarriedModelSelection = Schema.decodeUnknownOption(ModelSelectionSchema);
+
+export function decodeDraftCarriedSelection(value: unknown): ModelSelection | undefined {
+  return Option.getOrUndefined(decodeCarriedModelSelection(value));
+}
 
 export function isDraftThreadRoute(
   route:
