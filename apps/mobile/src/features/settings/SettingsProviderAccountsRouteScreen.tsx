@@ -31,6 +31,7 @@ import { useEnvironmentsWithScope } from "../../state/session";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useMobileEnvironmentScope } from "../environment-scope/useMobileEnvironmentScope";
 import {
+  providerSettingsEntryProfile,
   providerSettingsRowLabels,
   resolveProviderSettingsHierarchy,
 } from "@t3tools/client-runtime/provider-settings-hierarchy";
@@ -318,7 +319,13 @@ function ProviderAccount({
   const rowLabels = providerSettingsRowLabels({
     driverLabel: PROVIDER_DISPLAY_NAMES[provider.driver] ?? String(provider.driver),
     displayName: provider.displayName,
-    isAix: provider.aixProfile !== undefined,
+    isAix:
+      providerSettingsEntryProfile({
+        instanceId: provider.instanceId,
+        driverKind: provider.driver,
+        aixProfile: provider.aixProfile,
+        aixProfileLabel: provider.aixProfileLabel,
+      }) !== undefined,
     version: provider.version,
     status: status ?? "Checking provider status",
     accountSource: signedIn ? (provider.auth.label ?? provider.auth.type) : undefined,
