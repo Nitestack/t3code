@@ -4,6 +4,7 @@ import { Button } from "../../components/ui/Button";
 import { ProjectFavicon } from "../../components/ProjectFavicon";
 import * as Dialog from "../../components/ui/Dialog";
 import { AuthOrchestrationOperateScope, type ProjectScope } from "@t3tools/contracts";
+import { projectScopeInput, supportsProjectScope } from "@t3tools/client-runtime/environment";
 import { planProjectRemoval } from "@t3tools/client-runtime/state/projects";
 import {
   isAtomCommandInterrupted,
@@ -167,6 +168,12 @@ function ProjectOverviewContent(props: {
     props.connectedTargets.find((entry) => entry.environmentId === member.environmentId),
   );
   const offline = memberTargets.some((target) => target === undefined);
+  const canMoveProjectScope =
+    environmentScopeEnabled &&
+    memberTargets.every(
+      (target) =>
+        target !== undefined && supportsProjectScope(target.serverConfig.environment.capabilities),
+    );
   // Older servers drop pin and archive, so their projects do not offer them.
   // Offline members are checked when the write runs, so their reason can show.
   const canOrganize =
@@ -191,9 +198,19 @@ function ProjectOverviewContent(props: {
         Dialog.alert("Failed to update project", "This connection can no longer change it.");
         break;
       }
+      const target = props.connectedTargets.find(
+        (candidate) => candidate.environmentId === member.environmentId,
+      );
+      const { scope, ...organization } = input;
       const result = await organizeProject({
         environmentId: member.environmentId,
-        input: { projectId: member.id, ...input },
+        input: {
+          projectId: member.id,
+          ...organization,
+          ...(scope === undefined || !environmentScopeEnabled
+            ? {}
+            : projectScopeInput(target?.serverConfig.environment.capabilities, scope)),
+        },
       });
       if (result._tag === "Failure") {
         if (!isAtomCommandInterrupted(result)) {
@@ -352,7 +369,7 @@ function ProjectOverviewContent(props: {
             ) : null}
           </View>
         </View>
-        {canOrganize && environmentScopeEnabled ? (
+        {canMoveProjectScope ? (
           <SettingsActionRow
             icon="arrow.left.arrow.right"
             label={representative.scope === "work" ? "Move to Personal" : "Move to Work"}

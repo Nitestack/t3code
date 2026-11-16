@@ -157,8 +157,10 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   /** Only explicit false skips Live Activity seeding; older servers may still publish. */
   agentActivityPublishing: Schema.optionalKey(Schema.Boolean),
   projectCloneTracking: Schema.optionalKey(Schema.Boolean),
-  /** Server keeps `pinned` and `archived` from project.update. Older servers drop them. */
+  /** Server keeps pin and archive fields from project.update; project scope is separate. */
   projectOrganization: Schema.optionalKey(Schema.Boolean),
+  /** Server keeps project scope from project.create and project.update. */
+  projectScope: Schema.optionalKey(Schema.Boolean),
   /** Server answers projects.listIgnoredFiles. */
   ignoredFileListing: Schema.optionalKey(Schema.Boolean),
   /** projects.listIgnoredFiles honors `query`. Older servers ignore it. */

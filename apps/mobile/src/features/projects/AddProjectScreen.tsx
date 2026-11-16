@@ -39,6 +39,7 @@ import {
   connectionStatusText,
   type EnvironmentConnectionPhase,
 } from "@t3tools/client-runtime/connection";
+import { projectScopeInput } from "@t3tools/client-runtime/environment";
 import {
   canPreloadBrowsePath,
   createBrowseNavigationCoordinator,
@@ -57,6 +58,7 @@ import {
   AuthSourceControlWriteScope,
   AuthFilesystemReadScope,
   CommandId,
+  type ExecutionEnvironmentCapabilities,
   type EnvironmentId,
   type EnvironmentMachineKind,
   ProjectId,
@@ -102,6 +104,7 @@ import {
 } from "../../state/use-remote-environment-registry";
 import {
   isMissingCloneParentBrowseFailure,
+  mobileProjectScopeInput,
   resolveAddProjectEnvironment,
 } from "./AddProjectScreen.logic";
 import {
@@ -122,6 +125,7 @@ interface EnvironmentOption {
   readonly connectionErrorTraceId: string | null;
   readonly ghqCloneLayout: boolean;
   readonly offeredSourceControlProviders: OfferedSourceControlProviders | undefined;
+  readonly projectScopeCapabilities: Pick<ExecutionEnvironmentCapabilities, "projectScope"> | null;
 }
 
 const environmentOptionOrder = Order.mapInput(
@@ -437,6 +441,7 @@ function useEnvironmentOptions(
         connectionErrorTraceId: runtime?.connectionErrorTraceId ?? null,
         ghqCloneLayout: config?.settings.ghqCloneLayout === true,
         offeredSourceControlProviders: config?.settings.offeredSourceControlProviders,
+        projectScopeCapabilities: config?.environment.capabilities ?? null,
       };
     });
     return Arr.sort(
@@ -811,7 +816,10 @@ function useOpenExistingProject(environment: EnvironmentOption | null) {
   };
 }
 
-function useCreateProject(environment: EnvironmentOption | null, scope: "personal" | "work") {
+function useCreateProject(
+  environment: EnvironmentOption | null,
+  scope: "personal" | "work" | undefined,
+) {
   const openNewTaskDraft = useOpenNewTaskDraft();
   const navigation = useNavigation();
   const createProject = useAtomCommand(projectEnvironment.create, { reportFailure: false });
@@ -843,7 +851,10 @@ function useCreateProject(environment: EnvironmentOption | null, scope: "persona
       commandId: CommandId.make(uuidv4()),
       projectId,
       workspaceRoot,
-      scope,
+      ...projectScopeInput(
+        scope === undefined ? null : environment.projectScopeCapabilities,
+        scope ?? "personal",
+      ),
     });
     const result = await createProject({
       environmentId: environment.environmentId,
@@ -1133,6 +1144,12 @@ export function AddProjectNewScreen(props: { readonly environmentId?: string | s
   );
   const [name, setName] = useState("");
   const [scope, setScope] = useState(activeScope);
+  const projectScope = mobileProjectScopeInput(
+    scopeEnabled,
+    environment?.projectScopeCapabilities,
+    scope,
+  );
+  const canSetProjectScope = projectScope.scope !== undefined;
   const [publishes, setPublishes] = useState(false);
   const [publishKind, setPublishKind] = useState<SourceControlProviderKind | null>(null);
   const publishTarget = getNewProjectPublishTarget(publishTargets, publishKind);
@@ -1191,7 +1208,10 @@ export function AddProjectNewScreen(props: { readonly environmentId?: string | s
     setIsSubmitting(true);
     const result = await createNew({
       environmentId: environment.environmentId,
-      input: { name: trimmedName, scope: scopeEnabled ? scope : "personal" },
+      input: {
+        name: trimmedName,
+        ...projectScope,
+      },
     });
     if (AsyncResult.isFailure(result)) {
       submittingRef.current = false;
@@ -1276,7 +1296,7 @@ export function AddProjectNewScreen(props: { readonly environmentId?: string | s
             </Text>
           ) : null}
           {machineRows}
-          {scopeEnabled ? (
+          {canSetProjectScope ? (
             <SegmentedControl
               selected={scope}
               options={[
@@ -1385,12 +1405,18 @@ export function AddProjectLocalFolderScreen(props: { readonly environmentId?: st
   const environment = useEnvironmentFromParam(props.environmentId);
   const { activeScope, enabled: scopeEnabled } = useMobileEnvironmentScope();
   const [scope, setScope] = useState(activeScope);
+  const canSetProjectScope =
+    mobileProjectScopeInput(scopeEnabled, environment?.projectScopeCapabilities, scope).scope !==
+    undefined;
   const canCreateProject = useEnvironmentScope(
     environment?.environmentId ?? null,
     AuthOrchestrationOperateScope,
   );
   const navigation = useNavigation();
-  const createProject = useCreateProject(environment, scopeEnabled ? scope : "personal");
+  const createProject = useCreateProject(
+    environment,
+    mobileProjectScopeInput(scopeEnabled, environment?.projectScopeCapabilities, scope).scope,
+  );
   const { isBrowseNavigating, navigateToBrowsePath, pathInput, setPathInput, resolveHomePath } =
     useBrowsePathInput(environment);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -1430,7 +1456,7 @@ export function AddProjectLocalFolderScreen(props: { readonly environmentId?: st
             <ErrorBanner message="This connection cannot add projects." />
           ) : null}
           <ProjectPathInput value={pathInput} onChangeText={setPathInput} onSubmit={submitPath} />
-          {scopeEnabled ? (
+          {canSetProjectScope ? (
             <SegmentedControl
               selected={scope}
               options={[
@@ -1479,6 +1505,12 @@ export function AddProjectDestinationScreen(props: {
   });
   const navigation = useNavigation();
   const environment = useEnvironmentFromParam(props.environmentId);
+  const projectScope = mobileProjectScopeInput(
+    scopeEnabled,
+    environment?.projectScopeCapabilities,
+    scope,
+  );
+  const canSetProjectScope = projectScope.scope !== undefined;
   const canWriteSourceControl = useEnvironmentScope(
     environment?.environmentId ?? null,
     AuthSourceControlWriteScope,
@@ -1543,7 +1575,7 @@ export function AddProjectDestinationScreen(props: {
         projectId: ProjectId.make(uuidv4()),
         title,
         createdAt: new Date().toISOString(),
-        scope: scopeEnabled ? scope : "personal",
+        ...projectScope,
         remoteUrl,
         destinationPath: resolved.path,
       },
@@ -1596,7 +1628,7 @@ export function AddProjectDestinationScreen(props: {
       ) : null}
       {environment ? (
         <>
-          {scopeEnabled ? (
+          {canSetProjectScope ? (
             <View className="gap-2">
               <Text className="text-sm font-t3-medium text-foreground-muted">Project scope</Text>
               <SegmentedControl

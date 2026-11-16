@@ -1,5 +1,9 @@
 import { useParams } from "@tanstack/react-router";
-import { scopeProjectRef } from "@t3tools/client-runtime/environment";
+import {
+  projectScopeInput,
+  scopeProjectRef,
+  supportsProjectScope,
+} from "@t3tools/client-runtime/environment";
 import {
   getAddProjectInitialQuery,
   getCloneDestinationPath,
@@ -116,8 +120,8 @@ function AddProjectToMachineDialog({ request }: { request: AddProjectToMachineRe
     (protocol === "ssh" ? sshUrl : protocol === "https" ? httpsUrl : null) ?? sourceUrl;
 
   const targetEnvironment = environments.find((env) => env.environmentId === target?.environmentId);
-  const canSetProjectScope =
-    targetEnvironment?.serverConfig?.environment.capabilities.projectOrganization === true;
+  const projectScopeCapabilities = targetEnvironment?.serverConfig?.environment.capabilities;
+  const canSetProjectScope = supportsProjectScope(projectScopeCapabilities);
   const defaultPath = getCloneDestinationPath(
     getAddProjectInitialQuery(targetEnvironment?.serverConfig?.settings.addProjectBaseDirectory),
     getCloneDirectoryPath(
@@ -231,7 +235,7 @@ function AddProjectToMachineDialog({ request }: { request: AddProjectToMachineRe
         title: project.title,
         remoteUrl,
         destinationPath: destinationPath.trim(),
-        scope: canSetProjectScope ? scope : "personal",
+        ...projectScopeInput(projectScopeCapabilities, scope),
         files: [...selectedFiles.keys()],
       });
       close();

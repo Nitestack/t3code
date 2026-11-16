@@ -290,7 +290,8 @@ function ProjectDetail({
       ? window.desktopBridge?.pickProjectFavicon
       : undefined;
 
-  const { updateProjectGroup, canOrganizeProjectGroup } = useProjectGroupUpdate();
+  const { updateProjectGroup, canOrganizeProjectGroup, canSetProjectScope } =
+    useProjectGroupUpdate();
   const updateAllMembers = (
     input: ProjectGroupUpdate | ((member: SidebarProjectGroupMember) => ProjectGroupUpdate),
     failureTitle: string,
@@ -298,6 +299,7 @@ function ProjectDetail({
   const canOrganize =
     allMembers.every((member) => editableIds.has(member.environmentId)) &&
     canOrganizeProjectGroup(allMembers);
+  const canMoveProjectScope = canSetProjectScope(allMembers);
   const [isOrganizing, setIsOrganizing] = useState(false);
   const organize = async (input: ProjectGroupUpdate, failureTitle: string) => {
     setIsOrganizing(true);
@@ -617,27 +619,29 @@ function ProjectDetail({
               </div>
             }
           />
+          {canMoveProjectScope ? (
+            <SettingsRow
+              title="Project scope"
+              description="Controls whether this project appears in Personal or Work."
+              control={
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={isOrganizing}
+                  onClick={() =>
+                    void organize(
+                      { scope: group.scope === "work" ? "personal" : "work" },
+                      "Failed to move project",
+                    )
+                  }
+                >
+                  Move to {group.scope === "work" ? "Personal" : "Work"}
+                </Button>
+              }
+            />
+          ) : null}
           {canOrganize ? (
             <>
-              <SettingsRow
-                title="Project scope"
-                description="Controls whether this project appears in Personal or Work."
-                control={
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={isOrganizing}
-                    onClick={() =>
-                      void organize(
-                        { scope: group.scope === "work" ? "personal" : "work" },
-                        "Failed to move project",
-                      )
-                    }
-                  >
-                    Move to {group.scope === "work" ? "Personal" : "Work"}
-                  </Button>
-                }
-              />
               <SettingsRow
                 title="Pin"
                 description="Pinned projects come first in project pickers."

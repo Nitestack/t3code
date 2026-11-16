@@ -1,4 +1,5 @@
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import { projectScopeInput } from "@t3tools/client-runtime/environment";
 import {
   findProjectByPath,
   inferProjectTitleFromPath,
@@ -66,7 +67,10 @@ export function useOpenLocalWorkspace() {
             projectId,
             title: inferProjectTitleFromPath(workspaceRoot),
             workspaceRoot,
-            scope: activeScope,
+            ...projectScopeInput(
+              primaryEnvironment?.serverConfig?.environment.capabilities,
+              activeScope,
+            ),
             createWorkspaceRootIfMissing: false,
             defaultModelSelection: null,
           },

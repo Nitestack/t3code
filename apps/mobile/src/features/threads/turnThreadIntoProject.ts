@@ -3,6 +3,7 @@ import {
   runAtomCommand,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
+import { projectScopeInput } from "@t3tools/client-runtime/environment";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import { AuthOrchestrationOperateScope, type ProjectScope } from "@t3tools/contracts";
 import * as Haptics from "expo-haptics";
@@ -10,8 +11,8 @@ import * as Haptics from "expo-haptics";
 import * as Dialog from "../../components/ui/Dialog";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { environmentProjects, projectEnvironment } from "../../state/projects";
-import { environmentServerConfigsAtom } from "../../state/server";
 import { readEnvironmentScope } from "../../state/session";
+import { environmentServerConfigsAtom } from "../../state/server";
 
 /** A No project thread that already has its own folder, on a server that can promote it. */
 export function canTurnThreadIntoProject(thread: EnvironmentThreadShell): boolean {
@@ -29,7 +30,7 @@ export function canTurnThreadIntoProject(thread: EnvironmentThreadShell): boolea
 
 export async function turnThreadIntoProject(
   thread: EnvironmentThreadShell,
-  scope: ProjectScope,
+  scope?: ProjectScope,
 ): Promise<void> {
   const title = "Could not turn thread into a project";
   if (!readEnvironmentScope(thread.environmentId, AuthOrchestrationOperateScope)) {
@@ -40,7 +41,19 @@ export async function turnThreadIntoProject(
   const result = await runAtomCommand(
     appAtomRegistry,
     projectEnvironment.createFromThread,
-    { environmentId: thread.environmentId, input: { threadId: thread.id, scope } },
+    {
+      environmentId: thread.environmentId,
+      input: {
+        threadId: thread.id,
+        ...(scope === undefined
+          ? {}
+          : projectScopeInput(
+              appAtomRegistry.get(environmentServerConfigsAtom).get(thread.environmentId)
+                ?.environment.capabilities,
+              scope,
+            )),
+      },
+    },
     { reportFailure: false },
   );
   if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {

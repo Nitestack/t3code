@@ -9,7 +9,12 @@ import type {
   ServerConfig,
   ServerProvider,
 } from "@t3tools/contracts";
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import {
+  projectScopeInput,
+  scopeProjectRef,
+  scopeThreadRef,
+  supportsProjectScope,
+} from "@t3tools/client-runtime/environment";
 import { resolveProviderInstanceDisplayName as agentName } from "@t3tools/client-runtime/state/provider-instance-display";
 import {
   isAtomCommandInterrupted,
@@ -84,7 +89,7 @@ import {
 } from "../../onboarding/welcomeState";
 import { newProjectId, randomUUID } from "../../lib/utils";
 import { agentSessionImport } from "../../state/agentSessions";
-import { readProjects, useProjects, waitForProject } from "../../state/entities";
+import { readProjects, useProjects, useServerConfigs, waitForProject } from "../../state/entities";
 import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
 import { managedTelemetryOffMessage, useManagedPolicy } from "../../state/managedPolicy";
 import { useProjectScans } from "../../onboarding/useProjectScans";
@@ -858,7 +863,7 @@ function ProjectsSection({
           </Button>
         ) : null}
       </div>
-      {canWrite ? (
+      {canWrite && projectImport.canSetProjectScope ? (
         <div className="flex items-center justify-between gap-3 px-8">
           <span className="text-xs text-muted-foreground">Project scope</span>
           <ToggleGroup
@@ -1432,6 +1437,10 @@ function useProjectImport({
   ) => Promise<boolean>;
 }) {
   const { activeScope } = useClientEnvironmentScope();
+  const serverConfigs = useServerConfigs();
+  const canSetProjectScope = scans.every((scan) =>
+    supportsProjectScope(serverConfigs.get(scan.environmentId)?.environment.capabilities),
+  );
   const [scopeOverride, setScopeOverride] = useState<"personal" | "work" | null>(null);
   const projectScope = scopeOverride ?? activeScope;
   const writableEnvironments = useEnvironmentsWithScope(scans, AuthOrchestrationOperateScope);
@@ -1588,7 +1597,10 @@ function useProjectImport({
               commandId: attempt.commandId,
               title: candidate.title,
               workspaceRoot: candidate.path,
-              scope: projectScope,
+              ...projectScopeInput(
+                serverConfigs.get(environmentId)?.environment.capabilities,
+                projectScope,
+              ),
               createWorkspaceRootIfMissing: false,
               defaultModelSelection: null,
             },
@@ -1661,6 +1673,7 @@ function useProjectImport({
 
   return {
     canWrite,
+    canSetProjectScope,
     candidates,
     isNew,
     recent,

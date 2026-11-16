@@ -99,7 +99,12 @@ import { useAtomValue } from "@effect/atom-react";
 import { isDesktopLocalConnectionTarget } from "../connection/desktopLocal";
 import { useDesktopLocalBootstraps } from "../connection/useDesktopLocalBootstraps";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
-import { filterByProjectScope, filterProjectsByScope } from "@t3tools/client-runtime/environment";
+import {
+  filterByProjectScope,
+  filterProjectsByScope,
+  projectScopeInput,
+  supportsProjectScope,
+} from "@t3tools/client-runtime/environment";
 import { useClientEnvironmentScope } from "../environmentScope";
 import { useOpenPanelPullRequestUrl } from "../hooks/useOpenPanelPullRequestUrl";
 import { copyThreadReference } from "../lib/copyThreadReference";
@@ -648,9 +653,13 @@ function OpenCommandPaletteDialog(props: {
     environments.find((environment) => environment.environmentId === browseEnvironmentId) ?? null;
   const projectScopeEnvironmentId =
     addProjectCloneFlow?.environmentId ?? newProjectFlow?.environmentId ?? browseEnvironmentId;
-  const canSetProjectScope =
-    environments.find((environment) => environment.environmentId === projectScopeEnvironmentId)
-      ?.serverConfig?.environment.capabilities.projectOrganization === true;
+  const projectScopeCapabilitiesFor = (environmentId: EnvironmentId | null) =>
+    environmentId === null
+      ? undefined
+      : environments.find((environment) => environment.environmentId === environmentId)
+          ?.serverConfig?.environment.capabilities;
+  const projectScopeCapabilities = projectScopeCapabilitiesFor(projectScopeEnvironmentId);
+  const canSetProjectScope = supportsProjectScope(projectScopeCapabilities);
   const effectiveProjectCreateScope = canSetProjectScope ? projectCreateScope : "personal";
   const browseEnvironmentIsDesktopLocal =
     browseEnvironment !== null && isDesktopLocalConnectionTarget(browseEnvironment.entry.target);
@@ -2005,7 +2014,10 @@ function OpenCommandPaletteDialog(props: {
         workspaceRoot: cwd,
         createWorkspaceRootIfMissing: true,
         defaultModelSelection: null,
-        scope: effectiveProjectCreateScope,
+        ...projectScopeInput(
+          projectScopeCapabilitiesFor(input.environmentId),
+          effectiveProjectCreateScope,
+        ),
       },
     });
     if (createResult._tag === "Failure") {
@@ -2077,7 +2089,10 @@ function OpenCommandPaletteDialog(props: {
       createNewProject({
         environmentId: newProjectFlow.environmentId,
         name: newProjectName,
-        scope: effectiveProjectCreateScope,
+        ...projectScopeInput(
+          projectScopeCapabilitiesFor(newProjectFlow.environmentId),
+          effectiveProjectCreateScope,
+        ),
         publishTo: newProjectPublishes ? newProjectPublishTarget : null,
       }),
     );
@@ -2260,7 +2275,10 @@ function OpenCommandPaletteDialog(props: {
         createdAt: new Date().toISOString(),
         remoteUrl: addProjectCloneFlow.remoteUrl,
         destinationPath,
-        scope: effectiveProjectCreateScope,
+        ...projectScopeInput(
+          projectScopeCapabilitiesFor(addProjectCloneFlow.environmentId),
+          effectiveProjectCreateScope,
+        ),
       },
     });
     setIsRemoteProjectCloning(false);

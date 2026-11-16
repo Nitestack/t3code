@@ -11,6 +11,7 @@ import {
 import { RowPressable } from "../../components/ui/RowPressable";
 import { CustomSnoozeSheet } from "./CustomSnoozeSheet";
 import { appAtomRegistry } from "../../state/atom-registry";
+import { environmentServerConfigsAtom } from "../../state/server";
 import { threadArrangementOpenAtom } from "../../state/thread-order";
 import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -21,6 +22,7 @@ import type {
   EnvironmentThreadShell,
 } from "@t3tools/client-runtime/state/shell";
 import type { EnvironmentThreadSearchMatch } from "@t3tools/client-runtime/state/thread-search";
+import { supportsProjectScope } from "@t3tools/client-runtime/environment";
 import {
   formatWorkingDurationLabel,
   resolveThreadWorkingStartedAt,
@@ -1068,9 +1070,13 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
           isAndroidForkEnvironmentScopeEnabled({
             platformOS: Platform.OS,
             appVariant: Constants.expoConfig?.extra?.appVariant,
-          })
+          }) &&
+            supportsProjectScope(
+              appAtomRegistry.get(environmentServerConfigsAtom).get(thread.environmentId)
+                ?.environment.capabilities,
+            )
             ? activeScope
-            : "personal",
+            : undefined,
         );
       if (nativeEvent.event === "copy-thread") {
         const target = threadChipCopyTarget(

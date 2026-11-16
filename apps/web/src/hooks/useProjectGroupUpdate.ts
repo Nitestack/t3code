@@ -19,6 +19,7 @@ import { readEnvironment } from "../state/environments";
 import { projectEnvironment } from "../state/projects";
 import { readEnvironmentScope, useEnvironmentsWithScope } from "../state/session";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
+import { supportsProjectScope } from "@t3tools/client-runtime/environment";
 
 export type ProjectGroupUpdate = Partial<{
   title: string;
@@ -96,7 +97,12 @@ export function useProjectGroupUpdate() {
         true,
     );
 
-  return { updateProjectGroup, canOrganizeProjectGroup };
+  const canSetProjectScope = (members: ReadonlyArray<ProjectGroupMember>) =>
+    members.every((member) =>
+      supportsProjectScope(serverConfigs.get(member.environmentId)?.environment.capabilities),
+    );
+
+  return { updateProjectGroup, canOrganizeProjectGroup, canSetProjectScope };
 }
 
 /** Pin state for a project group, shared by every list that can pin or unpin a project. */

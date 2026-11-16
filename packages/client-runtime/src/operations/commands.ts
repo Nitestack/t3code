@@ -16,6 +16,7 @@ import {
   type PlanId,
   type ProjectId,
   type ProjectIconOverride,
+  type ProjectMutation,
   type ProjectScript,
   type ProjectScope,
   type ProviderApprovalDecision,
@@ -395,15 +396,7 @@ const mutateProject = Effect.fn("EnvironmentCommands.mutateProject")(function* (
         readonly defaultModelSelection?: ModelSelection | null;
         readonly scripts?: ReadonlyArray<ProjectScript>;
       }
-    | {
-        readonly type: "project.update";
-        readonly commandId: CommandId;
-        readonly projectId: ProjectId;
-        readonly title?: string;
-        readonly workspaceRoot?: string;
-        readonly defaultModelSelection?: ModelSelection | null;
-        readonly scripts?: ReadonlyArray<ProjectScript>;
-      }
+    | Extract<ProjectMutation, { readonly type: "project.update" }>
     | {
         readonly type: "project.delete";
         readonly commandId: CommandId;

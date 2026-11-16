@@ -154,7 +154,10 @@ const environments = [primaryId, remoteId].map((environmentId) => ({
   serverConfig: {
     keybindings: DEFAULT_RESOLVED_KEYBINDINGS,
     settings: DEFAULT_SERVER_SETTINGS,
-    environment: { platform: { machine: "server" }, capabilities: { projectOrganization: true } },
+    environment: {
+      platform: { machine: "server" },
+      capabilities: { projectOrganization: true, projectScope: true },
+    },
   },
 }));
 const session = (scopes: ReadonlyArray<AuthEnvironmentScope>): AuthSessionState => ({
@@ -180,6 +183,8 @@ function deferred<T>() {
 
 function setup() {
   vi.clearAllMocks();
+  for (const environment of environments)
+    environment.serverConfig.environment.capabilities.projectScope = true;
   state.sessions.clear();
   for (const id of [primaryId, remoteId])
     state.sessions.set(id, Atom.make<SessionResult>(writable()).pipe(Atom.keepAlive));
@@ -647,6 +652,17 @@ describe("project settings scope", () => {
   const environmentMenu = () => page.getByRole("button", { name: /^Environment scope:/ });
   const primaryOption = () => page.getByRole("menuitemradio", { name: /^primary/ });
   const remoteOption = () => page.getByRole("menuitemradio", { name: /^remote/ });
+
+  it("hides scope controls when only project organization is advertised", async () => {
+    setup();
+    for (const environment of environments)
+      environment.serverConfig.environment.capabilities.projectScope = false;
+    await using _screen = await mountPanel();
+
+    await expect
+      .element(page.getByRole("button", { name: "Move to Work" }))
+      .not.toBeInTheDocument();
+  });
 
   it("lets a project move between Personal and Work from settings", async () => {
     setup();

@@ -1,4 +1,5 @@
 import {
+  projectScopeInput,
   parseScopedThreadKey,
   scopeProjectRef,
   scopeThreadRef,
@@ -1034,7 +1035,14 @@ export function useThreadActions() {
     turnThreadIntoProject: (target: ScopedThreadRef) =>
       createProjectFromThread({
         environmentId: target.environmentId,
-        input: { threadId: target.threadId, scope: activeScope },
+        input: {
+          threadId: target.threadId,
+          ...projectScopeInput(
+            appAtomRegistry.get(environmentServerConfigsAtom).get(target.environmentId)?.environment
+              .capabilities,
+            activeScope,
+          ),
+        },
       }),
   };
 }
