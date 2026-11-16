@@ -228,6 +228,8 @@ interface AccountReport {
 }
 
 export function aixProfileNameFromWindowId(id: string): string | undefined {
+  const credentialSpecific = /^aix-budget:(.*)#credential:[a-f0-9]{64}$/u.exec(id);
+  if (credentialSpecific) return credentialSpecific[1];
   return /^aix-budget:(.+)$/u.exec(id)?.[1];
 }
 

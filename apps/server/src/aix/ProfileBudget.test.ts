@@ -1,6 +1,7 @@
 import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@t3tools/contracts";
 import { expect, it } from "@effect/vitest";
 import * as Cause from "effect/Cause";
+import * as Digest from "effect/crypto/Digest";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Logger from "effect/Logger";
@@ -62,6 +63,7 @@ const budgetFor = (
     },
   }).pipe(
     Effect.provideService(HttpClient.HttpClient, http.client),
+    Effect.provide(Digest.layerWebCrypto),
     Effect.map((service) => ({ service, resolves: () => resolves })),
   );
 };
@@ -117,7 +119,7 @@ it.each([
       {
         id: "aix-budget:ac",
         kind: "other",
-        label: "Gateway budget",
+        label: "Gateway budget · ac",
         usedPercent: expect.closeTo(usedPercent, 6),
         ...expected,
       },
@@ -171,9 +173,9 @@ it.effect.each([
     );
     const limits = yield* service.usageLimits("p");
 
-    expect(limits.windows.map(({ id, usedPercent }) => [id, usedPercent])).toEqual([
-      ["aix-budget:p", 50],
-    ]);
+    expect(limits.windows).toHaveLength(1);
+    expect(limits.windows[0]?.id).toMatch(/^aix-budget:p#credential:[a-f0-9]{64}$/u);
+    expect(limits.windows[0]?.usedPercent).toBe(50);
     expect(
       http.requests.map((request) => Option.getOrThrow(HttpClientRequest.toUrl(request)).href),
     ).toEqual([expected]);
@@ -386,20 +388,83 @@ it.effect("replaces only an enabled aix-managed instance's usage limits", () =>
     expect(yield* run("nim4", disabled)).toBe(disabled);
     expect(http.requests).toEqual([]);
 
-    const managed = yield* run("nim4", provider());
+    const managed = yield* run("nim4", provider({ driver: ProviderDriverKind.make("opencode") }));
     expect(managed.usageLimits?.profileName).toBe("nim4");
-    expect(managed.usageLimits?.windows.map(({ id }) => id)).toEqual(["aix-budget:nim4"]);
+    expect(managed.usageLimits?.windows[0]?.id).toMatch(
+      /^aix-budget:nim4#credential:[a-f0-9]{64}$/u,
+    );
     expect(managed.usageLimits?.windows[0]?.usedPercent).toBeCloseTo(99.55, 6);
 
     const failedHttp = fakeHttp(() => new Response(null, { status: 500 }));
     const failedBudget = yield* budgetFor(failedHttp);
-    const failed = yield* ProfileBudget.withAixProfileBudget("home")(provider()).pipe(
-      Effect.provideService(ProfileBudget.AixProfileBudget, failedBudget.service),
-    );
+    const failed = yield* ProfileBudget.withAixProfileBudget("home")(
+      provider({ driver: ProviderDriverKind.make("opencode") }),
+    ).pipe(Effect.provideService(ProfileBudget.AixProfileBudget, failedBudget.service));
     expect(failed.usageLimits).toMatchObject({
       profileName: "home",
       windows: [],
       unavailable: { reason: "probeFailed" },
     });
   }),
+);
+
+it.effect("keeps aix budgets on the OpenCode instance and identifies the profile", () =>
+  Effect.gen(function* () {
+    const http = fakeHttp(() => Response.json({ info: { spend: 16, max_budget: 100 } }));
+    const { service } = yield* budgetFor(http);
+    const run = (snapshot: ServerProvider) =>
+      ProfileBudget.withAixProfileBudget("adCare")(snapshot).pipe(
+        Effect.provideService(ProfileBudget.AixProfileBudget, service),
+      );
+
+    const codex = provider({ driver: ProviderDriverKind.make("codex") });
+    const claude = provider({ driver: ProviderDriverKind.make("claudeAgent") });
+    expect(yield* run(codex)).toBe(codex);
+    expect(yield* run(claude)).toBe(claude);
+
+    const opencode = yield* run(provider({ driver: ProviderDriverKind.make("opencode") }));
+    expect(opencode.usageLimits?.profileName).toBe("adCare");
+    expect(opencode.usageLimits?.windows[0]).toMatchObject({
+      label: "Gateway budget · adCare",
+      usedPercent: 16,
+    });
+    expect(opencode.usageLimits?.windows[0]?.id).toMatch(
+      /^aix-budget:adCare#credential:[a-f0-9]{64}$/u,
+    );
+    expect(http.requests).toHaveLength(1);
+  }),
+);
+
+it.effect(
+  "uses a stable credential fingerprint to merge the same profile across environments",
+  () =>
+    Effect.gen(function* () {
+      const respond = () => Response.json({ info: { spend: 16, max_budget: 100 } });
+      const first = yield* budgetFor(fakeHttp(respond));
+      const sameCredential = yield* budgetFor(fakeHttp(respond));
+      const equivalentEndpoint = yield* budgetFor(fakeHttp(respond), (profileName) =>
+        Effect.succeed(litellm(profileName, "https://gateway.test/v1/")),
+      );
+      const otherProfile = yield* budgetFor(fakeHttp(respond));
+      const otherCredential = yield* budgetFor(fakeHttp(respond), (profileName) =>
+        Effect.succeed({ ...litellm(profileName), apiKey: "different-key" }),
+      );
+
+      const fingerprint = (yield* first.service.usageLimits("adCare")).credentialFingerprint;
+      const matchingFingerprint = (yield* sameCredential.service.usageLimits("adCare"))
+        .credentialFingerprint;
+      const equivalentEndpointFingerprint = (yield* equivalentEndpoint.service.usageLimits(
+        "adCare",
+      )).credentialFingerprint;
+      const otherProfileFingerprint = (yield* otherProfile.service.usageLimits("nim4"))
+        .credentialFingerprint;
+      const otherCredentialFingerprint = (yield* otherCredential.service.usageLimits("adCare"))
+        .credentialFingerprint;
+
+      expect(fingerprint).toMatch(/^[a-f0-9]{64}$/u);
+      expect(matchingFingerprint).toBe(fingerprint);
+      expect(equivalentEndpointFingerprint).toBe(fingerprint);
+      expect(otherProfileFingerprint).not.toBe(fingerprint);
+      expect(otherCredentialFingerprint).not.toBe(fingerprint);
+    }),
 );

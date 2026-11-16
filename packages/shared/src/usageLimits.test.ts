@@ -25,9 +25,16 @@ import {
   paceRemainingPercent,
   usesChatGptSharing,
   resolveNewThreadModelSelection,
+  aixProfileNameFromWindowId,
 } from "./usageLimits.ts";
 
 const now = Date.parse("2026-09-03T12:00:00.000Z");
+
+it("reads the profile name from a credential-specific aix budget window id", () => {
+  expect(aixProfileNameFromWindowId(`aix-budget:adCare#credential:${"a".repeat(64)}`)).toBe(
+    "adCare",
+  );
+});
 
 const window = {
   id: "five_hour",
