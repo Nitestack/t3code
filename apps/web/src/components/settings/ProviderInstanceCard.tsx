@@ -77,7 +77,6 @@ import {
   settleCustomModelSave,
 } from "./customModelSaves.logic";
 import { getProviderRestartNotice } from "../ProviderUpdateLaunchNotification.logic";
-import { aixMetadataFromInstanceId } from "@t3tools/client-runtime/provider-picker-hierarchy";
 import { providerSettingsRowLabels } from "@t3tools/client-runtime/provider-settings-hierarchy";
 import {
   getProviderVersionAdvisoryPresentation,
@@ -826,7 +825,7 @@ export function ProviderInstanceCard({
   const displayName =
     instance.displayName?.trim() || driverOption?.label || String(instance.driver);
   const aixProfile =
-    liveProvider?.aixProfile ?? aixMetadataFromInstanceId(instanceId, instance.driver)?.aixProfile;
+    liveProvider?.aixProfile ?? readConfigString(instance.config, "aixProfile") ?? undefined;
   const accentColor = normalizeProviderAccentColor(instance.accentColor);
   const managedPolicy = useManagedPolicy(environmentId);
   const instanceLocks = managedInstanceLocks(managedPolicy, instance.driver);
@@ -1321,24 +1320,25 @@ export function ProviderInstanceCard({
         headerAction={editorHeaderAction}
       >
         <SettingsRow title="Status" status={statusContent} />
-        {aixProfile === undefined ? (
-          <SettingsRow
-            title="Display name"
-            control={
-              <div
-                inert={readOnly}
-                aria-disabled={readOnly || undefined}
-                className={cn(
-                  "flex w-full min-w-0 items-center justify-end gap-2 @min-[32rem]/settings-row:w-auto",
-                  readOnly && "opacity-50 select-none",
-                )}
-              >
-                <ProviderAccentColorPicker
-                  layout="inline"
-                  displayName={displayName}
-                  value={accentColor}
-                  onCommit={updateAccentColor}
-                />
+        <SettingsRow
+          // aix sync rewrites the display name, so only the accent stays editable.
+          title={aixProfile === undefined ? "Display name" : "Accent color"}
+          control={
+            <div
+              inert={readOnly}
+              aria-disabled={readOnly || undefined}
+              className={cn(
+                "flex w-full min-w-0 items-center justify-end gap-2 @min-[32rem]/settings-row:w-auto",
+                readOnly && "opacity-50 select-none",
+              )}
+            >
+              <ProviderAccentColorPicker
+                layout="inline"
+                displayName={displayName}
+                value={accentColor}
+                onCommit={updateAccentColor}
+              />
+              {aixProfile === undefined ? (
                 <DraftInput
                   id={`provider-instance-${instanceId}-display-name`}
                   size="sm"
@@ -1348,10 +1348,10 @@ export function ProviderInstanceCard({
                   placeholder={driverOption?.label ?? "Instance label"}
                   spellCheck={false}
                 />
-              </div>
-            }
-          />
-        ) : null}
+              ) : null}
+            </div>
+          }
+        />
       </SettingsSection>
 
       {setup || environmentFields.length > 0 ? (
