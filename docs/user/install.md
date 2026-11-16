@@ -139,14 +139,12 @@ matching stable tag; metadata records that upstream tag's peeled commit as the s
 flake reads the application version from the source and pins nixpkgs in `flake.lock`:
 
 ```bash
-nix profile add 'github:Nitestack/t3code/v0.1.9'
+nix profile add 'github:Nitestack/t3code/<release-tag>'
 ```
 
-Replace `v0.1.9` with the desired release tag when updating:
-
-```bash
-nix profile add 'github:Nitestack/t3code/v0.2.0'
-```
+Use a tag from the fork's [Releases page](https://github.com/Nitestack/t3code/releases), and the
+newer tag when updating. Older version tags in the repository are upstream's own and do not
+contain this build.
 
 For NixOS, add `inputs.t3code.packages.x86_64-linux.default` to
 `environment.systemPackages`. In Home Manager, point the T3 Code module at the same package:

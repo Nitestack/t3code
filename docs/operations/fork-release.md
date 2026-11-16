@@ -211,6 +211,11 @@ step. After explicit authorization, dispatch the stable workflow for the reviewe
 fork commit, source branch, upstream base, and build-only run, and the Nix command resolves the fork
 repository.
 
+Publishing reserves the tag before it creates the release. If a publish run fails between the
+two, the tag remains without a release and blocks that version for every source commit. Confirm on
+the Releases page that `vX.Y.Z` has no release, delete only that tag with
+`gh api -X DELETE repos/Nitestack/t3code/git/refs/tags/vX.Y.Z`, then rerun the publish dispatch.
+
 The `Nitestack Android APK` workflow remains available for a standalone signed build artifact. Its
 legacy `t3-android-vMAJOR.MINOR.PATCH` tag route remains compatible; use the `Release` workflow for
 the Windows, Android, and Nix build-only artifact or for an authorized canonical fork release.
