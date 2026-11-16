@@ -139,7 +139,7 @@ export function useProjectPin() {
       "Failed to move project",
     );
     if (result._tag !== "Success") return;
-    toastManager.add(
+    const toastId = toastManager.add(
       stackedThreadToast({
         type: "success",
         title: `Moved to ${destinationLabel}`,
@@ -150,12 +150,14 @@ export function useProjectPin() {
         data: {
           secondaryActionProps: {
             children: "Undo",
-            onClick: () =>
+            onClick: () => {
+              toastManager.close(toastId);
               void updateProjectGroup(
                 group.memberProjects,
                 { scope: sourceScope },
                 "Failed to move project",
-              ),
+              );
+            },
           },
         },
       }),
