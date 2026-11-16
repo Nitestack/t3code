@@ -59,6 +59,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { AppText as Text } from "../../components/ui/AppText";
+import { SegmentedControl } from "../../components/ui/SegmentedControl";
 import { AppBar } from "../../components/ui/AppBar";
 import { ProviderIcon } from "../../components/ProviderIcon";
 import { ThemedSwitch } from "../../components/ui/ThemedSwitch";
@@ -303,6 +304,7 @@ export type ExistingThreadSettingsRouteParams = {
 type ThreadSettingsSessionValue = {
   readonly environmentId: EnvironmentId | null;
   readonly projectScope: ProjectScope;
+  readonly setProjectScope: (scope: ProjectScope) => void;
   readonly providerInstanceId?: ProviderInstanceId;
   readonly providerGroups: ReadonlyArray<ProviderGroup>;
   readonly favoriteKeys: ReadonlySet<string>;
@@ -354,6 +356,12 @@ function ThreadSettingsSessionProvider(
       : config?.environment.capabilities.projectScope === true
         ? resolveProjectScope(props.projectScope)
         : "personal";
+  const [pickerScopeState, setPickerScopeState] = useState(() => ({
+    baseScope: projectScope,
+    scope: projectScope,
+  }));
+  const pickerScope =
+    pickerScopeState.baseScope === projectScope ? pickerScopeState.scope : projectScope;
   const settings = config?.settings;
   const connection = useEnvironmentQuery(
     props.environmentId ? environmentCatalog.stateAtom(props.environmentId) : null,
@@ -517,7 +525,7 @@ function ThreadSettingsSessionProvider(
         (model) =>
           favoriteKeys.has(model.key) &&
           isPickerModelVisibleForProjectScope({
-            scope: projectScope,
+            scope: pickerScope,
             modelProfileId: model.aixProfile,
             selectedProfileId: profileId,
             isSelected: false,
@@ -525,9 +533,13 @@ function ThreadSettingsSessionProvider(
       ),
     );
     if (hasScopedFavorite) return FAVORITES_PROVIDER_FILTER;
-    if (projectScope !== "work") return null;
+    if (pickerScope !== "work") return null;
     return profileId ? { tag: "aix-profile", profileId } : null;
   });
+  const setProjectScope = (scope: ProjectScope) => {
+    setPickerScopeState({ baseScope: projectScope, scope });
+    setProviderFilter(null);
+  };
   const [searchQuery, setSearchQuery] = useState("");
   const [providerExpansionOverrides, setProviderExpansionOverrides] = useState<ReadonlySet<string>>(
     () => new Set(),
@@ -657,7 +669,8 @@ function ThreadSettingsSessionProvider(
 
   const value = {
     environmentId,
-    projectScope,
+    projectScope: pickerScope,
+    setProjectScope,
     providerInstanceId: props.providerInstanceId,
     providerGroups,
     manageHidden,
@@ -1424,6 +1437,18 @@ function ThreadSettingsModelsScreen() {
         }}
         hideBottomBorder
       />
+      <View className="px-4 py-2">
+        <SegmentedControl
+          size="compact"
+          className="w-full"
+          options={[
+            { value: "personal", label: "Personal" },
+            { value: "work", label: "Work" },
+          ]}
+          selected={session.projectScope}
+          onSelect={session.setProjectScope}
+        />
+      </View>
       <ScreenContent>
         <ThreadSettingsMainContent
           bottomInset={searchToolbarInset}

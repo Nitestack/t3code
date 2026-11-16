@@ -245,6 +245,28 @@ describe("instance-scoped model selection", () => {
       slug: "vendor/model:fast",
       name: "Readable Model",
       isCustom: true,
+      catalogMetadata: metadata,
+    });
+
+    const personalEntry = deriveProviderInstanceEntries([provider({ instanceId: "codex" })])[0]!;
+    const personalSettings = {
+      ...settings,
+      providerInstances: {
+        ...settings.providerInstances,
+        [personalEntry.instanceId]: {
+          driver: ProviderDriverKind.make("codex"),
+          config: {
+            customModels: [
+              { slug: "vendor/model:fast", name: "Readable Model", catalogMetadata: metadata },
+            ],
+          },
+        },
+      },
+    };
+    expect(getAppModelOptionsForInstance(personalSettings, personalEntry)).toContainEqual({
+      slug: "vendor/model:fast",
+      name: "Readable Model",
+      isCustom: true,
       subProvider: "OpenAI GPT",
       catalogMetadata: metadata,
     });

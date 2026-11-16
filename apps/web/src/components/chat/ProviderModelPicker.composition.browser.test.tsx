@@ -136,6 +136,7 @@ function FooterWithHierarchy() {
             profiles: [{ id: "work", label: "adCare", entries: [] }],
             scope: "work",
             profileId: "work",
+            onScopeChange: () => {},
             onProfileChange: () => {},
           }}
         >
@@ -158,7 +159,7 @@ it("keeps composition keys out of model selection and dismissal", async () => {
   await using screen = await render(<Picker />);
   await page.getByRole("button", { name: "Choose model" }).click();
   const search = page.getByPlaceholder("Search models...");
-  await expect.element(page.getByRole("button", { name: "Model scope" })).not.toBeInTheDocument();
+  await expect.element(page.getByRole("button", { name: "Work", exact: true })).toBeVisible();
   await search.fill("Target");
   await expect.element(page.getByRole("option", { name: /Target model/ })).toBeVisible();
 
@@ -204,14 +205,30 @@ it("moves ArrowLeft and Shift+Tab from search to the selected harness", async ()
   await expect.element(codex).toHaveFocus();
 });
 
-it("shows only the Work profile selector in Work and no scope toggle in Personal", async () => {
+it("shows the scope toggle and Work profile selector when scoped to Work", async () => {
   await using _screen = await render(<Picker withAix projectScope="work" />);
   await page.getByRole("button", { name: "Choose model" }).click();
 
   const profile = page.getByRole("button", { name: "Work profile: adCare" });
   await expect.element(profile).toHaveTextContent("adCare");
-  await expect.element(page.getByRole("button", { name: "Model scope" })).not.toBeInTheDocument();
+  await expect.element(page.getByRole("button", { name: "Personal", exact: true })).toBeVisible();
+  await expect.element(page.getByRole("button", { name: "Work", exact: true })).toBeVisible();
   await expect.element(page.getByRole("button", { name: "Subscriptions" })).not.toBeInTheDocument();
+});
+
+it("switches the listed models with the picker scope", async () => {
+  await using _screen = await render(<Picker withAix />);
+  await page.getByRole("button", { name: "Choose model" }).click();
+  await expect.element(page.getByRole("option", { name: /Target model/ })).toBeVisible();
+  await expect.element(page.getByRole("option", { name: /AIX model/ })).not.toBeInTheDocument();
+
+  await page.getByRole("button", { name: "Work", exact: true }).click();
+  await expect.element(page.getByRole("option", { name: /AIX model/ })).toBeVisible();
+  await expect.element(page.getByRole("button", { name: /^Work profile/ })).toBeVisible();
+
+  await page.getByRole("button", { name: "Personal", exact: true }).click();
+  await expect.element(page.getByRole("option", { name: /Target model/ })).toBeVisible();
+  await expect.element(page.getByRole("option", { name: /AIX model/ })).not.toBeInTheDocument();
 });
 
 it("selects the matching harness when the Work profile changes", async () => {
@@ -361,12 +378,14 @@ it("keeps composing keys from triggering model jump shortcuts", async () => {
   }
 });
 
-it("keeps the Work profile selector keyboard reachable", async () => {
+it("keeps the scope toggle and Work profile selector keyboard reachable", async () => {
   await using _screen = await render(<FooterWithHierarchy />, { router: false }); // no routes involved
   await page.getByRole("button", { name: "Picker" }).click();
   const profile = page.getByRole("button", { name: "Work profile: adCare" });
   await expect.element(profile).toHaveTextContent("adCare");
   profile.element().focus();
+  await userEvent.tab({ shift: true });
+  await expect.element(page.getByRole("button", { name: "Personal", exact: true })).toHaveFocus();
   await userEvent.tab({ shift: true });
   await expect.element(page.getByRole("button", { name: "Picker" })).toHaveFocus();
 });

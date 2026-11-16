@@ -7,6 +7,7 @@ export type ModelPickerHierarchy = {
   readonly profiles: ReadonlyArray<AixProviderProfile<ProviderInstanceEntry>>;
   readonly scope: ProjectScope;
   readonly profileId: string | undefined;
+  readonly onScopeChange: (scope: ProjectScope) => void;
   readonly onProfileChange: (profileId: string) => void;
 };
 
