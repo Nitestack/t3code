@@ -37,6 +37,13 @@
         pname = "t3code";
         inherit version;
         name = "t3code-${version}";
+        # The desktop registers itself as the t3code:// handler (T3 Connect sign-in callback);
+        # without this it would register the shared bare Electron binary instead.
+        # symlinkJoin bakes postBuild into buildCommand, so overriding postBuild is a no-op.
+        buildCommand = old.buildCommand + ''
+          wrapProgram "$out/bin/t3code-desktop" \
+            --set-default T3CODE_DESKTOP_LAUNCHER_PATH "$out/bin/t3code-desktop"
+        '';
         meta = old.meta // {
           mainProgram = "t3code-desktop";
         };
