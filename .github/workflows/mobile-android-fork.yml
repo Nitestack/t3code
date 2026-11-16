@@ -135,6 +135,8 @@ jobs:
         working-directory: apps/mobile
         run: |
           set -euo pipefail
+          # app.config.ts reads T3 Connect's public identifiers from the root .env.
+          cp ../../.env.example ../../.env
           pnpm exec expo config --json | node -e 'const fs = require("node:fs"); const c = JSON.parse(fs.readFileSync(0, "utf8")); fs.appendFileSync(process.env.GITHUB_ENV, "T3_ANDROID_EXPECTED_VERSION_NAME=" + c.version + "\nT3_ANDROID_EXPECTED_VERSION_CODE=" + c.android.versionCode + "\n");'
           pnpm exec expo prebuild --clean --platform android
 

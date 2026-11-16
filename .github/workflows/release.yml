@@ -368,9 +368,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          set -a
-          . ./.env.example
-          set +a
+          # The build reads T3 Connect's public identifiers from the root .env.
+          cp .env.example .env
           echo "T3CODE_TELEMETRY_CHANNEL=dev" >> "$GITHUB_ENV"
 
       - name: Build the platform-independent desktop bundle
