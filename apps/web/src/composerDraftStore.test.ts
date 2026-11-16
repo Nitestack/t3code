@@ -182,7 +182,7 @@ function resetComposerDraftStore() {
     promotedDraftRedirects: {},
     stickyModelSelectionByProvider: {},
     stickyOptionsByModelByProvider: {},
-    stickyActiveProvider: null,
+    stickyActiveProviderByScope: { personal: null, work: null },
   });
 }
 
@@ -599,7 +599,7 @@ describe("composerDraftStore terminal contexts", () => {
       draftThreadsByThreadKey: {},
       logicalProjectDraftThreadKeyByLogicalProjectKey: {},
       stickyModelSelectionByProvider: {},
-      stickyActiveProvider: null,
+      stickyActiveProviderByScope: { personal: null, work: null },
     });
   });
 
@@ -1986,7 +1986,9 @@ describe("composerDraftStore modelSelection", () => {
       }),
     );
     expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.activeProvider).toBe(CODEX_SECONDARY_INSTANCE);
-    expect(useComposerDraftStore.getState().stickyActiveProvider).toBe(CODEX_SECONDARY_INSTANCE);
+    expect(useComposerDraftStore.getState().stickyActiveProviderByScope.personal).toBe(
+      CODEX_SECONDARY_INSTANCE,
+    );
     expect(useComposerDraftStore.getState().stickyModelSelectionByProvider[CODEX_INSTANCE]).toBe(
       undefined,
     );
@@ -2149,6 +2151,28 @@ describe("composerDraftStore sticky composer settings", () => {
     });
   });
 
+  it("remembers and applies the last active provider separately for personal and work", () => {
+    const store = useComposerDraftStore.getState();
+    const personalDraft = DraftId.make("draft-sticky-personal-scope");
+    const workDraft = DraftId.make("draft-sticky-work-scope");
+    const aixInstance = ProviderInstanceId.make("aix-codex-team");
+
+    store.setStickyModelSelection({ instanceId: aixInstance, model: "gpt-work" });
+    store.applyStickyState(personalDraft, "personal");
+    expect(draftByKey(personalDraft)?.activeProvider).toBeNull();
+
+    store.setStickyModelSelection(modelSelection(CODEX_DRIVER, "gpt-personal"));
+    store.applyStickyState(personalDraft, "personal");
+    store.applyStickyState(workDraft, "work");
+
+    expect(draftByKey(personalDraft)?.activeProvider).toBe(CODEX_INSTANCE);
+    expect(draftByKey(workDraft)?.activeProvider).toBe(aixInstance);
+    expect(useComposerDraftStore.getState().stickyActiveProviderByScope).toEqual({
+      personal: CODEX_INSTANCE,
+      work: aixInstance,
+    });
+  });
+
   it("replaces a non-explicit stale model and its options with sticky state", () => {
     const store = useComposerDraftStore.getState();
     const draftId = DraftId.make("draft-stale-sticky-seed");
@@ -2248,13 +2272,45 @@ describe("composerDraftStore model seed migration", () => {
 
         expect(useComposerDraftStore.getState()).toMatchObject({
           stickyModelSelectionByProvider: { [CODEX_INSTANCE]: stickySelection },
-          stickyActiveProvider: null,
+          stickyActiveProviderByScope: { personal: null, work: null },
         });
       } finally {
         vi.useRealTimers();
       }
     },
   );
+
+  it("migrates a persisted global aix sticky provider into the work bucket", async () => {
+    vi.useFakeTimers();
+    try {
+      const aixInstance = ProviderInstanceId.make("aix-codex-team");
+      const aixSelection = { instanceId: aixInstance, model: "gpt-work" };
+      const storage = useComposerDraftStore.persist.getOptions().storage;
+      expect(storage).toBeDefined();
+      storage?.setItem(COMPOSER_DRAFT_STORAGE_KEY, {
+        version: 8,
+        state: {
+          draftsByThreadKey: {},
+          draftThreadsByThreadKey: {},
+          logicalProjectDraftThreadKeyByLogicalProjectKey: {},
+          stickyModelSelectionByProvider: { [aixInstance]: aixSelection },
+          stickyActiveProvider: aixInstance,
+        },
+      } as never);
+      await vi.advanceTimersByTimeAsync(300);
+      await useComposerDraftStore.persist.rehydrate();
+
+      expect(useComposerDraftStore.getState().stickyActiveProviderByScope).toEqual({
+        personal: null,
+        work: aixInstance,
+      });
+      const draftId = DraftId.make("draft-migrated-work-sticky");
+      useComposerDraftStore.getState().applyStickyState(draftId, "work");
+      expect(draftByKey(draftId)?.activeProvider).toBe(aixInstance);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it("strips seeded models only from empty draft sessions when upgrading storage", async () => {
     vi.useFakeTimers();
@@ -2338,7 +2394,7 @@ describe("composerDraftStore model seed migration", () => {
       });
       expect(useComposerDraftStore.getState()).toMatchObject({
         stickyModelSelectionByProvider: { [CODEX_INSTANCE]: stickySelection },
-        stickyActiveProvider: CODEX_INSTANCE,
+        stickyActiveProviderByScope: { personal: CODEX_INSTANCE, work: null },
       });
     } finally {
       vi.useRealTimers();

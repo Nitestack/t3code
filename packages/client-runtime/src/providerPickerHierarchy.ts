@@ -1,6 +1,7 @@
 import {
   ProviderDriverKind,
   ProviderInstanceId,
+  DEFAULT_MODEL_BY_PROVIDER,
   type ProjectScope,
   type ModelSelection,
 } from "@t3tools/contracts";
@@ -178,6 +179,7 @@ type DraftDefaultProvider = {
   readonly enabled: boolean;
   readonly installed: boolean;
   readonly status: string;
+  readonly auth?: { readonly status?: string | undefined } | undefined;
   readonly availability?: string | undefined;
   readonly aixProfile?: string | undefined;
   readonly models: ReadonlyArray<{
@@ -186,83 +188,49 @@ type DraftDefaultProvider = {
   }>;
 };
 
-export function resolveScopedDraftModelSelection(input: {
+export function resolveDraftModelSelectionForScope(input: {
   readonly scope: ProjectScope;
-  readonly normalDefault: ModelSelection | null | undefined;
+  readonly explicitSelection?: ModelSelection | null | undefined;
+  readonly stickySelection?: ModelSelection | null | undefined;
+  /** The project's configured model, before scope and readiness are applied. */
+  readonly normalDefault?: ModelSelection | null | undefined;
   readonly providers: ReadonlyArray<DraftDefaultProvider>;
 }): ModelSelection | null {
+  if (input.explicitSelection) return input.explicitSelection;
   const providers = input.providers.map((provider) => ({
     ...provider,
     aixProfile:
       provider.aixProfile ??
       aixMetadataFromInstanceId(provider.instanceId, provider.driver)?.aixProfile,
   }));
-  const ready = providers.filter(
-    (provider) =>
-      provider.enabled &&
-      provider.installed &&
-      provider.status === "ready" &&
-      provider.availability !== "unavailable",
-  );
-  const currentProvider = input.normalDefault
-    ? providers.find((provider) => provider.instanceId === input.normalDefault?.instanceId)
-    : undefined;
-  if (input.scope === "personal") {
-    if (!currentProvider?.aixProfile) return input.normalDefault ?? null;
-    const personal = ready.find((provider) => provider.aixProfile === undefined);
-    return personal ? defaultSelectionForProvider(personal) : (input.normalDefault ?? null);
-  }
-  const aixProviders = ready.filter((provider) => provider.aixProfile !== undefined);
-  if (aixProviders.length === 0) return input.normalDefault ?? null;
-  const rememberedProfile = currentProvider?.aixProfile;
-  const profileId =
-    (rememberedProfile && aixProviders.some((provider) => provider.aixProfile === rememberedProfile)
-      ? rememberedProfile
-      : aixProviders[0]?.aixProfile) ?? undefined;
-  const profileProviders = aixProviders.filter((provider) => provider.aixProfile === profileId);
-  const matching = profileProviders.find(
-    (provider) =>
-      provider.driver === currentProvider?.driver &&
-      input.normalDefault !== null &&
-      provider.models.some((model) => model.slug === input.normalDefault?.model),
-  );
-  if (matching && input.normalDefault)
-    return { ...input.normalDefault, instanceId: matching.instanceId };
-  return defaultSelectionForProvider(profileProviders[0]!);
+  const inScope = (provider: DraftDefaultProvider) =>
+    input.scope === "work"
+      ? provider.aixProfile !== undefined || provider.instanceId.startsWith("aix-")
+      : provider.aixProfile === undefined && !provider.instanceId.startsWith("aix-");
+  const ready = (provider: DraftDefaultProvider) =>
+    provider.enabled &&
+    provider.installed &&
+    provider.availability !== "unavailable" &&
+    (provider.status === "ready" ||
+      (provider.status !== "error" &&
+        (provider.status === "authenticated" || provider.auth?.status === "authenticated")));
+  const selectable = (selection: ModelSelection | null | undefined) => {
+    if (!selection) return null;
+    const provider = providers.find((candidate) => candidate.instanceId === selection.instanceId);
+    return provider && inScope(provider) && ready(provider) ? selection : null;
+  };
+  const configured = selectable(input.normalDefault);
+  if (configured) return configured;
+  const sticky = selectable(input.stickySelection);
+  if (sticky) return sticky;
+  const firstReady = providers.find((provider) => inScope(provider) && ready(provider));
+  return firstReady ? defaultSelectionForProvider(firstReady) : null;
 }
 
-export function resolveDraftModelSelectionForScope(input: {
-  readonly scope: ProjectScope;
-  readonly explicitSelection?: ModelSelection | null | undefined;
-  readonly stickySelection?: ModelSelection | null | undefined;
-  readonly normalDefault: ModelSelection | null | undefined;
-  readonly providers: ReadonlyArray<DraftDefaultProvider>;
-}): ModelSelection | null {
-  if (input.explicitSelection) return input.explicitSelection;
-  const stickyProvider = input.stickySelection
-    ? input.providers.find((provider) => provider.instanceId === input.stickySelection?.instanceId)
-    : undefined;
-  const stickyProfile = stickyProvider
-    ? (stickyProvider.aixProfile ??
-      aixMetadataFromInstanceId(stickyProvider.instanceId, stickyProvider.driver)?.aixProfile)
-    : undefined;
-  const stickyIsWork =
-    stickyProfile !== undefined || input.stickySelection?.instanceId.startsWith("aix-") === true;
-  const stickyBelongsToScope =
-    input.stickySelection !== null &&
-    input.stickySelection !== undefined &&
-    (input.scope === "work" ? stickyIsWork : !stickyIsWork);
-  if (stickyBelongsToScope) return input.stickySelection ?? null;
-  return resolveScopedDraftModelSelection({
-    scope: input.scope,
-    normalDefault: input.normalDefault,
-    providers: input.providers,
-  });
-}
-
-function defaultSelectionForProvider(provider: DraftDefaultProvider): ModelSelection {
+function defaultSelectionForProvider(provider: DraftDefaultProvider): ModelSelection | null {
   const model = provider.models.find((candidate) => candidate.isDefault) ?? provider.models[0];
-  return { instanceId: provider.instanceId, model: model?.slug ?? "" };
+  const modelSlug = model?.slug ?? DEFAULT_MODEL_BY_PROVIDER[provider.driver];
+  return modelSlug ? { instanceId: provider.instanceId, model: modelSlug } : null;
 }
 
 export function isPickerModelVisibleForProjectScope(input: {

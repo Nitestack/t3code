@@ -10,7 +10,6 @@ import {
   pickerFilterProfileId,
   pickerFilterProviderKey,
   providerInstancesForProjectScope,
-  resolveScopedDraftModelSelection,
   resolveDraftModelSelectionForScope,
   resolveModelPickerProjectScope,
   resolveAixProfileId,
@@ -186,12 +185,11 @@ describe("provider picker hierarchy", () => {
       },
     ];
     const normalDefault = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-6.1" };
-    expect(resolveScopedDraftModelSelection({ scope: "work", normalDefault, providers })).toEqual({
-      instanceId: ProviderInstanceId.make("aix-codex-ac"),
-      model: "gpt-6.1",
-    });
+    expect(resolveDraftModelSelectionForScope({ scope: "work", normalDefault, providers })).toEqual(
+      { instanceId: ProviderInstanceId.make("aix-codex-ac"), model: "gpt-6.1" },
+    );
     expect(
-      resolveScopedDraftModelSelection({
+      resolveDraftModelSelectionForScope({
         scope: "work",
         normalDefault: { instanceId: ProviderInstanceId.make("codex"), model: "missing" },
         providers,
@@ -201,7 +199,7 @@ describe("provider picker hierarchy", () => {
       model: "gpt-6.1",
     });
     expect(
-      resolveScopedDraftModelSelection({
+      resolveDraftModelSelectionForScope({
         scope: "personal",
         normalDefault: {
           instanceId: ProviderInstanceId.make("aix-codex-ac"),
@@ -248,7 +246,7 @@ describe("provider picker hierarchy", () => {
         normalDefault: personalSticky,
         providers,
       }),
-    ).toEqual({ instanceId: ProviderInstanceId.make("aix-codex-ac"), model: "gpt-6.1" });
+    ).toEqual({ instanceId: ProviderInstanceId.make("aix-codex-ac"), model: "gpt-aix-default" });
     expect(
       resolveDraftModelSelectionForScope({
         scope: "personal",
@@ -274,5 +272,117 @@ describe("provider picker hierarchy", () => {
         providers,
       }),
     ).toEqual(personalSticky);
+  });
+
+  it("resolves new draft selection in explicit, configured, sticky, then ready-provider order", () => {
+    const providers = [
+      {
+        instanceId: ProviderInstanceId.make("codex"),
+        driver: ProviderDriverKind.make("codex"),
+        enabled: true,
+        installed: true,
+        status: "ready",
+        models: [{ slug: "personal-default", isDefault: true }, { slug: "personal-last" }],
+      },
+      {
+        instanceId: ProviderInstanceId.make("aix-codex-team"),
+        driver: ProviderDriverKind.make("codex"),
+        enabled: true,
+        installed: true,
+        status: "ready",
+        aixProfile: "team",
+        models: [{ slug: "work-default", isDefault: true }, { slug: "work-last" }],
+      },
+      {
+        instanceId: ProviderInstanceId.make("claudeAgent"),
+        driver: ProviderDriverKind.make("claudeAgent"),
+        enabled: true,
+        installed: true,
+        status: "ready",
+        models: [{ slug: "claude-default", isDefault: true }],
+      },
+    ];
+    const selection = (instanceId: string, model: string) => ({
+      instanceId: ProviderInstanceId.make(instanceId),
+      model,
+    });
+
+    expect(
+      resolveDraftModelSelectionForScope({
+        scope: "personal",
+        explicitSelection: selection("aix-codex-team", "explicit"),
+        normalDefault: selection("codex", "configured"),
+        stickySelection: selection("claudeAgent", "sticky"),
+        providers,
+      }),
+    ).toEqual(selection("aix-codex-team", "explicit"));
+
+    expect(
+      resolveDraftModelSelectionForScope({
+        scope: "personal",
+        normalDefault: selection("codex", "configured"),
+        stickySelection: selection("claudeAgent", "sticky"),
+        providers,
+      }),
+    ).toEqual(selection("codex", "configured"));
+
+    expect(
+      resolveDraftModelSelectionForScope({
+        scope: "personal",
+        normalDefault: selection("aix-codex-team", "wrong-scope"),
+        stickySelection: selection("claudeAgent", "sticky"),
+        providers,
+      }),
+    ).toEqual(selection("claudeAgent", "sticky"));
+
+    expect(
+      resolveDraftModelSelectionForScope({
+        scope: "personal",
+        stickySelection: selection("codex", "disabled-sticky"),
+        providers: providers.map((provider) =>
+          provider.instanceId === "codex" ? { ...provider, enabled: false } : provider,
+        ),
+      }),
+    ).toEqual(selection("claudeAgent", "claude-default"));
+
+    expect(
+      resolveDraftModelSelectionForScope({
+        scope: "personal",
+        stickySelection: selection("aix-codex-team", "wrong-scope"),
+        providers,
+      }),
+    ).toEqual(selection("codex", "personal-default"));
+
+    expect(
+      resolveDraftModelSelectionForScope({
+        scope: "work",
+        stickySelection: selection("aix-codex-team", "work-last"),
+        providers,
+      }),
+    ).toEqual(selection("aix-codex-team", "work-last"));
+
+    expect(
+      resolveDraftModelSelectionForScope({
+        scope: "personal",
+        providers: [
+          {
+            instanceId: ProviderInstanceId.make("authenticated"),
+            driver: ProviderDriverKind.make("codex"),
+            enabled: true,
+            installed: true,
+            status: "warning",
+            auth: { status: "authenticated" },
+            models: [{ slug: "authenticated-default", isDefault: true }],
+          },
+        ],
+      }),
+    ).toEqual(selection("authenticated", "authenticated-default"));
+
+    expect(
+      resolveDraftModelSelectionForScope({
+        scope: "work",
+        providers: providers.filter((provider) => provider.aixProfile === undefined),
+      }),
+    ).toBeNull();
   });
 });

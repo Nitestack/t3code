@@ -62,7 +62,6 @@ export function useComposerProviderModel(
     entries: providerInstanceEntries,
     candidateInstanceIds: [
       draftSelectionIsExplicit ? draftModelState?.activeProvider : null,
-      !draftSelectionIsExplicit && !threadStarted ? threadModelSelection?.instanceId : null,
       ...candidateInstanceIds,
     ],
     lockedProvider,

@@ -94,7 +94,7 @@ vi.mock("../../state/use-composer-drafts", () => ({
   retargetNewTaskDraft: mocks.retargetDraft,
   updateComposerDraftSettings: mocks.writeSettings,
   setComposerDraftText: mocks.writeText,
-  useStickyComposerModelSelection: () => null,
+  useStickyComposerModelSelections: () => ({ personal: null, work: null }),
   isNewTaskDraftKey: (key: string) => key.startsWith("new-task:"),
   clearComposerDraft: vi.fn(),
   appendComposerDraftAttachments: vi.fn(),

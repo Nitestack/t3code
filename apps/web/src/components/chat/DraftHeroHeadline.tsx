@@ -201,7 +201,6 @@ export function DraftHeroHeadline({
       draftId,
     );
     if (!hasExplicitComposerModelSelection(currentDraft)) {
-      applyStickyState(draftId);
       const environmentConfig = environments.find(
         (environment) => environment.environmentId === project.environmentId,
       )?.serverConfig;
@@ -215,19 +214,22 @@ export function DraftHeroHeadline({
         project.scope,
         environmentConfig?.environment?.capabilities?.projectScope === true,
       );
+      applyStickyState(draftId, scope);
       const normalDefault =
         defaultSelection ??
-        (useComposerDraftStore.getState().stickyActiveProvider !== null || !environmentSettings
-          ? null
-          : resolveProjectDefaultProviderModelSelection(
-              providers,
-              environmentSettings,
-              project.id,
-            ));
+        (environmentSettings
+          ? resolveProjectDefaultProviderModelSelection(providers, environmentSettings, project.id)
+          : null);
+      const stickyState = useComposerDraftStore.getState();
+      const stickyProviderForScope = stickyState.stickyActiveProviderByScope[scope];
+      const stickySelectionForScope = stickyProviderForScope
+        ? (stickyState.stickyModelSelectionByProvider[stickyProviderForScope] ?? null)
+        : null;
       const fallbackResolution = resolveNewThreadModelSelection({
         defaultSelection: resolveDraftModelSelectionForScope({
           scope,
           normalDefault,
+          stickySelection: stickySelectionForScope,
           providers,
         }),
         fallbackSelection: environmentSettings?.fallbackModelSelection ?? null,
@@ -239,6 +241,7 @@ export function DraftHeroHeadline({
       const defaultModelSelection = resolveDraftModelSelectionForScope({
         scope,
         normalDefault: fallbackResolution.fallback ? fallbackResolution.selection : normalDefault,
+        stickySelection: stickySelectionForScope,
         providers,
       });
       if (defaultModelSelection) {

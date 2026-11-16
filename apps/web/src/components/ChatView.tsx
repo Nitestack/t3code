@@ -820,19 +820,24 @@ export default function ChatView(props: ChatViewProps) {
     ? (draftDefaultModelSelection ??
       resolveProjectDefaultProviderModelSelection(draftProviders, settings, draftThread.projectId))
     : null;
+  const draftEnvironment = draftThread ? environmentById.get(draftThread.environmentId) : null;
+  const draftProjectScope = resolveModelPickerProjectScope(
+    fallbackDraftProject?.scope,
+    draftEnvironment?.serverConfig?.environment?.capabilities?.projectScope === true,
+  );
+  const draftStickySelection = useComposerDraftStore((store) => {
+    const instanceId = store.stickyActiveProviderByScope[draftProjectScope];
+    return instanceId ? (store.stickyModelSelectionByProvider[instanceId] ?? null) : null;
+  });
   const draftExplicitModelSelection =
     composerModelSelectionExplicit && composerSelectedModelSelection
       ? composerSelectedModelSelection
       : null;
   const draftScopedDefault = draftThread
     ? resolveDraftModelSelectionForScope({
-        scope: resolveModelPickerProjectScope(
-          fallbackDraftProject?.scope,
-          environmentById.get(draftThread.environmentId)?.serverConfig?.environment?.capabilities
-            ?.projectScope === true,
-        ),
+        scope: draftProjectScope,
         explicitSelection: draftExplicitModelSelection,
-        stickySelection: composerSelectedModelSelection,
+        stickySelection: draftStickySelection,
         normalDefault: draftNormalDefault,
         providers: draftProviders,
       })
@@ -848,7 +853,19 @@ export default function ChatView(props: ChatViewProps) {
           now: Date.parse(`${nowMinute}:00Z`),
         })
       : null;
-  const draftFallback = draftModelResolution?.fallback ? draftModelResolution : null;
+  const scopedDraftFallbackSelection = draftModelResolution?.fallback
+    ? resolveDraftModelSelectionForScope({
+        scope: draftProjectScope,
+        explicitSelection: draftExplicitModelSelection,
+        stickySelection: draftStickySelection,
+        normalDefault: draftModelResolution.selection,
+        providers: draftProviders,
+      })
+    : null;
+  const draftFallback =
+    draftModelResolution?.fallback && scopedDraftFallbackSelection
+      ? { ...draftModelResolution, selection: scopedDraftFallbackSelection }
+      : null;
   const localDraftThread = draftThread
     ? buildLocalDraftThread(
         threadId,
@@ -857,6 +874,7 @@ export default function ChatView(props: ChatViewProps) {
           NO_PROVIDER_MODEL_SELECTION,
       )
     : undefined;
+  const draftComposerSelection = draftFallback?.selection ?? draftScopedDefault;
   const isServerThread = serverThread !== null;
   const activeThread = isServerThread ? serverThread : localDraftThread;
   const serverLatestRun =
@@ -1300,10 +1318,16 @@ export default function ChatView(props: ChatViewProps) {
     { modelSelectionExplicit: composerModelSelectionExplicit },
     threadHasStarted(activeThread),
   );
-  const selectedProviderByThreadId = composerModelSelectionApplies ? composerActiveProvider : null;
+  const selectedProviderByThreadId = composerModelSelectionApplies
+    ? composerActiveProvider
+    : draftThread
+      ? (draftComposerSelection?.instanceId ?? null)
+      : null;
   const threadProvider =
     activeThread?.modelSelection.instanceId ??
-    activeProjectDefaultModelSelection?.instanceId ??
+    (draftThread
+      ? draftComposerSelection?.instanceId
+      : activeProjectDefaultModelSelection?.instanceId) ??
     null;
   const lockedProvider = deriveLockedProvider({
     thread: activeThread,
@@ -1378,9 +1402,12 @@ export default function ChatView(props: ChatViewProps) {
     entries: providerInstanceEntries,
     candidateInstanceIds: [
       selectedProviderByThreadId,
+      draftComposerSelection?.instanceId,
       activeRuntime?.providerInstanceId,
       activeThreadModelInstanceId,
-      activeProjectDefaultModelSelection?.instanceId,
+      draftThread
+        ? draftComposerSelection?.instanceId
+        : activeProjectDefaultModelSelection?.instanceId,
     ],
     lockedProvider,
     lockedInstanceId: activeRuntime?.providerInstanceId ?? activeThreadModelInstanceId,
@@ -3739,7 +3766,9 @@ export default function ChatView(props: ChatViewProps) {
                                 providerStatuses={providerStatuses as ServerProvider[]}
                                 providerCatalogKnown={serverConfig !== null}
                                 activeProjectDefaultModelSelection={
-                                  activeProjectDefaultModelSelection
+                                  draftThread
+                                    ? draftComposerSelection
+                                    : activeProjectDefaultModelSelection
                                 }
                                 activeThreadModelSelection={activeThread?.modelSelection}
                                 activeProjectId={activeProject?.id ?? null}

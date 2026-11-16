@@ -60,7 +60,7 @@ function setup(): Disposable {
     draftThreadsByThreadKey: {},
     logicalProjectDraftThreadKeyByLogicalProjectKey: {},
     stickyModelSelectionByProvider: {},
-    stickyActiveProvider: null,
+    stickyActiveProviderByScope: { personal: null, work: null },
   });
   return {
     [Symbol.dispose]() {

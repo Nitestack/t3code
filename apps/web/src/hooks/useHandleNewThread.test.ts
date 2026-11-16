@@ -6,6 +6,14 @@ const testState = vi.hoisted(() => {
   let projectFileRead = Promise.resolve<null>(null);
   let projectRemoved = false;
   let connectedEnvironmentIds = ["environment-primary", "environment-ssh"];
+  let providers: ReadonlyArray<{
+    readonly instanceId: string;
+    readonly driver: string;
+    readonly enabled: boolean;
+    readonly installed: boolean;
+    readonly status: string;
+    readonly models: ReadonlyArray<{ readonly slug: string; readonly isDefault?: boolean }>;
+  }> = [];
   let targetSettings = {
     defaultThreadEnvMode: "local" as "local" | "worktree" | null,
     newWorktreesStartFromOrigin: false,
@@ -46,6 +54,8 @@ const testState = vi.hoisted(() => {
     ),
     getDraftThread: vi.fn(() => null),
     applyStickyState: vi.fn(),
+    stickyActiveProviderByScope: { personal: null as string | null, work: null as string | null },
+    stickyModelSelectionByProvider: {} as Record<string, { instanceId: string; model: string }>,
     setDraftThreadContext: vi.fn(),
     setLogicalProjectDraftThreadId: vi.fn(),
     setModelSelection: vi.fn(),
@@ -84,6 +94,12 @@ const testState = vi.hoisted(() => {
     get targetSettings() {
       return targetSettings;
     },
+    get providers() {
+      return providers;
+    },
+    set providers(value) {
+      providers = value;
+    },
     reset(
       nextStoredDraft: typeof storedDraft,
       workspaceDefaults = {
@@ -96,6 +112,9 @@ const testState = vi.hoisted(() => {
       draftsWithUserText = new Set();
       projectRemoved = false;
       connectedEnvironmentIds = ["environment-primary", "environment-ssh"];
+      providers = [];
+      draftStore.stickyActiveProviderByScope = { personal: null, work: null };
+      draftStore.stickyModelSelectionByProvider = {};
       targetSettings = {
         defaultThreadEnvMode: workspaceDefaults.envMode,
         newWorktreesStartFromOrigin: workspaceDefaults.startFromOrigin,
@@ -124,9 +143,10 @@ const testServerConfigs = () =>
           ...testState.targetSettings,
           newWorktreesStartFromOrigin: !testState.targetSettings.newWorktreesStartFromOrigin,
         },
+        providers: testState.providers,
       },
     ],
-    ["environment-ssh", { settings: testState.targetSettings }],
+    ["environment-ssh", { settings: testState.targetSettings, providers: testState.providers }],
   ]);
 
 vi.mock("../rpc/atomRegistry", () => ({
@@ -219,9 +239,17 @@ vi.mock("../composerDraftStore", () => {
 vi.mock("../lib/chatThreadActions", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/chatThreadActions")>()),
   hasExplicitComposerModelSelection: () => false,
-  resolveNewThreadModelSelectionOverride: () => null,
 }));
-vi.mock("../providerInstances", () => ({ resolveDefaultProviderModelSelection: () => null }));
+vi.mock("../providerInstances", () => ({
+  resolveDefaultProviderModelSelection: () => null,
+  resolveProjectDefaultProviderModelSelection: (entries: typeof testState.providers) => {
+    const provider = entries.find(
+      (entry) => !entry.instanceId.startsWith("aix-") && entry.enabled && entry.status === "ready",
+    );
+    const model = provider?.models.find((candidate) => candidate.isDefault) ?? provider?.models[0];
+    return provider && model ? { instanceId: provider.instanceId, model: model.slug } : null;
+  },
+}));
 vi.mock("../lib/t3ProjectFileDefaults", () => ({
   readT3ProjectFile: () => testState.projectFileRead,
 }));
@@ -336,6 +364,49 @@ describe.each([
 });
 
 describe("useNewThreadHandler", () => {
+  it("starts a personal draft on its ready subscription default when the global sticky is aix", async () => {
+    testState.reset(null);
+    testState.providers = [
+      {
+        instanceId: "aix-codex-team",
+        driver: "codex",
+        enabled: true,
+        installed: true,
+        status: "ready",
+        models: [{ slug: "work-default", isDefault: true }],
+      },
+      {
+        instanceId: "codex",
+        driver: "codex",
+        enabled: true,
+        installed: true,
+        status: "ready",
+        models: [{ slug: "personal-default", isDefault: true }],
+      },
+    ];
+    testState.draftStore.stickyActiveProviderByScope = {
+      personal: null,
+      work: "aix-codex-team",
+    };
+    testState.draftStore.stickyModelSelectionByProvider = {
+      "aix-codex-team": { instanceId: "aix-codex-team", model: "work-last" },
+    };
+
+    const pending = useNewThreadHandler()({
+      environmentId: "environment-ssh",
+      projectId: "project-remote",
+    } as never);
+    testState.completeProjectFileRead(null);
+    await pending;
+
+    expect(testState.draftStore.applyStickyState).toHaveBeenCalledWith("draft-delayed", "personal");
+    expect(testState.draftStore.setModelSelection).toHaveBeenCalledWith(
+      "draft-delayed",
+      { instanceId: "codex", model: "personal-default" },
+      { replaceOptions: true },
+    );
+  });
+
   it("keeps the text of a draft that gained some while it waited", async () => {
     testState.reset(null);
     const raced = {

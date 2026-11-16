@@ -35,7 +35,6 @@ import {
   buildModelOptions,
   groupByProvider,
   resolveDefaultableModelSelection,
-  resolveNewTaskModelSelection,
   resolveSelectableModelSelection,
   serverConfigForCwd,
 } from "../../lib/modelOptions";
@@ -61,7 +60,7 @@ import {
   setStickyComposerModelSelection,
   updateComposerDraftSettings,
   useComposerDraft,
-  useStickyComposerModelSelection,
+  useStickyComposerModelSelections,
 } from "../../state/use-composer-drafts";
 import {
   rememberModelOptions,
@@ -371,7 +370,7 @@ export function NewTaskFlowProvider(
   }, [scopedProjects, selectableProjects, selectedEnvironmentId]);
 
   const linkedEnvironments = useLinkedEnvironments(selectedProject?.environmentId ?? null);
-  const storedStickyModelSelection = useStickyComposerModelSelection();
+  const storedStickyModelsByScope = useStickyComposerModelSelections();
   const modelSelectionNow = useNowMinuteMs();
   const projectDefaults = useNewTaskProjectDefaults(selectedProject);
   const isScratchDraft = projectDefaults.isScratch;
@@ -484,6 +483,11 @@ export function NewTaskFlowProvider(
     projectDefaults.serverConfig,
     workspaceCwd,
   );
+  const projectScope = resolveModelPickerProjectScope(
+    selectedProject?.scope,
+    selectedEnvironmentServerConfig?.environment?.capabilities?.projectScope === true,
+  );
+  const storedStickyModelSelection = storedStickyModelsByScope[projectScope];
   // Keep the user's explicit choice separate from the resolved display value:
   // only the explicit flag is ever written back to the draft, so the resolved
   // value keeps tracking the server setting when the config loads late.
@@ -522,25 +526,16 @@ export function NewTaskFlowProvider(
     selectedProject?.id ?? null,
   );
 
-  const selectedDefaultModel = resolveNewTaskModelSelection({
-    draftSelection: draftModelSelection,
-    projectDefaultSelection: projectDefaultModelSelection,
-    stickySelection: stickyModelSelection,
-    modelOptions,
-  });
   const scopedDefaultModel = selectedEnvironmentServerConfig
     ? resolveDraftModelSelectionForScope({
-        scope: resolveModelPickerProjectScope(
-          selectedProject?.scope,
-          selectedEnvironmentServerConfig?.environment?.capabilities?.projectScope === true,
-        ),
+        scope: projectScope,
         explicitSelection: draftModelSelection,
         stickySelection: stickyModelSelection,
-        normalDefault: selectedDefaultModel,
+        normalDefault: projectDefaultModelSelection,
         providers: selectedEnvironmentServerConfig.providers,
       })
-    : selectedDefaultModel;
-  const selectedModel = resolveNewThreadModelSelection({
+    : (draftModelSelection ?? projectDefaultModelSelection ?? stickyModelSelection);
+  const usageResolution = resolveNewThreadModelSelection({
     defaultSelection: scopedDefaultModel,
     explicitSelection: draftModelSelection,
     fallbackSelection: selectedEnvironmentServerConfig?.settings.fallbackModelSelection ?? null,
@@ -550,7 +545,17 @@ export function NewTaskFlowProvider(
       : {}),
     projectId: selectedProject?.id ?? null,
     now: modelSelectionNow,
-  }).selection;
+  });
+  const selectedModel =
+    usageResolution.fallback && selectedEnvironmentServerConfig
+      ? (resolveDraftModelSelectionForScope({
+          scope: projectScope,
+          explicitSelection: draftModelSelection,
+          stickySelection: stickyModelSelection,
+          normalDefault: usageResolution.selection,
+          providers: selectedEnvironmentServerConfig.providers,
+        }) ?? scopedDefaultModel)
+      : usageResolution.selection;
   const selectedModelKey = selectedModel
     ? `${selectedModel.instanceId}:${selectedModel.model}`
     : null;
