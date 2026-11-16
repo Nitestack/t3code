@@ -27,13 +27,13 @@ Choose a profile's model and inspect the context window, output limits, and pric
 
 Usage limits show the budget reported for each profile, including a reset time when the gateway supplies one.
 
-![Demo Work Gateway and Research Lab budget windows for Codex and OpenCode](./.github/readme/aix/aix-budget-windows.png)
+![Demo gateway budgets for the research and work aix profiles](./.github/readme/aix/aix-budget-windows.png)
 
 ### Work and Personal views
 
 Classify environments as Work, then switch views to filter their projects and threads. The view does not change server permissions or stop running agents.
 
-![Work and Personal switch with the environment classification menu open](./.github/readme/aix/work-personal-scope.png)
+![Personal and Work switch with the environment classification menu open](./.github/readme/aix/work-personal-scope.png)
 
 ## Set up aix and run T3
 
