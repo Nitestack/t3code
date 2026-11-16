@@ -35,7 +35,7 @@ import {
   getProviderSlashCommandsForSlashMenu,
 } from "@t3tools/client-runtime/providerSkills";
 import { searchProviderSkills } from "../../providerSkillSearch";
-import { useVisibleThreadShells } from "~/state/entities";
+import { useProjects, useVisibleThreadShells } from "~/state/entities";
 import { useEnvironmentIdentities, useEnvironmentMachines } from "~/state/environments";
 import { offersLinkedEnvironmentsAtom } from "~/state/peerLinks";
 import {
@@ -124,7 +124,8 @@ export function useComposerMenuItems({
   const settledPullRequestTextQuery =
     pullRequestTextQuery === debouncedPullRequestTextQuery ? pullRequestTextQuery : null;
   const isPathTrigger = composerTriggerKind === "path";
-  const { activeScope, assignments } = useClientEnvironmentScope();
+  const { activeScope } = useClientEnvironmentScope();
+  const projects = useProjects();
   const environmentThreadShells = useVisibleThreadShells(isPathTrigger);
   // The user's machines feed `@` machine matches; the catalog summary is cheap and stable.
   const environmentIdentities = useEnvironmentIdentities();
@@ -137,13 +138,14 @@ export function useComposerMenuItems({
     environmentId,
     linkedEnvironments,
     shells: environmentThreadShells,
+    projects,
     environments: mentionableEnvironments,
     scope: activeScope,
-    assignments,
   });
   // Mounts older settled threads matching the mention, here and on linked machines, which shells
   // may leave out.
   useThreadSearch(isPathTrigger ? composerCandidates.searchEnvironmentIds : [], pathTriggerQuery, {
+    projectIds: composerCandidates.searchProjectIds,
     titlesOnly: true,
   });
   const offersMachines = useAtomValue(offersLinkedEnvironmentsAtom(environmentId));

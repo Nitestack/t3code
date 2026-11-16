@@ -3,10 +3,11 @@ import * as Schema from "effect/Schema";
 import { IsoDateTime, ProjectId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { RepositoryIdentity, ThreadEnvMode } from "./environment.ts";
 import { ModelSelection } from "./modelSelection.ts";
-import { ProjectScript, ReceivedProjectIcon } from "./project.ts";
+import { ProjectScript, ProjectScope, ReceivedProjectIcon } from "./project.ts";
 
 export const OrchestrationProjectShell = Schema.Struct({
   id: ProjectId,
+  scope: Schema.optional(ProjectScope),
   title: TrimmedNonEmptyString,
   // Set once someone renames the project. A folder-default title can equal the
   // repository name, so grouped labels need this to tell a chosen name apart.

@@ -6,6 +6,7 @@ import {
   StoredProjectIcon,
   ProjectId,
   ProjectScript,
+  ProjectScope,
   ThreadEnvMode,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -31,6 +32,7 @@ export class ProjectStoreV2Error extends Schema.TaggedError<ProjectStoreV2Error>
 
 export const ProjectRow = Schema.Struct({
   projectId: ProjectId,
+  scope: ProjectScope,
   title: Schema.String,
   hasCustomTitle: Schema.Boolean,
   workspaceRoot: Schema.String,
@@ -60,6 +62,7 @@ const ProjectDbRow = Schema.Struct({
 function toShell(row: ProjectRow): OrchestrationProjectShell {
   return {
     id: row.projectId,
+    scope: row.scope,
     title: row.title,
     hasCustomTitle: row.hasCustomTitle,
     workspaceRoot: row.workspaceRoot,
@@ -119,6 +122,7 @@ export const make = Effect.gen(function* () {
     execute: (request) => sql`
       SELECT
         project_id AS "projectId",
+        scope,
         title,
         has_custom_title AS "hasCustomTitle",
         workspace_root AS "workspaceRoot",
@@ -152,6 +156,7 @@ export const make = Effect.gen(function* () {
         (encoded) => sql`
           INSERT INTO projection_projects (
             project_id,
+            scope,
             title,
             has_custom_title,
             workspace_root,
@@ -169,6 +174,7 @@ export const make = Effect.gen(function* () {
           )
           VALUES (
             ${encoded.projectId},
+            ${encoded.scope},
             ${encoded.title},
             ${encoded.hasCustomTitle},
             ${encoded.workspaceRoot},
@@ -193,6 +199,7 @@ export const make = Effect.gen(function* () {
             END,
             has_custom_title = MAX(projection_projects.has_custom_title, excluded.has_custom_title),
             workspace_root = excluded.workspace_root,
+            scope = excluded.scope,
             default_model_selection_json = excluded.default_model_selection_json,
             default_thread_env_mode = excluded.default_thread_env_mode,
             auto_pull = excluded.auto_pull,
@@ -241,6 +248,7 @@ export const make = Effect.gen(function* () {
         const payload = event.payload;
         return yield* upsertRow({
           projectId: payload.projectId,
+          scope: payload.scope ?? "personal",
           title: payload.title,
           hasCustomTitle: false,
           workspaceRoot: payload.workspaceRoot,
@@ -272,6 +280,7 @@ export const make = Effect.gen(function* () {
         ...row,
         ...(payload.title === undefined ? {} : { title: payload.title, hasCustomTitle: true }),
         ...(payload.workspaceRoot === undefined ? {} : { workspaceRoot: payload.workspaceRoot }),
+        ...(payload.scope === undefined ? {} : { scope: payload.scope }),
         ...(payload.defaultModelSelection === undefined
           ? {}
           : { defaultModelSelection: payload.defaultModelSelection }),

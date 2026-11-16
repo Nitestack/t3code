@@ -60,6 +60,7 @@ export interface ProjectCloneHooks {
     readonly title: string;
     readonly workspaceRoot: string;
     readonly createdAt: string;
+    readonly scope?: ProjectCloneStartInput["scope"];
   }) => Effect.Effect<void, OrchestrationDispatchCommandError | ProjectConflictError>;
   readonly onCloned: (input: {
     readonly projectId: ProjectId;
@@ -89,6 +90,7 @@ interface TrackedClone {
     readonly destinationPath: string;
     readonly repository: SourceControlRepositoryInfo | null;
     readonly protocol: SourceControlCloneProtocol;
+    readonly scope: ProjectCloneStartInput["scope"];
   };
 }
 
@@ -314,6 +316,7 @@ export const make = Effect.gen(function* () {
             destinationPath: prepared.destinationPath,
             repository: prepared.repository,
             protocol: input.protocol ?? "auto",
+            scope: input.scope,
           },
         });
         return [true, next] as const;
@@ -335,6 +338,7 @@ export const make = Effect.gen(function* () {
               title: input.title,
               workspaceRoot: prepared.destinationPath,
               createdAt: input.createdAt,
+              ...(input.scope === undefined ? {} : { scope: input.scope }),
             })
             .pipe(
               Effect.as(input.projectId),

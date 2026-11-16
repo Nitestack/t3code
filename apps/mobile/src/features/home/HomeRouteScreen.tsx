@@ -5,8 +5,6 @@ import { NativePrimaryColumnContext } from "../../native/v5-workspace-context";
 import { useNavigation } from "@react-navigation/native";
 import { useMemo, useState } from "react";
 import { Platform } from "react-native";
-import * as Arr from "effect/Array";
-import * as Order from "effect/Order";
 
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import { pickableProjectGroups } from "@t3tools/client-runtime/state/project-grouping";
@@ -57,10 +55,10 @@ export function HomeRouteScreen() {
     useAtomValueWhileVisible(steadyNavigationThreadShellsAtom, visible),
   );
   const pendingTasks = usePendingNewTasks();
-  const { filter: filterScope } = useMobileEnvironmentScope();
+  const { filter: filterScope, filterThreads: filterThreadScope } = useMobileEnvironmentScope();
   const projects = filterScope(allProjects);
-  const threads = filterScope(allThreads);
-  const scopedPendingTasks = filterScope(pendingTasks);
+  const threads = filterThreadScope(allThreads, allProjects);
+  const scopedPendingTasks = filterThreadScope(pendingTasks, allProjects);
   const { environments: workspaceEnvironments, state: catalogState } = useWorkspaceState();
   const { savedConnectionsById } = useSavedRemoteConnections();
   const navigation = useNavigation();
@@ -114,20 +112,7 @@ export function HomeRouteScreen() {
   } = useThreadListActions();
   const { openPendingTask, confirmDeletePendingTask } =
     usePendingTaskListActions(selectThreadRoute);
-  const connectionStateByEnvironmentId = new Map(
-    workspaceEnvironments.map(
-      (environment) => [environment.environmentId, environment.connectionState] as const,
-    ),
-  );
-  const allEnvironments = Arr.sort(
-    Object.values(savedConnectionsById).map((connection) => ({
-      environmentId: connection.environmentId,
-      label: connection.environmentLabel,
-      connectionState: connectionStateByEnvironmentId.get(connection.environmentId) ?? "available",
-    })),
-    Order.mapInput(Order.String, (environment: { readonly label: string }) => environment.label),
-  );
-  const environments = filterScope(homeListFilterEnvironments(workspaceEnvironments));
+  const environments = homeListFilterEnvironments(workspaceEnvironments);
   const availableEnvironmentIds = useMemo(
     () => new Set(environments.map((environment) => environment.environmentId)),
     [environments],
@@ -201,7 +186,6 @@ export function HomeRouteScreen() {
         />
 
         <EnvironmentScopeSwitcher
-          environments={allEnvironments}
           onScopeChange={() => {
             setSelectedEnvironmentId(null);
             setSelectedProjectKey(null);

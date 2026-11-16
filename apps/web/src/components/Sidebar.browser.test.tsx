@@ -99,7 +99,7 @@ describe("sidebar header new thread", () => {
     vi.mocked(useHandleNewThread).mockReturnValue({
       activeDraftThread: null,
       activeThread: null,
-      environmentScope: { activeScope: "personal", assignments: {} },
+      environmentScope: { activeScope: "personal", projects: [] },
       defaultProjectRef: currentProjectRef,
       defaultProjectFallbackReady: true,
       handleNewThread: startThread,
@@ -155,7 +155,7 @@ describe("sidebar render isolation", () => {
     vi.mocked(useHandleNewThread).mockReturnValue({
       activeDraftThread: null,
       activeThread: null,
-      environmentScope: { activeScope: "personal", assignments: {} },
+      environmentScope: { activeScope: "personal", projects: [] },
       defaultProjectRef: {
         environmentId: activeProject.environmentId,
         projectId: activeProject.id,
@@ -234,7 +234,7 @@ describe("sidebar thread rename", () => {
       vi.mocked(useHandleNewThread).mockReturnValue({
         activeDraftThread: null,
         activeThread: null,
-        environmentScope: { activeScope: "personal", assignments: {} },
+        environmentScope: { activeScope: "personal", projects: [] },
         defaultProjectRef: {
           environmentId: activeProject.environmentId,
           projectId: activeProject.id,
@@ -303,7 +303,7 @@ describe("sidebar settled pagination", () => {
     vi.mocked(useHandleNewThread).mockReturnValue({
       activeDraftThread: null,
       activeThread: null,
-      environmentScope: { activeScope: "personal", assignments: {} },
+      environmentScope: { activeScope: "personal", projects: [] },
       defaultProjectRef: {
         environmentId: activeProject.environmentId,
         projectId: activeProject.id,

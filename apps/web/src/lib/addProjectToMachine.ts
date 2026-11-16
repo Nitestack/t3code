@@ -41,6 +41,7 @@ export interface AddProjectToMachineInput {
   readonly title: string;
   readonly remoteUrl: string;
   readonly destinationPath: string;
+  readonly scope?: "personal" | "work";
   readonly files: ReadonlyArray<string>;
 }
 
@@ -138,6 +139,7 @@ export async function addProjectToMachine(input: AddProjectToMachineInput): Prom
         createdAt: new Date().toISOString(),
         remoteUrl: input.remoteUrl,
         destinationPath: input.destinationPath,
+        ...(input.scope === undefined ? {} : { scope: input.scope }),
       },
     },
     { label: "Add project to machine", reportFailure: false },

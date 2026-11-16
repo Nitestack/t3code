@@ -1,49 +1,21 @@
-import { EnvironmentId, ThreadId } from "@t3tools/contracts";
-import { filterByEnvironmentScope, scopedThreadKey } from "@t3tools/client-runtime/environment";
+import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
-import {
-  filterEnvironmentIdsByScope,
-  filterThreadKeysByEnvironmentScope,
-} from "./environmentScope";
+import { filterProjectsForScope, filterThreadsForScope } from "./environmentScope";
 
-describe("filterEnvironmentIdsByScope", () => {
-  it("filters by environment identity when project names and paths overlap", () => {
-    const workEnvironmentId = EnvironmentId.make("environment-work");
-    const personalEnvironmentId = EnvironmentId.make("environment-personal");
-    const environmentIds = [workEnvironmentId, personalEnvironmentId];
+describe("project scope filters", () => {
+  it("filters project and thread rows by scope while sharing an environment", () => {
+    const environmentId = EnvironmentId.make("shared-server");
+    const workProjectId = ProjectId.make("work-project");
+    const personalProjectId = ProjectId.make("personal-project");
     const projects = [
-      { environmentId: workEnvironmentId, title: "repo", workspaceRoot: "/projects/repo" },
-      { environmentId: personalEnvironmentId, title: "repo", workspaceRoot: "/projects/repo" },
+      { environmentId, id: workProjectId, scope: "work" as const },
+      { environmentId, id: personalProjectId },
     ];
-    const assignments = {
-      [workEnvironmentId]: "work",
-      [personalEnvironmentId]: "personal",
-    } as const;
-
-    expect(filterEnvironmentIdsByScope(environmentIds, "work", assignments)).toEqual([
-      workEnvironmentId,
-    ]);
-    expect(filterEnvironmentIdsByScope(environmentIds, "personal", assignments)).toEqual([
-      personalEnvironmentId,
-    ]);
-    expect(filterByEnvironmentScope(projects, "work", assignments)).toEqual([projects[0]]);
-    expect(filterByEnvironmentScope(projects, "personal", assignments)).toEqual([projects[1]]);
-
-    const workThread = { environmentId: workEnvironmentId, threadId: ThreadId.make("same-id") };
-    const personalThread = {
-      environmentId: personalEnvironmentId,
-      threadId: ThreadId.make("same-id"),
-    };
-    const staleSelection = [
-      scopedThreadKey(workThread),
-      scopedThreadKey(personalThread),
-      "invalid",
+    const threads = [
+      { environmentId, projectId: workProjectId, id: ThreadId.make("work-thread") },
+      { environmentId, projectId: personalProjectId, id: ThreadId.make("personal-thread") },
     ];
-    expect(filterThreadKeysByEnvironmentScope(staleSelection, "personal", assignments)).toEqual([
-      personalThread,
-    ]);
-    expect(filterThreadKeysByEnvironmentScope(staleSelection, "work", assignments)).toEqual([
-      workThread,
-    ]);
+    expect(filterProjectsForScope(projects, "work")).toEqual([projects[0]]);
+    expect(filterThreadsForScope(threads, "personal", projects)).toEqual([threads[1]]);
   });
 });

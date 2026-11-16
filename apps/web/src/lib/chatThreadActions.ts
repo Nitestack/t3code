@@ -6,11 +6,7 @@ import type {
   ProjectId,
   ScopedProjectRef,
 } from "@t3tools/contracts";
-import {
-  getEnvironmentScope,
-  type EnvironmentScopeAssignments,
-  type EnvironmentScope,
-} from "@t3tools/client-runtime/environment";
+import { resolveProjectScope, type EnvironmentScope } from "@t3tools/client-runtime/environment";
 import type { ComposerThreadDraftState, DraftThreadEnvMode } from "../composerDraftStore";
 
 type ComposerModelSelectionState = Pick<
@@ -41,7 +37,11 @@ export interface ChatThreadActionContext {
   readonly defaultProjectRef: ScopedProjectRef | null;
   readonly environmentScope?: {
     readonly activeScope: EnvironmentScope;
-    readonly assignments: EnvironmentScopeAssignments;
+    readonly projects: ReadonlyArray<{
+      readonly environmentId: EnvironmentId;
+      readonly id: ProjectId;
+      readonly scope?: EnvironmentScope | undefined;
+    }>;
   };
   readonly handleNewThread: NewThreadHandler;
 }
@@ -98,20 +98,28 @@ export function draftModelSelectionApplies(
 export function resolveThreadActionProjectRef(
   context: ChatThreadActionContext,
 ): ScopedProjectRef | null {
-  const isInScope = (environmentId: EnvironmentId) =>
-    context.environmentScope === undefined ||
-    getEnvironmentScope(context.environmentScope.assignments, environmentId) ===
-      context.environmentScope.activeScope;
-  if (context.activeThread && isInScope(context.activeThread.environmentId)) {
+  const isInScope = (project: ThreadContextLike | ScopedProjectRef) => {
+    if (context.environmentScope === undefined) return true;
+    const ref = "projectId" in project ? project : null;
+    const scope =
+      ref === null
+        ? undefined
+        : context.environmentScope.projects.find(
+            (candidate) =>
+              candidate.environmentId === ref.environmentId && candidate.id === ref.projectId,
+          )?.scope;
+    return resolveProjectScope(scope) === context.environmentScope.activeScope;
+  };
+  if (context.activeThread && isInScope(context.activeThread)) {
     return scopeProjectRef(context.activeThread.environmentId, context.activeThread.projectId);
   }
-  if (context.activeDraftThread && isInScope(context.activeDraftThread.environmentId)) {
+  if (context.activeDraftThread && isInScope(context.activeDraftThread)) {
     return scopeProjectRef(
       context.activeDraftThread.environmentId,
       context.activeDraftThread.projectId,
     );
   }
-  return context.defaultProjectRef && isInScope(context.defaultProjectRef.environmentId)
+  return context.defaultProjectRef && isInScope(context.defaultProjectRef)
     ? context.defaultProjectRef
     : null;
 }

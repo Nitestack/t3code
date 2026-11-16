@@ -226,13 +226,14 @@ export function CommandPalette(props: {
   const { themeVariables } = useAppearancePreferences();
   const selectDetail = useSelectWorkspaceDetail();
   const runCommand = props.onCommand;
-  const { filter: filterScope } = useMobileEnvironmentScope();
+  const { filter: filterScope, filterThreads: filterThreadScope } = useMobileEnvironmentScope();
   const projects = filterScope(useProjects());
-  const threads = filterScope(useVisibleThreadShells());
+  const allProjects = useProjects();
+  const threads = filterThreadScope(useVisibleThreadShells(), allProjects);
   const activeThreadRef = parseActiveThreadPath(props.pathname);
   const activeThread = useThreadShell(activeThreadRef);
   const visitThread = useAtomCommand(threadEnvironment.visit, { reportFailure: false });
-  const environments = filterScope(useWorkspaceEnvironments());
+  const environments = useWorkspaceEnvironments();
   const { savedConnectionsById } = useSavedRemoteConnections();
   const [query, setQuery] = useState("");
   // Ranking is relative to when the palette opened, so rows do not reorder as time passes.

@@ -1,6 +1,7 @@
 import * as Schema from "effect/Schema";
 
 import { IsoDateTime, NonNegativeInt, ProjectId, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { ProjectScope } from "./project.ts";
 import {
   SourceControlCloneProtocol,
   SourceControlProviderKind,
@@ -50,6 +51,7 @@ export const ProjectCloneStartInput = Schema.Struct({
   projectId: ProjectId,
   title: TrimmedNonEmptyString,
   createdAt: IsoDateTime,
+  scope: Schema.optional(ProjectScope),
   provider: Schema.optional(SourceControlProviderKind),
   repository: Schema.optional(TrimmedNonEmptyString),
   remoteUrl: Schema.optional(TrimmedNonEmptyString),

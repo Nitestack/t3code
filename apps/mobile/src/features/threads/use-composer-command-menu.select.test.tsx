@@ -7,7 +7,6 @@ vi.mock("../environment-scope/useMobileEnvironmentScope", () => ({
   useMobileEnvironmentScope: () => ({
     enabled: false,
     activeScope: "personal",
-    assignments: {},
   }),
 }));
 vi.mock("../../state/queries", () => ({

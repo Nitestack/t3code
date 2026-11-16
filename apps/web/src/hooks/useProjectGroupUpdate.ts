@@ -1,4 +1,8 @@
-import { AuthOrchestrationOperateScope, type ProjectIconOverride } from "@t3tools/contracts";
+import {
+  AuthOrchestrationOperateScope,
+  type ProjectIconOverride,
+  type ProjectScope,
+} from "@t3tools/contracts";
 import {
   isAtomCommandInterrupted,
   mapAtomCommandResult,
@@ -22,6 +26,7 @@ export type ProjectGroupUpdate = Partial<{
   projectIcon: ProjectIconOverride | null;
   pinned: boolean;
   archived: boolean;
+  scope: ProjectScope;
 }>;
 
 type ProjectGroupMember = Pick<

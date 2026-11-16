@@ -23,6 +23,7 @@ import { create } from "zustand";
 
 import { type DraftId, useComposerDraftStore } from "../composerDraftStore";
 import { useAddProjectTargets } from "../hooks/useAddProjectTargets";
+import { useClientEnvironmentScope } from "../environmentScope";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useLogicalProjectEnvironments } from "../hooks/useLogicalProjectEnvironments";
 import {
@@ -107,6 +108,8 @@ function AddProjectToMachineDialog({ request }: { request: AddProjectToMachineRe
     project?.repositoryIdentity?.locator.remoteUrl ??
     "";
   const [protocol, setProtocol] = useState<CloneProtocol | null>(() => cloneUrlProtocol(sourceUrl));
+  const { activeScope } = useClientEnvironmentScope();
+  const [scope, setScope] = useState<"personal" | "work">(activeScope);
   const sshUrl = cloneUrlForProtocol(sourceUrl, "ssh");
   const httpsUrl = cloneUrlForProtocol(sourceUrl, "https");
   const remoteUrl =
@@ -226,6 +229,7 @@ function AddProjectToMachineDialog({ request }: { request: AddProjectToMachineRe
         title: project.title,
         remoteUrl,
         destinationPath: destinationPath.trim(),
+        scope,
         files: [...selectedFiles.keys()],
       });
       close();
@@ -324,6 +328,20 @@ function AddProjectToMachineDialog({ request }: { request: AddProjectToMachineRe
               </div>
             </div>
 
+            <div className="flex flex-col gap-1.5">
+              <Label>Project scope</Label>
+              <ToggleGroup
+                aria-label="Project scope"
+                value={[scope]}
+                onValueChange={(next) => {
+                  const value = next[0];
+                  if (value === "personal" || value === "work") setScope(value);
+                }}
+              >
+                <Toggle value="personal">Personal</Toggle>
+                <Toggle value="work">Work</Toggle>
+              </ToggleGroup>
+            </div>
             <div className="flex flex-col gap-1.5">
               <Label>Clone over</Label>
               {sshUrl && httpsUrl ? (

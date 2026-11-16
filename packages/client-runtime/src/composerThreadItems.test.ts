@@ -1,4 +1,4 @@
-import { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -9,6 +9,7 @@ import {
 } from "./composerThreadItems.ts";
 
 const environmentId = EnvironmentId.make("env-composer");
+const projectId = ProjectId.make("composer-project");
 
 function shell(
   id: string,
@@ -17,6 +18,7 @@ function shell(
 ): ComposerThreadCandidate {
   return {
     environmentId,
+    projectId,
     id: ThreadId.make(id),
     title,
     branch: null,
@@ -83,24 +85,32 @@ it("keeps composer mentions in the active environment scope as it changes", () =
   const work = EnvironmentId.make("env-work");
   const personal = EnvironmentId.make("env-personal");
   // The shared list can still contain cached results from the other scope after a switch.
+  const workProject = ProjectId.make("work-project");
+  const personalProject = ProjectId.make("personal-project");
   const shells = [
-    shell("work-thread", "Deploy the work app", { environmentId: work }),
-    shell("personal-thread", "Deploy the personal app", { environmentId: personal }),
+    shell("work-thread", "Deploy the work app", { environmentId: work, projectId: workProject }),
+    shell("personal-thread", "Deploy the personal app", {
+      environmentId: personal,
+      projectId: personalProject,
+    }),
   ];
   const linkedEnvironments = new Map([[personal, "Personal server"]]);
   const environments = [
     { environmentId: work, label: "Work server", machine: "cloud" as const },
     { environmentId: personal, label: "Personal server", machine: "laptop" as const },
   ];
-  const assignments = { [work]: "work", [personal]: "personal" } as const;
+  const projects = [
+    { environmentId: work, id: workProject, scope: "work" as const },
+    { environmentId: personal, id: personalProject, scope: "personal" as const },
+  ];
   const candidates = (scope: "work" | "personal" | null) =>
     composerMenuCandidatesForScope({
       environmentId: work,
       linkedEnvironments,
       shells,
+      projects,
       environments,
       scope,
-      assignments,
     });
   const mentionsFor = (scope: "work" | "personal" | null) => {
     const scoped = candidates(scope);
@@ -125,7 +135,7 @@ it("keeps composer mentions in the active environment scope as it changes", () =
   expect(mentionsFor("work")).toEqual({
     searchEnvironmentIds: [work],
     threadIds: ["work-thread"],
-    environmentIds: [],
+    environmentIds: [personal],
   });
   expect(mentionsFor("personal")).toEqual({
     searchEnvironmentIds: [personal],

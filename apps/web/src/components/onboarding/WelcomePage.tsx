@@ -41,6 +41,8 @@ import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from "rea
 
 import { TYPOGRAPHY_ADVANCED_STORAGE_KEY } from "../../appearanceFonts";
 import { MOBILE_APP_URL } from "../../branding";
+import { useClientEnvironmentScope } from "../../environmentScope";
+import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { isElectron } from "../../env";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { usePersistEnvironmentProviderInstanceMutation } from "../../hooks/useSettings";
@@ -856,6 +858,24 @@ function ProjectsSection({
           </Button>
         ) : null}
       </div>
+      {canWrite ? (
+        <div className="flex items-center justify-between gap-3 px-8">
+          <span className="text-xs text-muted-foreground">Project scope</span>
+          <ToggleGroup
+            aria-label="Project scope"
+            value={[projectImport.projectScope]}
+            onValueChange={(next) => {
+              const value = next[0];
+              if (value === "personal" || value === "work") {
+                projectImport.setProjectScope(value);
+              }
+            }}
+          >
+            <Toggle value="personal">Personal</Toggle>
+            <Toggle value="work">Work</Toggle>
+          </ToggleGroup>
+        </div>
+      ) : null}
       {reviewing && canWrite ? (
         // The negative margin lines the list's checkboxes up with the one above it.
         <fieldset className="-mx-1.5 mt-1 min-w-0" disabled={isImporting}>
@@ -1411,6 +1431,9 @@ function useProjectImport({
     importedThreadCount?: number,
   ) => Promise<boolean>;
 }) {
+  const { activeScope } = useClientEnvironmentScope();
+  const [scopeOverride, setScopeOverride] = useState<"personal" | "work" | null>(null);
+  const projectScope = scopeOverride ?? activeScope;
   const writableEnvironments = useEnvironmentsWithScope(scans, AuthOrchestrationOperateScope);
   const createProject = useAtomCommand(projectEnvironment.create, { reportFailure: false });
   const importThreads = useAtomCommand(agentSessionImport, { reportFailure: false });
@@ -1565,6 +1588,7 @@ function useProjectImport({
               commandId: attempt.commandId,
               title: candidate.title,
               workspaceRoot: candidate.path,
+              scope: projectScope,
               createWorkspaceRootIfMissing: false,
               defaultModelSelection: null,
             },
@@ -1643,6 +1667,8 @@ function useProjectImport({
     selected,
     selectedKeys,
     setSelectedKeys,
+    projectScope,
+    setProjectScope: setScopeOverride,
     visibleImportError,
     runImport,
     finishAfterImport,

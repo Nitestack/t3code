@@ -3,6 +3,7 @@ import { describe, expect, it } from "@effect/vitest";
 import {
   OrchestrationDispatchCommandError,
   ProjectId,
+  type ProjectScope,
   projectCloneProgressSummary,
   type SourceControlCloneProtocol,
   SourceControlRepositoryError,
@@ -31,13 +32,21 @@ const startInput = {
 function makeHarness(options?: {
   readonly clone?: SourceControlRepositoryService.SourceControlRepositoryService["Service"]["cloneRepository"];
 }) {
-  const created: Array<{ projectId: ProjectId; workspaceRoot: string }> = [];
+  const created: Array<{
+    projectId: ProjectId;
+    workspaceRoot: string;
+    scope?: ProjectScope;
+  }> = [];
   const cloned: Array<ProjectId> = [];
   const discarded: Array<string> = [];
   const hooks: ProjectCloneTracker.ProjectCloneHooks = {
     createProject: (input) =>
       Effect.sync(() => {
-        created.push({ projectId: input.projectId, workspaceRoot: input.workspaceRoot });
+        created.push({
+          projectId: input.projectId,
+          workspaceRoot: input.workspaceRoot,
+          ...(input.scope === undefined ? {} : { scope: input.scope }),
+        });
       }),
     onCloned: (input) => Effect.sync(() => void cloned.push(input.projectId)),
   };
@@ -89,9 +98,11 @@ describe("ProjectCloneTracker", () => {
       );
       yield* Effect.yieldNow;
 
-      const result = yield* tracker.start(startInput, harness.hooks);
+      const result = yield* tracker.start({ ...startInput, scope: "work" }, harness.hooks);
       expect(result.cwd).toBe("/workspace/t3code");
-      expect(harness.created).toEqual([{ projectId, workspaceRoot: "/workspace/t3code" }]);
+      expect(harness.created).toEqual([
+        { projectId, workspaceRoot: "/workspace/t3code", scope: "work" },
+      ]);
 
       yield* Effect.yieldNow;
       const running = yield* tracker.get(projectId);

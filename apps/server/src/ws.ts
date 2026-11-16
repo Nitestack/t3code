@@ -2866,6 +2866,7 @@ export const layerWsRpc = (
                   title: project.title,
                   workspaceRoot: project.workspaceRoot,
                   createWorkspaceRootIfMissing: true,
+                  ...(project.scope === undefined ? {} : { scope: project.scope }),
                 })
                 .pipe(
                   Effect.asVoid,

@@ -3,7 +3,7 @@ import { AppText as Text, AppTextInput } from "../../components/ui/AppText";
 import { Button } from "../../components/ui/Button";
 import { ProjectFavicon } from "../../components/ProjectFavicon";
 import * as Dialog from "../../components/ui/Dialog";
-import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
+import { AuthOrchestrationOperateScope, type ProjectScope } from "@t3tools/contracts";
 import { planProjectRemoval } from "@t3tools/client-runtime/state/projects";
 import {
   isAtomCommandInterrupted,
@@ -178,7 +178,11 @@ function ProjectOverviewContent(props: {
         target.serverConfig.environment.capabilities.projectOrganization === true,
     );
   // One machine at a time, stopping at the first failure, as web does.
-  const organize = async (input: { readonly pinned?: boolean; readonly archived?: boolean }) => {
+  const organize = async (input: {
+    readonly pinned?: boolean;
+    readonly archived?: boolean;
+    readonly scope?: ProjectScope;
+  }) => {
     setIsOrganizing(true);
     for (const member of allMembers) {
       if (!readEnvironmentScope(member.environmentId, AuthOrchestrationOperateScope)) {
@@ -346,6 +350,20 @@ function ProjectOverviewContent(props: {
             ) : null}
           </View>
         </View>
+        <SettingsActionRow
+          icon="arrow.left.arrow.right"
+          label={representative.scope === "work" ? "Move to Personal" : "Move to Work"}
+          description={
+            offline
+              ? "Connect every machine with this project to change its scope."
+              : "Moves every checkout of this project between Personal and Work."
+          }
+          disabled={isOrganizing || offline}
+          loading={isOrganizing}
+          onPress={() =>
+            void organize({ scope: representative.scope === "work" ? "personal" : "work" })
+          }
+        />
       </SettingsSection>
 
       {canOrganize ? (

@@ -55,10 +55,14 @@ describe("chatThreadActions", () => {
         defaultProjectRef: workProjectRef,
         environmentScope: {
           activeScope: "work",
-          assignments: {
-            [workEnvironmentId]: "work",
-            [personalEnvironmentId]: "personal",
-          },
+          projects: [
+            { environmentId: workEnvironmentId, id: workProjectRef.projectId, scope: "work" },
+            {
+              environmentId: personalEnvironmentId,
+              id: ProjectId.make("same"),
+              scope: "personal",
+            },
+          ],
         },
         handleNewThread: async () => null,
       }),
