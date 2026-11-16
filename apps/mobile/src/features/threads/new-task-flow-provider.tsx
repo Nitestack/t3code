@@ -21,6 +21,7 @@ import {
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   MessageId,
+  resolveProjectProviderInstanceEnabled,
   repositoryGroupingKeyOf,
   ThreadId,
 } from "@t3tools/contracts";
@@ -230,6 +231,7 @@ export function NewTaskFlowProvider(
     /** Identifies the draft route this flow serves; a new key starts a fresh flow. */
     flowKey?: string;
     routeDraftId?: string;
+    carriedSelection?: ModelSelection;
   }>,
 ) {
   const allProjects = useProjects();
@@ -528,13 +530,47 @@ export function NewTaskFlowProvider(
     selectedProject?.id ?? null,
   );
 
+  const resolverProviders = selectedEnvironmentServerConfig
+    ? selectedEnvironmentServerConfig.providers.map((provider) => ({
+        ...provider,
+        enabled: selectedEnvironmentServerConfig.settings
+          ? resolveProjectProviderInstanceEnabled(
+              selectedEnvironmentServerConfig.settings,
+              selectedProject?.id ?? null,
+              provider.instanceId,
+            )
+          : provider.enabled,
+      }))
+    : [];
+  const orderedDefault = modelOptions.find((option) => {
+    const provider = resolverProviders.find(
+      (candidate) => candidate.instanceId === option.selection.instanceId,
+    );
+    return (
+      option.isDefault &&
+      !option.isUnavailable &&
+      provider !== undefined &&
+      provider.enabled &&
+      provider.installed &&
+      provider.availability !== "unavailable" &&
+      provider.status === "ready" &&
+      isModelSelectionInProjectScope({
+        scope: projectScope,
+        selection: option.selection,
+        providers: resolverProviders,
+      })
+    );
+  })?.selection;
+
   const scopedDefaultModel = selectedEnvironmentServerConfig
     ? resolveDraftModelSelectionForScope({
         scope: projectScope,
         explicitSelection: draftModelSelection,
+        carriedSelection: props.carriedSelection,
         stickySelection: stickyModelSelection,
         normalDefault: projectDefaultModelSelection,
-        providers: selectedEnvironmentServerConfig.providers,
+        orderedDefault,
+        providers: resolverProviders,
       })
     : (draftModelSelection ??
       [projectDefaultModelSelection, stickyModelSelection].find((selection) =>
@@ -559,8 +595,10 @@ export function NewTaskFlowProvider(
           exhaustedSelection: scopedDefaultModel,
           fallbackSelection: usageResolution.selection,
           normalDefault: projectDefaultModelSelection,
+          carriedSelection: props.carriedSelection,
           stickySelection: stickyModelSelection,
-          providers: selectedEnvironmentServerConfig.providers,
+          orderedDefault,
+          providers: resolverProviders,
         })
       : usageResolution.selection;
   const selectedModelKey = selectedModel

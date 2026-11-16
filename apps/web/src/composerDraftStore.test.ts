@@ -1777,6 +1777,16 @@ describe("composerDraftStore modelSelection", () => {
     expect(draftFor(threadId, TEST_ENVIRONMENT_ID)).toBeUndefined();
   });
 
+  it("clears a stale non-explicit model when no default can be resolved", () => {
+    const store = useComposerDraftStore.getState();
+    store.setModelSelection(threadRef, modelSelection(CODEX_DRIVER, "stale-model"));
+    store.setModelSelection(threadRef, null);
+
+    const cleared = draftFor(threadId, TEST_ENVIRONMENT_ID);
+    expect(cleared?.activeProvider ?? null).toBeNull();
+    expect(cleared?.modelSelectionByProvider ?? {}).toEqual({});
+  });
+
   it("marks picker writes explicit and seeding writes non-explicit", () => {
     const store = useComposerDraftStore.getState();
     store.setModelSelection(threadRef, modelSelection(CODEX_DRIVER, "gpt-5.4"));

@@ -415,6 +415,36 @@ describe("provider picker hierarchy", () => {
     expect(
       resolveDraftModelSelectionForScope({
         scope: "personal",
+        carriedSelection: selection("claudeAgent", "carried"),
+        normalDefault: selection("codex", "configured"),
+        stickySelection: selection("claudeAgent", "sticky"),
+        providers,
+      }),
+    ).toEqual(selection("claudeAgent", "carried"));
+
+    expect(
+      resolveDraftModelSelectionForScope({
+        scope: "personal",
+        carriedSelection: selection("codex", "not-ready-carry"),
+        normalDefault: selection("codex", "configured"),
+        providers: providers.map((provider) =>
+          provider.instanceId === "codex" ? { ...provider, status: "warning" } : provider,
+        ),
+      }),
+    ).toEqual(selection("claudeAgent", "claude-default"));
+
+    expect(
+      resolveDraftModelSelectionForScope({
+        scope: "personal",
+        carriedSelection: selection("aix-codex-team", "wrong-scope-carry"),
+        normalDefault: selection("codex", "configured"),
+        providers,
+      }),
+    ).toEqual(selection("codex", "configured"));
+
+    expect(
+      resolveDraftModelSelectionForScope({
+        scope: "personal",
         orderedDefault: selection("codex", "personal-default"),
         stickySelection: selection("claudeAgent", "sticky"),
         providers,
@@ -438,6 +468,17 @@ describe("provider picker hierarchy", () => {
         ),
       }),
     ).toEqual(selection("claudeAgent", "claude-default"));
+
+    expect(
+      resolveDraftModelSelectionAfterUsageLimitFallback({
+        scope: "personal",
+        exhaustedSelection: selection("codex", "exhausted"),
+        fallbackSelection: null,
+        carriedSelection: selection("codex", "exhausted"),
+        stickySelection: selection("claudeAgent", "sticky"),
+        providers,
+      }),
+    ).toEqual(selection("claudeAgent", "sticky"));
 
     expect(
       resolveDraftModelSelectionForScope({

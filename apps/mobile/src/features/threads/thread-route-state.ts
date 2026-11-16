@@ -8,6 +8,7 @@ export type NewTaskDraftRouteParams = {
   readonly cloning?: string | string[];
   readonly draftId?: string | string[];
   readonly incomingShareId?: string | string[];
+  readonly carriedSelection?: import("@t3tools/contracts").ModelSelection;
 };
 
 export function isDraftThreadRoute(
@@ -37,5 +38,7 @@ export function draftRouteIdentity(draft: NewTaskDraftRouteParams): string {
     draft.branch ?? null,
     draft.worktreePath ?? null,
     first(draft.incomingShareId),
+    draft.carriedSelection?.instanceId ?? null,
+    draft.carriedSelection?.model ?? null,
   ]);
 }

@@ -18,6 +18,7 @@ const testState = vi.hoisted(() => {
     defaultThreadEnvMode: "local" as "local" | "worktree" | null,
     newWorktreesStartFromOrigin: false,
     defaultModelSelection: null,
+    fallbackModelSelection: null as { readonly instanceId: string; readonly model: string } | null,
     defaultRuntimeMode: "full-access" as RuntimeMode,
   };
   let storedDraft: {
@@ -26,6 +27,12 @@ const testState = vi.hoisted(() => {
     readonly promotedTo: null;
     readonly threadId: string;
   } | null = null;
+  let sourceComposer: {
+    readonly activeProvider: string;
+    readonly modelSelectionByProvider: Record<string, { instanceId: string; model: string }>;
+    readonly modelSelectionExplicit?: boolean;
+  } | null = null;
+  let forceUsageFallback = false;
   let openDraftRoute: { readonly kind: "draft"; readonly draftId: string } | null = null;
   let sourceThreadRoute: { readonly kind: "server"; readonly threadRef: object } | null = null;
   let sourceThread: {
@@ -45,7 +52,7 @@ const testState = vi.hoisted(() => {
     }),
   };
   const draftStore = {
-    getComposerDraft: vi.fn((draftId: string) => ({ draftId })),
+    getComposerDraft: vi.fn((draftId: string) => sourceComposer ?? { draftId }),
     getDraftSessionByLogicalProjectKey: vi.fn(() => storedDraft),
     getDraftSession: vi.fn(() =>
       openDraftRoute === null
@@ -101,9 +108,26 @@ const testState = vi.hoisted(() => {
     get sourceThread() {
       return sourceThread;
     },
-    openServerThread(modelSelection: { readonly instanceId: string; readonly model: string }) {
+    get forceUsageFallback() {
+      return forceUsageFallback;
+    },
+    useUsageFallback() {
+      forceUsageFallback = true;
+    },
+    setFallbackSelection(selection: { readonly instanceId: string; readonly model: string }) {
+      targetSettings = { ...targetSettings, fallbackModelSelection: selection };
+    },
+    openServerThread(
+      modelSelection: { readonly instanceId: string; readonly model: string },
+      explicit = false,
+    ) {
       sourceThreadRoute = { kind: "server", threadRef: {} };
       sourceThread = { modelSelection, latestRun: null, itemCount: 0, runtime: null };
+      sourceComposer = {
+        activeProvider: modelSelection.instanceId,
+        modelSelectionByProvider: { [modelSelection.instanceId]: modelSelection },
+        ...(explicit ? { modelSelectionExplicit: true } : {}),
+      };
     },
     openEmptyDraft(draftId: string) {
       openDraftRoute = { kind: "draft", draftId };
@@ -128,6 +152,8 @@ const testState = vi.hoisted(() => {
       openDraftRoute = null;
       sourceThreadRoute = null;
       sourceThread = null;
+      sourceComposer = null;
+      forceUsageFallback = false;
       draftsWithUserText = new Set();
       projectRemoved = false;
       connectedEnvironmentIds = ["environment-primary", "environment-ssh"];
@@ -138,6 +164,7 @@ const testState = vi.hoisted(() => {
         defaultThreadEnvMode: workspaceDefaults.envMode,
         newWorktreesStartFromOrigin: workspaceDefaults.startFromOrigin,
         defaultModelSelection: null,
+        fallbackModelSelection: null,
         defaultRuntimeMode: "full-access",
       };
       router.state.location.href = "/";
@@ -233,6 +260,26 @@ vi.mock("@t3tools/shared/projectSettings", () => ({
     projectSettings: { settings: { defaultThreadEnvMode: "local" | "worktree" } };
   }) => input.projectSettings.settings.defaultThreadEnvMode,
 }));
+vi.mock("@t3tools/shared/usageLimits", () => ({
+  resolveNewThreadModelSelection: (input: {
+    readonly defaultSelection: { readonly instanceId: string; readonly model: string } | null;
+    readonly fallbackSelection: { readonly instanceId: string; readonly model: string } | null;
+    readonly providers: ReadonlyArray<{ readonly instanceId: string }>;
+  }) => {
+    if (!testState.forceUsageFallback || !input.fallbackSelection) {
+      return { selection: input.defaultSelection, fallback: null };
+    }
+    return {
+      selection: input.fallbackSelection,
+      fallback: {
+        provider: input.providers.find(
+          (provider) => provider.instanceId === input.defaultSelection?.instanceId,
+        ),
+        resetsAt: null,
+      },
+    };
+  },
+}));
 vi.mock("@tanstack/react-router", () => ({
   useParams: () => null,
   useRouter: () => testState.router,
@@ -257,9 +304,12 @@ vi.mock("../composerDraftStore", () => {
 });
 vi.mock("../lib/chatThreadActions", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/chatThreadActions")>()),
-  hasExplicitComposerModelSelection: () => false,
+  hasExplicitComposerModelSelection: (
+    draft: { readonly modelSelectionExplicit?: boolean } | null,
+  ) => draft?.modelSelectionExplicit === true,
 }));
 vi.mock("../providerInstances", () => ({
+  draftDefaultProvidersFor: (entries: typeof testState.providers) => entries,
   resolveDefaultProviderModelSelection: () => null,
   resolveProjectDefaultProviderModelSelection: (entries: typeof testState.providers) => {
     const provider = entries.find(
@@ -383,6 +433,44 @@ describe.each([
 });
 
 describe("useNewThreadHandler", () => {
+  it("does not carry an exhausted explicit source model into a new draft", async () => {
+    testState.reset(null);
+    testState.providers = [
+      {
+        instanceId: "claudeAgent",
+        driver: "claudeAgent",
+        enabled: true,
+        installed: true,
+        status: "ready",
+        models: [{ slug: "carried-model" }],
+      },
+      {
+        instanceId: "codex",
+        driver: "codex",
+        enabled: true,
+        installed: true,
+        status: "ready",
+        models: [{ slug: "fallback-model", isDefault: true }],
+      },
+    ];
+    testState.setFallbackSelection({ instanceId: "codex", model: "fallback-model" });
+    testState.useUsageFallback();
+    testState.openServerThread({ instanceId: "claudeAgent", model: "carried-model" }, true);
+
+    const pending = useNewThreadHandler()({
+      environmentId: "environment-ssh",
+      projectId: "project-remote",
+    } as never);
+    testState.completeProjectFileRead(null);
+    await pending;
+
+    expect(testState.draftStore.setModelSelection).toHaveBeenCalledWith(
+      "draft-delayed",
+      { instanceId: "codex", model: "fallback-model" },
+      { replaceOptions: true },
+    );
+  });
+
   it("carries the current route model into a new draft when its scope matches", async () => {
     testState.reset(null);
     testState.providers = [

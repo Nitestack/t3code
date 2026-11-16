@@ -52,7 +52,10 @@ import { DraftProjectName } from "./DraftProjectName";
 import { DraftHeroProjectHeading } from "./DraftHeroProjectHeading";
 import { TriageDraftHero } from "./TriageDraftHero";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
-import { resolveProjectDefaultProviderModelSelection } from "../../providerInstances";
+import {
+  draftDefaultProvidersFor,
+  resolveProjectDefaultProviderModelSelection,
+} from "../../providerInstances";
 import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
 import {
   resolveDraftModelSelectionAfterUsageLimitFallback,
@@ -211,6 +214,9 @@ export function DraftHeroHeadline({
             .defaultModelSelection
         : project.defaultModelSelection;
       const providers = providersByEnvironment.get(project.environmentId) ?? [];
+      const resolverProviders = environmentSettings
+        ? draftDefaultProvidersFor(providers, environmentSettings, project.id)
+        : providers;
       const scope = resolveModelPickerProjectScope(
         project.scope,
         environmentConfig?.environment?.capabilities?.projectScope === true,
@@ -230,7 +236,7 @@ export function DraftHeroHeadline({
         normalDefault,
         orderedDefault,
         stickySelection: stickySelectionForScope,
-        providers,
+        providers: resolverProviders,
       });
       const fallbackResolution = resolveNewThreadModelSelection({
         defaultSelection: initialDefaultSelection,
@@ -248,13 +254,15 @@ export function DraftHeroHeadline({
             normalDefault,
             orderedDefault,
             stickySelection: stickySelectionForScope,
-            providers,
+            providers: resolverProviders,
           })
         : initialDefaultSelection;
       if (defaultModelSelection) {
         setModelSelection(draftId, defaultModelSelection, {
           replaceOptions: true,
         });
+      } else {
+        setModelSelection(draftId, null);
       }
     }
   };
