@@ -161,6 +161,11 @@ export function aixDesiredInstances(
 ): Map<ProviderInstanceId, ProviderInstanceConfig> {
   const desired = new Map<ProviderInstanceId, ProviderInstanceConfig>();
   for (const profile of profiles) {
+    const budgetOwner = profile.routes.has(OPENCODE)
+      ? OPENCODE
+      : profile.routes.has(CLAUDE_CODE)
+        ? CLAUDE_CODE
+        : undefined;
     for (const [driver, models] of profile.routes) {
       const instanceId = aixInstanceId(driver, profile.name);
       if (instanceId === undefined || models.length === 0) continue;
@@ -172,6 +177,7 @@ export function aixDesiredInstances(
         environment: [{ name: AIX_PROFILE_VARIABLE, value: profile.name, sensitive: false }],
         config: {
           aixProfile: profile.name,
+          ...(driver === budgetOwner && driver === CLAUDE_CODE ? { aixBudgetOwner: true } : {}),
           customModels: models.map((model) => ({
             slug: customModelSlug(driver, model.id),
             name: model.displayName,

@@ -186,6 +186,7 @@ function PoolWindowCard({
 }) {
   const navigation = useNavigation();
   const [barWidth, setBarWidth] = useState(0);
+  const profileName = pool.members[0]?.account.profileName;
   const budgetWindow = pool.members.length === 1 ? pool.members[0]?.window : undefined;
   const amounts = budgetWindow?.amounts;
   const leftUsd = budgetWindow ? budgetLeftUsd(budgetWindow) : undefined;
@@ -208,7 +209,9 @@ function PoolWindowCard({
       <View className={wide ? "gap-1" : "flex-row items-start justify-between gap-3"}>
         <View className="gap-1">
           {label !== null ? (
-            <Text className="text-sm font-t3-medium text-foreground">{label ?? pool.label}</Text>
+            <Text className="text-sm font-t3-medium text-foreground">
+              {profileName ? (label ?? "Gateway budget") : (label ?? pool.label)}
+            </Text>
           ) : null}
           {amounts && leftUsd !== undefined ? (
             <>
@@ -627,7 +630,9 @@ export function UsageLimitAccountScreen({ route }: AccountScreenProps) {
               ) : null}
             </View>
             <View className="gap-3 rounded-[24px] border-continuous bg-grouped-card p-4">
-              <Text className="text-sm font-t3-medium text-foreground">{window.label}</Text>
+              <Text className="text-sm font-t3-medium text-foreground">
+                {account.profileName ? "Gateway budget" : window.label}
+              </Text>
               <Text className="text-3xl font-t3-bold tabular-nums text-foreground">
                 {remainingPercent(window)}% left
               </Text>

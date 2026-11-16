@@ -561,6 +561,7 @@ function PoolWindowCard({
   readonly description?: string | undefined;
 }) {
   const nextRefill = pool.resets.find((reset) => reset.restoresPercent > 0);
+  const profileName = pool.members[0]?.account.profileName;
   const budgetWindow = pool.members.length === 1 ? pool.members[0]?.window : undefined;
   const amounts = budgetWindow?.amounts;
   const leftUsd = budgetWindow ? budgetLeftUsd(budgetWindow) : undefined;
@@ -568,7 +569,9 @@ function PoolWindowCard({
     <div className="grid items-center gap-x-6 gap-y-3 rounded-lg border border-border/60 p-4 md:grid-cols-[11rem_minmax(0,1fr)]">
       <div className="flex flex-col gap-1">
         {label !== null ? (
-          <span className="text-sm font-medium text-foreground">{label ?? pool.label}</span>
+          <span className="text-sm font-medium text-foreground">
+            {profileName ? (label ?? "Gateway budget") : (label ?? pool.label)}
+          </span>
         ) : null}
         {amounts && leftUsd !== undefined ? (
           <>

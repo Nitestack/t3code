@@ -50,7 +50,13 @@ export function useUsageLimitsPanel(input: {
       : null;
   // Intercept /usage-limits only when Limits has selected-provider data.
   const offered =
-    providerDriver !== null && hasProviderUsageLimits(providerDriver, providers, sources);
+    providerDriver !== null &&
+    hasProviderUsageLimits(
+      providerDriver,
+      providers,
+      sources,
+      providers.find((provider) => provider.instanceId === providerInstanceId)?.aixProfile,
+    );
 
   const open = useStableCallback(() => {
     const now = Date.now();

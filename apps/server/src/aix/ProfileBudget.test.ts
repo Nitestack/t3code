@@ -381,22 +381,36 @@ const provider = (overrides: Partial<ServerProvider> = {}): ServerProvider =>
     ...overrides,
   }) as ServerProvider;
 
-it.effect("replaces only an enabled aix-managed instance's usage limits", () =>
+it.effect("replaces usage limits only on an enabled Claude budget owner", () =>
   Effect.gen(function* () {
     const http = fakeHttp(() => Response.json({ info: { spend: 199.1, max_budget: 200 } }));
     const { service } = yield* budgetFor(http);
-    const run = (profileName: string | undefined, snapshot: ServerProvider) =>
-      ProfileBudget.withAixProfileBudget(profileName)(snapshot).pipe(
-        Effect.provideService(ProfileBudget.AixProfileBudget, service),
-      );
+    const run = (
+      profileName: string | undefined,
+      isBudgetOwner: boolean,
+      snapshot: ServerProvider,
+    ) =>
+      ProfileBudget.withAixProfileBudget(
+        profileName,
+        isBudgetOwner,
+      )(snapshot).pipe(Effect.provideService(ProfileBudget.AixProfileBudget, service));
 
     const manual = provider();
-    expect(yield* run(undefined, manual)).toBe(manual);
+    expect(yield* run(undefined, false, manual)).toBe(manual);
     const disabled = provider({ enabled: false });
-    expect(yield* run("nim4", disabled)).toBe(disabled);
+    expect(yield* run("nim4", true, disabled)).toBe(disabled);
     expect(http.requests).toEqual([]);
 
-    const managed = yield* run("nim4", provider({ driver: ProviderDriverKind.make("opencode") }));
+    const codex = provider();
+    expect(yield* run("nim4", true, codex)).toBe(codex);
+    const notOwner = provider({ driver: ProviderDriverKind.make("claudeAgent") });
+    expect(yield* run("nim4", false, notOwner)).toBe(notOwner);
+
+    const managed = yield* run(
+      "nim4",
+      true,
+      provider({ driver: ProviderDriverKind.make("claudeAgent") }),
+    );
     expect(managed.usageLimits?.profileName).toBe("nim4");
     expect(managed.usageLimits?.windows[0]?.id).toMatch(
       /^aix-budget:nim4#credential:[a-f0-9]{64}$/u,
@@ -405,9 +419,12 @@ it.effect("replaces only an enabled aix-managed instance's usage limits", () =>
 
     const failedHttp = fakeHttp(() => new Response(null, { status: 500 }));
     const failedBudget = yield* budgetFor(failedHttp);
-    const failed = yield* ProfileBudget.withAixProfileBudget("home")(
-      provider({ driver: ProviderDriverKind.make("opencode") }),
-    ).pipe(Effect.provideService(ProfileBudget.AixProfileBudget, failedBudget.service));
+    const failed = yield* ProfileBudget.withAixProfileBudget(
+      "home",
+      true,
+    )(provider({ driver: ProviderDriverKind.make("claudeAgent") })).pipe(
+      Effect.provideService(ProfileBudget.AixProfileBudget, failedBudget.service),
+    );
     expect(failed.usageLimits).toMatchObject({
       profileName: "home",
       windows: [],
@@ -416,29 +433,28 @@ it.effect("replaces only an enabled aix-managed instance's usage limits", () =>
   }),
 );
 
-it.effect("keeps aix budgets on the OpenCode instance and identifies the profile", () =>
+it.effect("applies the fallback budget only to the designated Claude instance", () =>
   Effect.gen(function* () {
     const http = fakeHttp(() => Response.json({ info: { spend: 16, max_budget: 100 } }));
     const { service } = yield* budgetFor(http);
     const run = (snapshot: ServerProvider) =>
-      ProfileBudget.withAixProfileBudget("adCare")(snapshot).pipe(
-        Effect.provideService(ProfileBudget.AixProfileBudget, service),
-      );
+      ProfileBudget.withAixProfileBudget(
+        "adCare",
+        true,
+      )(snapshot).pipe(Effect.provideService(ProfileBudget.AixProfileBudget, service));
 
     const codex = provider({ driver: ProviderDriverKind.make("codex") });
     const claude = provider({ driver: ProviderDriverKind.make("claudeAgent") });
     expect(yield* run(codex)).toBe(codex);
-    expect(yield* run(claude)).toBe(claude);
-
-    const opencode = yield* run(provider({ driver: ProviderDriverKind.make("opencode") }));
-    expect(opencode.usageLimits?.profileName).toBe("adCare");
-    expect(opencode.usageLimits?.windows[0]).toMatchObject({
+    const claudeBudget = yield* run(claude);
+    expect(claudeBudget.usageLimits?.profileName).toBe("adCare");
+    expect(claudeBudget.usageLimits?.windows[0]).toMatchObject({
       label: "Gateway budget · adCare",
       usedPercent: 16,
     });
-    expect(opencode.usageLimits?.windows[0]?.id).toMatch(
-      /^aix-budget:adCare#credential:[a-f0-9]{64}$/u,
-    );
+
+    const opencode = provider({ driver: ProviderDriverKind.make("opencode") });
+    expect(yield* run(opencode)).toBe(opencode);
     expect(http.requests).toHaveLength(1);
   }),
 );

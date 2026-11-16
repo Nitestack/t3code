@@ -113,7 +113,7 @@ export const make = Effect.gen(function* () {
             ?.supportsTextGeneration === false ||
           (selected.status === "error" &&
             (!selected.installed || selected.auth.status === "unauthenticated"))));
-    if (unusable || exhaustedUsageWindow(selected, now, selection.model)) {
+    if (unusable || exhaustedUsageWindow(selected, now, selection.model, snapshots)) {
       const settings = yield* serverSettings.getSettings.pipe(
         Effect.mapError(
           (cause) =>
@@ -139,7 +139,7 @@ export const make = Effect.gen(function* () {
               isProviderAvailable(provider) &&
               isProviderTextGenerationCapable(provider) &&
               (operation !== "generateReviewGuide" || INVESTIGATING_DRIVERS.has(driver)) &&
-              !exhaustedUsageWindow(provider, now, model)
+              !exhaustedUsageWindow(provider, now, model, snapshots)
             );
           },
           { defaultModelSelection: settings.defaultModelSelection },

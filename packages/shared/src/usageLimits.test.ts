@@ -31,10 +31,11 @@ import {
 
 const now = Date.parse("2026-09-03T12:00:00.000Z");
 
-it("reads the profile name from a credential-specific aix budget window id", () => {
-  expect(aixProfileNameFromWindowId(`aix-budget:adCare#credential:${"a".repeat(64)}`)).toBe(
-    "adCare",
-  );
+it.each([
+  [`aix-budget:adCare#credential:${"a".repeat(64)}`, "adCare"],
+  ["aix-budget:Personal", "Personal"],
+])("reads the aix profile name from window id %s", (id, profileName) => {
+  expect(aixProfileNameFromWindowId(id)).toBe(profileName);
 });
 
 const window = {
@@ -89,6 +90,26 @@ describe("new thread model fallback", () => {
     ["missing default", { defaultSelection: null }, null],
     ["no fallback", { fallbackSelection: null }, selection],
     ["expired window", { now: Date.parse("2026-09-04T00:00:00Z") }, selection],
+    [
+      "exhausted profile budget on another driver",
+      {
+        providers: [
+          provider({ instanceId: selection.instanceId, aixProfile: "work" }),
+          available,
+          provider({
+            instanceId: ProviderInstanceId.make("aix-claudeAgent-work"),
+            driver: ProviderDriverKind.make("claudeAgent"),
+            aixProfile: "work",
+            usageLimits: {
+              checkedAt: "2026-09-03T11:30:00.000Z",
+              profileName: "work",
+              windows: [{ ...window, id: "aix-budget:work", usedPercent: 100 }],
+            },
+          }),
+        ],
+      },
+      fallback,
+    ],
     [
       "environment disabled",
       {
@@ -1674,20 +1695,23 @@ describe("/usage-limits", () => {
     const selected = provider({
       instanceId: ProviderInstanceId.make("codex-work"),
       driver: ProviderDriverKind.make("codex"),
-      usageLimits: {
-        checkedAt: "2026-09-03T11:00:00.000Z",
-        profileName: "work",
-        windows: [{ ...window, id: "aix-budget:work", label: "Gateway budget", usedPercent: 40 }],
-      },
+      aixProfile: "work",
     });
-    const latestFailure = provider({
+    const latestBudget = provider({
       instanceId: ProviderInstanceId.make("claude-work"),
       driver: ProviderDriverKind.make("claudeAgent"),
+      aixProfile: "work",
       usageLimits: {
-        checkedAt: "2026-09-03T11:45:00.000Z",
+        checkedAt: "2026-09-03T11:30:00.000Z",
         profileName: "work",
-        windows: [],
-        unavailable: { reason: "probeFailed", message: "Gateway budget unavailable." },
+        windows: [
+          {
+            ...window,
+            id: `aix-budget:work#credential:${"a".repeat(64)}`,
+            label: "Gateway budget · work",
+            amounts: { currency: "USD" as const, spent: 16, total: 100 },
+          },
+        ],
       },
     });
     const nativeCodex = provider({
@@ -1698,6 +1722,30 @@ describe("/usage-limits", () => {
       },
     });
 
+    const budgetReport = collectProviderUsageLimits(
+      selected.instanceId,
+      [selected, latestBudget, nativeCodex],
+      [],
+      now,
+    );
+    expect(
+      budgetReport?.accounts.find((account) => account.id === "claude-work")?.limits.windows[0],
+    ).toMatchObject({
+      id: `aix-budget:work#credential:${"a".repeat(64)}`,
+      amounts: { currency: "USD", spent: 16, total: 100 },
+    });
+
+    const latestFailure = provider({
+      instanceId: ProviderInstanceId.make("claude-work"),
+      driver: ProviderDriverKind.make("claudeAgent"),
+      aixProfile: "work",
+      usageLimits: {
+        checkedAt: "2026-09-03T11:45:00.000Z",
+        profileName: "work",
+        windows: [],
+        unavailable: { reason: "probeFailed", message: "Gateway budget unavailable." },
+      },
+    });
     const report = collectProviderUsageLimits(
       selected.instanceId,
       [selected, latestFailure, nativeCodex],
@@ -1705,7 +1753,7 @@ describe("/usage-limits", () => {
       now,
     );
 
-    expect(report?.accounts.find((account) => account.id === "codex-work")?.limits).toEqual(
+    expect(report?.accounts.find((account) => account.id === "claude-work")?.limits).toEqual(
       latestFailure.usageLimits,
     );
     expect(

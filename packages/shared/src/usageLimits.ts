@@ -31,8 +31,14 @@ export function exhaustedUsageWindow(
   provider: ServerProvider | undefined,
   now: number,
   model?: string,
+  providers?: readonly ServerProvider[],
 ) {
-  const windows = provider?.usageLimits?.windows ?? [];
+  const profileName = provider?.aixProfile;
+  const latestProfile =
+    profileName && providers
+      ? latestAixProfileReportsForProviders(providers).get(profileName)
+      : undefined;
+  const windows = latestProfile?.limits.windows ?? provider?.usageLimits?.windows ?? [];
   const exhausted = windows.filter(
     (window) =>
       (window.usedPercent ?? 0) >= 100 &&
@@ -92,7 +98,7 @@ export function resolveNewThreadModelSelection(input: {
   const unchanged = { selection, fallback: null };
   if (input.explicitSelection || !selection || !input.fallbackSelection) return unchanged;
   const provider = input.providers.find((entry) => entry.instanceId === selection.instanceId);
-  const window = exhaustedUsageWindow(provider, input.now, selection.model);
+  const window = exhaustedUsageWindow(provider, input.now, selection.model, input.providers);
   const fallback = input.providers.find(
     (entry) => entry.instanceId === input.fallbackSelection?.instanceId,
   );
@@ -103,7 +109,7 @@ export function resolveNewThreadModelSelection(input: {
     !fallback.installed ||
     fallback.auth.status === "unauthenticated" ||
     !isProviderAvailable(fallback) ||
-    exhaustedUsageWindow(fallback, input.now, input.fallbackSelection.model) ||
+    exhaustedUsageWindow(fallback, input.now, input.fallbackSelection.model, input.providers) ||
     (input.settings &&
       !resolveProjectProviderInstanceEnabled(
         input.settings,
@@ -959,9 +965,15 @@ export function hasProviderUsageLimits(
   driver: ServerProvider["driver"],
   providers: readonly ServerProvider[],
   sources: UsageLimitSourceSnapshots,
+  profileName?: string,
 ): boolean {
   return (
-    providersWithLimits(providers).some((provider) => provider.driver === driver) ||
+    providersWithLimits(providers).some(
+      (provider) =>
+        provider.driver === driver ||
+        (profileName !== undefined &&
+          (provider.aixProfile ?? aixProfileName(provider.usageLimits)) === profileName),
+    ) ||
     sources.some(
       (source) =>
         source.accounts.some((account) => account.driver === driver) ||
@@ -1027,7 +1039,11 @@ export function collectProviderUsageLimits(
   now: number,
 ): UsageLimitsReport | null {
   const selected = providers.find((provider) => provider.instanceId === instanceId);
-  if (!selected || !hasProviderUsageLimits(selected.driver, providers, sources)) return null;
+  if (
+    !selected ||
+    !hasProviderUsageLimits(selected.driver, providers, sources, selected.aixProfile)
+  )
+    return null;
   const resolveKey = accountKeyResolver([
     ...providers.filter((provider) => provider.enabled).map(nativeReport),
     ...sources.flatMap((source) => source.accounts),
@@ -1040,22 +1056,24 @@ export function collectProviderUsageLimits(
   const selectedDriverProfiles = new Map<string, ServerProvider>();
   for (const provider of providersWithLimits(providers)) {
     if (provider.driver !== selected.driver) continue;
-    const profileName = aixProfileName(provider.usageLimits);
+    const profileName = provider.aixProfile ?? aixProfileName(provider.usageLimits);
     if (profileName && !selectedDriverProfiles.has(profileName)) {
       selectedDriverProfiles.set(profileName, provider);
     }
   }
-  const selectedProfileName = aixProfileName(selected.usageLimits);
+  const selectedProfileName = selected.aixProfile ?? aixProfileName(selected.usageLimits);
   const latestProfiles = latestAixProfileReportsForProviders(providers);
   if (selectedProfileName) selectedDriverProfiles.set(selectedProfileName, selected);
+  const addedProfiles = new Set<string>();
   for (const provider of providersWithLimits(providers)) {
     if (!provider.usageLimits) continue;
-    const profileName = aixProfileName(provider.usageLimits);
+    const profileName = provider.aixProfile ?? aixProfileName(provider.usageLimits);
     if (profileName) {
-      const selectedProfileProvider = selectedDriverProfiles.get(profileName);
+      if (!selectedDriverProfiles.has(profileName) || addedProfiles.has(profileName)) continue;
       const latestProfile = latestProfiles.get(profileName);
-      if (provider !== selectedProfileProvider || !latestProfile) continue;
-      const snapshot = { provider, limits: latestProfile.limits };
+      if (!latestProfile) continue;
+      addedProfiles.add(profileName);
+      const snapshot = { provider: latestProfile.provider, limits: latestProfile.limits };
       nativeByAccount.set(`aix-profile:${profileName}`, { usage: snapshot, credits: null });
       continue;
     }
@@ -1095,6 +1113,7 @@ export function collectProviderUsageLimits(
     usage: { provider, limits },
     credits,
   } of native) {
+    const profileName = provider.aixProfile ?? aixProfileName(limits);
     const key = resolveKey(nativeReport(provider));
     const hubCredits = sources
       .flatMap((source) => source.accounts.map((account) => ({ source, account })))
@@ -1121,7 +1140,9 @@ export function collectProviderUsageLimits(
     accounts.push({
       id: provider.instanceId,
       driver: provider.driver,
-      label: `${provider.displayName?.trim() || String(provider.driver)} [${provider.instanceId}]`,
+      label: profileName
+        ? provider.aixProfileLabel?.trim() || profileName
+        : `${provider.displayName?.trim() || String(provider.driver)} [${provider.instanceId}]`,
       ...(provider.auth.label ? { plan: provider.auth.label } : {}),
       instanceId: provider.instanceId,
       resetCreditInput:
@@ -1132,7 +1153,11 @@ export function collectProviderUsageLimits(
               creditId: hubCreditId,
             }
           : { instanceId: credits?.provider.instanceId ?? provider.instanceId },
-      ...(provider.displayName ? { displayName: provider.displayName } : {}),
+      ...(profileName
+        ? { displayName: provider.aixProfileLabel?.trim() || profileName }
+        : provider.displayName
+          ? { displayName: provider.displayName }
+          : {}),
       ...(provider.accentColor ? { accentColor: provider.accentColor } : {}),
       ...(provider.auth.email ? { email: provider.auth.email } : {}),
       limits: shownCredits ? { ...limits, resetCredits: shownCredits } : limits,

@@ -256,11 +256,14 @@ export const layer = Layer.effect(
   }),
 );
 
-/** Keeps each profile budget on OpenCode, whose window IDs keep profiles separate upstream. */
+/** Attaches a profile budget to its designated Claude fallback instance when OpenCode is absent. */
 export const withAixProfileBudget =
-  (profileName: string | undefined) =>
+  (profileName: string | undefined, isBudgetOwner = false) =>
   (provider: ServerProvider): Effect.Effect<ServerProvider> =>
-    profileName === undefined || !provider.enabled || provider.driver !== "opencode"
+    profileName === undefined ||
+    !isBudgetOwner ||
+    !provider.enabled ||
+    provider.driver !== "claudeAgent"
       ? Effect.succeed(provider)
       : Effect.serviceOption(AixProfileBudget).pipe(
           Effect.flatMap((service) =>
