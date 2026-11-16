@@ -14,7 +14,7 @@ import { useModelPickerHierarchy } from "./ModelPickerHierarchyContext";
 
 export function ModelPickerHierarchyFooterControls() {
   const hierarchy = useModelPickerHierarchy();
-  if (!hierarchy) return null;
+  if (!hierarchy || hierarchy.profiles.length === 0) return null;
   const selectedProfile = hierarchy.profiles.find((profile) => profile.id === hierarchy.profileId);
   return (
     <div className="flex min-w-0 items-center gap-2" data-model-picker-hierarchy-controls>
@@ -30,7 +30,7 @@ export function ModelPickerHierarchyFooterControls() {
         <Toggle value="personal">Personal</Toggle>
         <Toggle value="work">Work</Toggle>
       </ToggleGroup>
-      {hierarchy.scope === "work" && hierarchy.profiles.length > 0 ? (
+      {hierarchy.scope === "work" ? (
         <Menu>
           <MenuTrigger
             render={
