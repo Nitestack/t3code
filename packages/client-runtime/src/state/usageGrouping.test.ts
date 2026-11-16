@@ -13,6 +13,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   filterLimitPresentationsByGroup,
   filterUsageBucketsByScope,
+  filterUsageSummaryByScope,
   groupLimitAccounts,
   resolveUsageLimitGroup,
   usageLimitGroupForProvider,
@@ -84,6 +85,28 @@ describe("usage limit grouping", () => {
     expect(usageScopeGroupsInBuckets(buckets)).toEqual(new Set(["personal", "work"]));
     expect(filterUsageBucketsByScope(buckets, "personal")).toEqual([buckets[0]]);
     expect(filterUsageBucketsByScope(buckets, "work")).toEqual([buckets[1]]);
+    const summary = {
+      buckets,
+      sources: [
+        {
+          fingerprint: {
+            hostId: "host",
+            provider: "claude" as const,
+            resolvedHomePath: "/.claude/projects",
+            volumeId: "volume",
+          },
+          status: "ok" as const,
+          scannedFiles: 2,
+          skippedFiles: 0,
+          malformedRecords: 0,
+          distinctSessions: 2,
+          distinctSessionsByScope: { personal: 1, work: 1 },
+          message: null,
+        },
+      ],
+    };
+    expect(filterUsageSummaryByScope(summary, "work").sources[0]?.distinctSessions).toBe(1);
+    expect(filterUsageSummaryByScope(summary, "personal").sources[0]?.distinctSessions).toBe(1);
   });
 
   it("classifies AIX profile metadata as Work regardless of its display name", () => {

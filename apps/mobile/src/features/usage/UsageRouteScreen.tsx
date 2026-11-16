@@ -56,7 +56,7 @@ import { toggleUsageEnvironment } from "./usageEnvironmentSelection";
 import { useRefreshLimits } from "./UsageLimitsSection";
 import { UsageLimitsSection } from "./UsageLimitsPooled";
 import {
-  filterUsageBucketsByScope,
+  filterUsageSummaryByScope,
   resolveUsageLimitGroup,
   usageLimitGroupsInPresentations,
   usageScopeGroupsInBuckets,
@@ -148,10 +148,7 @@ function UsageScreen(props: {
               {
                 environmentId,
                 label,
-                summary: {
-                  ...summary,
-                  buckets: filterUsageBucketsByScope(summary.buckets, scope),
-                },
+                summary: filterUsageSummaryByScope(summary, scope),
               },
             ],
       ),

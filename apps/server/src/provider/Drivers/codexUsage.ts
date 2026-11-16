@@ -87,6 +87,8 @@ const CodexUnreportedRequest = Schema.Struct({
 });
 type CodexUnreportedRequest = typeof CodexUnreportedRequest.Type;
 type CodexRequestAttribution = Omit<CodexUnreportedRequest, "usage">;
+const codexUsageScope = (state: CodexScanState) =>
+  state.modelProvider === "t3_aix" ? "work" : "personal";
 
 // An interrupted turn can end before a snapshot reports its last request. Bill those requests only
 // when the `token_usage_record`s since the previous snapshot explain the whole gap; `last` is the
@@ -432,7 +434,7 @@ function codexAttribution(state: CodexScanState, timestampMs: number): CodexRequ
     turnId: state.turnId,
     speed: state.speed,
     sawThreadSettings: state.sawThreadSettings,
-    scope: state.modelProvider === "t3_aix" ? "work" : "personal",
+    scope: codexUsageScope(state),
   };
 }
 
@@ -458,7 +460,7 @@ function codexRequestRecord(
 
   return {
     provider: "codex",
-    scope: scope ?? (state.modelProvider === "t3_aix" ? "work" : "personal"),
+    scope: scope ?? codexUsageScope(state),
     timestampMs,
     model,
     sessionId: state.sessionId,

@@ -11,8 +11,6 @@ import {
   type UsageRecord,
 } from "@t3tools/provider-core/server/usage";
 import * as HostProcess from "@t3tools/shared/HostProcess";
-import * as ServerConfig from "../../config.ts";
-import { resolveClaudeAixConfigDir } from "./ClaudeHome.ts";
 
 // Claude Code uses this model for local placeholders that never reached the API.
 export const CLAUDE_SYNTHETIC_MODEL = "<synthetic>";
@@ -134,10 +132,7 @@ export const claudeUsageFormat: TranscriptUsageFormat<void> = {
   parseProjected: (projected) => parseClaudeRecord(projected),
 };
 
-export const claudeUsageReader: ProviderUsageReader<
-  ClaudeSettings,
-  Path.Path | ServerConfig.ServerConfig
-> = {
+export const claudeUsageReader: ProviderUsageReader<ClaudeSettings, Path.Path> = {
   kind: "transcripts",
   provider: "claude",
   format: claudeUsageFormat,
@@ -145,16 +140,10 @@ export const claudeUsageReader: ProviderUsageReader<
     if (config === undefined) return [];
     const path = yield* Path.Path;
     const homeDirectory = yield* HostProcess.HomeDirectory;
-    if (config.aixProfile !== undefined) {
-      const { stateDir } = yield* ServerConfig.ServerConfig;
-      const configDir = yield* resolveClaudeAixConfigDir(stateDir, config.aixProfile);
-      const dir = path.join(configDir, "projects");
-      return [{ dir, scope: "work" }];
-    }
     const configured = config.homePath.trim();
     const home = configured
       ? expandHomePath(configured, homeDirectory)
       : environment.CLAUDE_CONFIG_DIR?.trim() || path.join(homeDirectory, ".claude");
-    return [{ dir: path.resolve(home, "projects"), scope: "personal" }];
+    return [{ dir: path.resolve(home, "projects") }];
   }),
 };

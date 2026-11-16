@@ -104,6 +104,10 @@ export const UsageSource = Schema.Struct({
   malformedRecords: NonNegativeInt,
   /** Total this count; bucket counts double-count sessions spanning days or models. */
   distinctSessions: NonNegativeInt,
+  /** Optional per-scope counts let clients scope the headline without summing bucket counts. */
+  distinctSessionsByScope: Schema.optional(
+    Schema.Struct({ personal: NonNegativeInt, work: NonNegativeInt }),
+  ),
   message: Schema.NullOr(TrimmedNonEmptyString),
   /** Cached response during refresh; repeat with awaitRefresh for fresh data. */
   refreshing: Schema.optionalKey(Schema.Literal(true)),

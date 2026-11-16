@@ -527,17 +527,7 @@ describe("UsageService", () => {
     Effect.gen(function* () {
       const { home, settings } = yield* setup;
       const codexSessions = NodePath.join(home, "codex", "sessions");
-      const claudeAixProjects = NodePath.join(
-        home,
-        "usage-aix-classification",
-        "userdata",
-        "providers",
-        "claude",
-        "aix",
-        "personal",
-        "projects",
-        "project",
-      );
+      const claudeProjects = NodePath.join(home, "claude", "projects", "project");
       yield* Effect.promise(async () => {
         await NodeFSP.mkdir(codexSessions, { recursive: true });
         for (const [name, modelProvider] of [
@@ -565,23 +555,47 @@ describe("UsageService", () => {
               .join("\n") + "\n",
           );
         }
-        await NodeFSP.mkdir(claudeAixProjects, { recursive: true });
+        await NodeFSP.mkdir(claudeProjects, { recursive: true });
         await NodeFSP.writeFile(
-          NodePath.join(claudeAixProjects, "session.jsonl"),
-          claudeLine(9, 7),
+          NodePath.join(claudeProjects, "claude-aix-session.jsonl"),
+          claudeLine(9, 7, "claude-fable-5", "claude-aix-session"),
+        );
+        await NodeFSP.writeFile(
+          NodePath.join(claudeProjects, "claude-personal-session.jsonl"),
+          claudeLine(10, 11, "claude-fable-5", "claude-personal-session"),
         );
       });
       const scopedSettings = {
         ...settings,
         providerInstances: {
           ...settings.providerInstances,
-          [ProviderInstanceId.make("claude-aix")]: {
+          [ProviderInstanceId.make("aix-claudeAgent-personal")]: {
             driver: ProviderDriverKind.make("claudeAgent"),
             config: { aixProfile: "personal" },
           },
         },
       };
       const summary = yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* sql`INSERT INTO orchestration_v2_projection_provider_threads (
+          provider_thread_id, thread_id, owner_node_id, provider, driver,
+          provider_instance_id, provider_session_id, status, first_run_ordinal,
+          last_run_ordinal, updated_at, payload_json
+        ) VALUES (
+          'aix-provider-thread', 'aix-thread', NULL, 'aix-claudeAgent-personal', 'claudeAgent',
+          'aix-claudeAgent-personal', 'aix-provider-session', 'idle', 1,
+          1, '2026-08-01T10:00:00.000Z', ${encodeUnknownJsonString({
+            id: "aix-provider-thread",
+            driver: "claudeAgent",
+            providerInstanceId: "aix-claudeAgent-personal",
+            providerSessionId: "aix-provider-session",
+            nativeThreadRef: {
+              driver: "claudeAgent",
+              nativeId: "claude-aix-session",
+              strength: "strong",
+            },
+          })}
+        )`;
         const service = yield* UsageService.make;
         return yield* service.readSummary(WINDOW);
       }).pipe(
@@ -598,8 +612,12 @@ describe("UsageService", () => {
 
       assert.deepStrictEqual(
         summary.buckets.map(({ provider, scope }) => `${provider}:${scope}`).sort(),
-        ["claude:work", "codex:personal", "codex:work"],
+        ["claude:personal", "claude:work", "codex:personal", "codex:work"],
       );
+      const claudeSource = summary.sources.find(
+        ({ fingerprint }) => fingerprint.provider === "claude",
+      );
+      assert.deepStrictEqual(claudeSource?.distinctSessionsByScope, { personal: 1, work: 1 });
     }),
   );
 

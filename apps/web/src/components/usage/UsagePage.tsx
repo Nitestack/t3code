@@ -110,9 +110,9 @@ import {
   type UsagePagePreferences,
 } from "./usagePagePreferences";
 import {
+  filterUsageSummaryByScope,
   resolveUsageLimitGroup,
   usageLimitGroupsInPresentations,
-  usageScopeForBucket,
   usageScopeGroupsInBuckets,
 } from "@t3tools/client-runtime/state/usage-grouping";
 
@@ -249,9 +249,13 @@ export function UsagePage() {
   const { activeScope } = useClientEnvironmentScope();
   const [requestedScope, setRequestedScope] = useState<UsageScope | null>(null);
   const scope = resolveUsageLimitGroup(requestedScope, scopeGroups, activeScope);
-  const scopedMerged = shown
-    ? mergeAnsweredUsage(shown.environments, (bucket) => usageScopeForBucket(bucket) === scope)
-    : merged;
+  const scopedEnvironments = (shown?.environments ?? selectedEnvironments).map((environment) => ({
+    ...environment,
+    ...(environment.summary === null
+      ? {}
+      : { summary: filterUsageSummaryByScope(environment.summary, scope) }),
+  }));
+  const scopedMerged = mergeAnsweredUsage(scopedEnvironments);
   const refreshProviders = useAtomCommand(serverEnvironment.refreshProviders, {
     reportFailure: false,
   });
@@ -593,7 +597,7 @@ export function UsagePage() {
       {showingLimits ? null : (
         <UsageModelDialogHost
           models={scopedMerged.models}
-          environments={selectedEnvironments}
+          environments={scopedEnvironments}
           metric={metric === "tokens" ? "tokens" : "cost"}
           chartWindow={{
             days,
