@@ -902,6 +902,36 @@ describe("ProviderInstanceRegistry — multi-instance codex slice", () => {
         expect(ghost.unavailableReason).toMatch(/ghostDriver/);
       }).pipe(Effect.provide(layerTest)),
   );
+
+  it.effect.each([
+    { label: undefined, blocked: true, expectedLabel: "ac" },
+    { label: "adCare", blocked: false, expectedLabel: "adCare" },
+  ] as const)(
+    "attaches aix snapshot metadata from legacy driver config with label fallback ($expectedLabel)",
+    ({ label, blocked, expectedLabel }) =>
+      Effect.gen(function* () {
+        const instanceId = ProviderInstanceId.make("aix-codex-ac");
+        const { registry } = yield* makeProviderInstanceRegistry({
+          drivers: [CodexDriver],
+          configMap: {
+            [instanceId]: {
+              driver: ProviderDriverKind.make("codex"),
+              ...(label ? { aixProfileLabel: label } : {}),
+              config: makeCodexConfig({ enabled: false, aixProfile: "ac" }),
+            },
+          },
+          blockedReason: (driver) => (blocked && driver === "codex" ? "blocked" : undefined),
+        });
+        const snapshot = blocked
+          ? (yield* registry.listUnavailable)[0]
+          : yield* (yield* registry.getInstance(instanceId))!.snapshot.getSnapshot;
+        expect(snapshot).toMatchObject({
+          instanceId,
+          aixProfile: "ac",
+          aixProfileLabel: expectedLabel,
+        });
+      }).pipe(Effect.provide(layerTest)),
+  );
 });
 
 const DisabledByDefaultConfig = Schema.Struct({

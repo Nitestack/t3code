@@ -33,6 +33,7 @@ import {
   type PreviewAnnotationPayload,
   ProviderDriverKind,
   type ProviderInstanceId,
+  type ProjectScope,
   type ProviderThreadId,
   type ServerProvider,
   type ScopedProjectRef,
@@ -107,6 +108,25 @@ import {
 
 type ThreadProjection = EnvironmentThread["projection"];
 type ThreadStructureRow = ThreadStructure["visibleTurnItems"][number];
+
+export function resolveDraftFallbackBannerDefault(input: {
+  readonly selection: ModelSelection | null;
+  readonly providers: ReadonlyArray<
+    Pick<ServerProvider, "instanceId" | "displayName" | "driver" | "models">
+  >;
+}) {
+  if (!input.selection) return null;
+  const provider = input.providers.find(
+    (candidate) => candidate.instanceId === input.selection?.instanceId,
+  );
+  if (!provider) return null;
+  const model = provider.models.find((candidate) => candidate.slug === input.selection?.model);
+  return {
+    selection: input.selection,
+    providerName: provider.displayName ?? provider.driver,
+    modelName: model?.name ?? input.selection.model,
+  };
+}
 
 export const LAST_INVOKED_SCRIPT_BY_PROJECT_KEY = "t3code:last-invoked-script-by-project";
 export const MAX_HIDDEN_MOUNTED_TERMINAL_THREADS = 10;
@@ -477,32 +497,49 @@ export function resolveComposerProviderSelection(input: {
   candidateInstanceIds: ReadonlyArray<ProviderInstanceId | null | undefined>;
   lockedProvider: ProviderDriverKind | null;
   lockedInstanceId: ProviderInstanceId | null | undefined;
+  /** Restricts implicit draft selection; explicit picks and existing threads omit this. */
+  draftScope?: ProjectScope | undefined;
 }) {
-  const requestedInstanceId = input.candidateInstanceIds.find(
+  const entries = input.draftScope
+    ? input.entries.filter((entry) => {
+        const isWork = entry.aixProfile !== undefined || entry.instanceId.startsWith("aix-");
+        return input.draftScope === "work" ? isWork : !isWork;
+      })
+    : input.entries;
+  const candidateInstanceIds = input.draftScope
+    ? input.candidateInstanceIds.filter((candidate) => {
+        if (candidate == null || candidate === NO_PROVIDER_MODEL_SELECTION.instanceId) return true;
+        const isWork =
+          candidate.startsWith("aix-") ||
+          input.entries.find((entry) => entry.instanceId === candidate)?.aixProfile !== undefined;
+        return input.draftScope === "work" ? isWork : !isWork;
+      })
+    : input.candidateInstanceIds;
+  const requestedInstanceId = candidateInstanceIds.find(
     (candidate) => candidate != null && candidate !== NO_PROVIDER_MODEL_SELECTION.instanceId,
   );
   const requestedDriverKind =
     input.lockedProvider ??
-    input.entries.find((entry) => entry.instanceId === requestedInstanceId)?.driverKind ??
-    input.entries[0]?.driverKind ??
+    entries.find((entry) => entry.instanceId === requestedInstanceId)?.driverKind ??
+    entries[0]?.driverKind ??
     ProviderDriverKind.make("unconfigured");
   const lockedContinuationGroupKey = input.lockedProvider
-    ? (input.entries.find((entry) => entry.instanceId === input.lockedInstanceId)
-        ?.continuationGroupKey ?? null)
+    ? (entries.find((entry) => entry.instanceId === input.lockedInstanceId)?.continuationGroupKey ??
+      null)
     : null;
   // Missing metadata must not move Antigravity history into another Google profile.
   const requiresExactInstance =
     input.lockedProvider === "antigravity" &&
     input.lockedInstanceId != null &&
     lockedContinuationGroupKey === null;
-  const compatibleEntries = input.entries.filter(
+  const compatibleEntries = entries.filter(
     (entry) =>
       (!input.lockedProvider || entry.driverKind === input.lockedProvider) &&
       (!lockedContinuationGroupKey || entry.continuationGroupKey === lockedContinuationGroupKey) &&
       (!requiresExactInstance || entry.instanceId === input.lockedInstanceId),
   );
   const selectedProviderEntry =
-    input.candidateInstanceIds
+    candidateInstanceIds
       .map((candidate) =>
         compatibleEntries.find(
           (entry) => entry.instanceId === candidate && entry.enabled && entry.isAvailable,

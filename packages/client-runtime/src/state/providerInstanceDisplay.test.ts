@@ -73,6 +73,15 @@ describe("shouldShowInstanceBadge", () => {
     expect(shouldShowInstanceBadge(first, [first, second])).toBe(true);
   });
 
+  it("does not badge or count aix instances", () => {
+    const aix = { driverKind: codex, enabled: true, aixProfile: "ac" };
+    const personal = { driverKind: codex, enabled: true };
+    expect(shouldShowInstanceBadge(aix, [aix, personal])).toBe(false);
+    expect(shouldShowInstanceBadge(personal, [personal, aix])).toBe(false);
+    const secondPersonal = { driverKind: codex, enabled: true };
+    expect(shouldShowInstanceBadge(personal, [personal, secondPersonal, aix])).toBe(true);
+  });
+
   it("ignores disabled siblings for enabled instances while distinguishing historical owners", () => {
     const enabled = { driverKind: codex, enabled: true };
     const disabled = { driverKind: codex, enabled: false };

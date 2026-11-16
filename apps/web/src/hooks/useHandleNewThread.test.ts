@@ -6,10 +6,19 @@ const testState = vi.hoisted(() => {
   let projectFileRead = Promise.resolve<null>(null);
   let projectRemoved = false;
   let connectedEnvironmentIds = ["environment-primary", "environment-ssh"];
+  let providers: ReadonlyArray<{
+    readonly instanceId: string;
+    readonly driver: string;
+    readonly enabled: boolean;
+    readonly installed: boolean;
+    readonly status: string;
+    readonly models: ReadonlyArray<{ readonly slug: string; readonly isDefault?: boolean }>;
+  }> = [];
   let targetSettings = {
     defaultThreadEnvMode: "local" as "local" | "worktree" | null,
     newWorktreesStartFromOrigin: false,
     defaultModelSelection: null,
+    fallbackModelSelection: null as { readonly instanceId: string; readonly model: string } | null,
     defaultRuntimeMode: "full-access" as RuntimeMode,
   };
   let storedDraft: {
@@ -18,7 +27,21 @@ const testState = vi.hoisted(() => {
     readonly promotedTo: null;
     readonly threadId: string;
   } | null = null;
+  let sourceComposer: {
+    readonly activeProvider: string;
+    readonly modelSelectionByProvider: Record<string, { instanceId: string; model: string }>;
+    readonly modelSelectionExplicit?: boolean;
+  } | null = null;
+  let forceUsageFallback = false;
+  let serverConfigsLoaded = true;
   let openDraftRoute: { readonly kind: "draft"; readonly draftId: string } | null = null;
+  let sourceThreadRoute: { readonly kind: "server"; readonly threadRef: object } | null = null;
+  let sourceThread: {
+    readonly modelSelection: { readonly instanceId: string; readonly model: string };
+    readonly latestRun: null;
+    readonly itemCount: 0;
+    readonly runtime: null;
+  } | null = null;
   let draftsWithUserText = new Set<string>();
   const router = {
     state: {
@@ -30,7 +53,7 @@ const testState = vi.hoisted(() => {
     }),
   };
   const draftStore = {
-    getComposerDraft: vi.fn((draftId: string) => ({ draftId })),
+    getComposerDraft: vi.fn((draftId: string) => sourceComposer ?? { draftId }),
     getDraftSessionByLogicalProjectKey: vi.fn(() => storedDraft),
     getDraftSession: vi.fn(() =>
       openDraftRoute === null
@@ -46,6 +69,8 @@ const testState = vi.hoisted(() => {
     ),
     getDraftThread: vi.fn(() => null),
     applyStickyState: vi.fn(),
+    stickyActiveProviderByScope: { personal: null as string | null, work: null as string | null },
+    stickyModelSelectionByProvider: {} as Record<string, { instanceId: string; model: string }>,
     setDraftThreadContext: vi.fn(),
     setLogicalProjectDraftThreadId: vi.fn(),
     setModelSelection: vi.fn(),
@@ -78,11 +103,50 @@ const testState = vi.hoisted(() => {
     get openDraftRoute() {
       return openDraftRoute;
     },
+    get routeTarget() {
+      return sourceThreadRoute ?? openDraftRoute;
+    },
+    get sourceThread() {
+      return sourceThread;
+    },
+    get forceUsageFallback() {
+      return forceUsageFallback;
+    },
+    get serverConfigsLoaded() {
+      return serverConfigsLoaded;
+    },
+    unloadServerConfigs() {
+      serverConfigsLoaded = false;
+    },
+    useUsageFallback() {
+      forceUsageFallback = true;
+    },
+    setFallbackSelection(selection: { readonly instanceId: string; readonly model: string }) {
+      targetSettings = { ...targetSettings, fallbackModelSelection: selection };
+    },
+    openServerThread(
+      modelSelection: { readonly instanceId: string; readonly model: string },
+      explicit = false,
+    ) {
+      sourceThreadRoute = { kind: "server", threadRef: {} };
+      sourceThread = { modelSelection, latestRun: null, itemCount: 0, runtime: null };
+      sourceComposer = {
+        activeProvider: modelSelection.instanceId,
+        modelSelectionByProvider: { [modelSelection.instanceId]: modelSelection },
+        ...(explicit ? { modelSelectionExplicit: true } : {}),
+      };
+    },
     openEmptyDraft(draftId: string) {
       openDraftRoute = { kind: "draft", draftId };
     },
     get targetSettings() {
       return targetSettings;
+    },
+    get providers() {
+      return providers;
+    },
+    set providers(value) {
+      providers = value;
     },
     reset(
       nextStoredDraft: typeof storedDraft,
@@ -93,13 +157,22 @@ const testState = vi.hoisted(() => {
     ) {
       storedDraft = nextStoredDraft;
       openDraftRoute = null;
+      sourceThreadRoute = null;
+      sourceThread = null;
+      sourceComposer = null;
+      forceUsageFallback = false;
+      serverConfigsLoaded = true;
       draftsWithUserText = new Set();
       projectRemoved = false;
       connectedEnvironmentIds = ["environment-primary", "environment-ssh"];
+      providers = [];
+      draftStore.stickyActiveProviderByScope = { personal: null, work: null };
+      draftStore.stickyModelSelectionByProvider = {};
       targetSettings = {
         defaultThreadEnvMode: workspaceDefaults.envMode,
         newWorktreesStartFromOrigin: workspaceDefaults.startFromOrigin,
         defaultModelSelection: null,
+        fallbackModelSelection: null,
         defaultRuntimeMode: "full-access",
       };
       router.state.location.href = "/";
@@ -116,18 +189,26 @@ const testState = vi.hoisted(() => {
 });
 
 const testServerConfigs = () =>
-  new Map([
-    [
-      "environment-primary",
-      {
-        settings: {
-          ...testState.targetSettings,
-          newWorktreesStartFromOrigin: !testState.targetSettings.newWorktreesStartFromOrigin,
-        },
-      },
-    ],
-    ["environment-ssh", { settings: testState.targetSettings }],
-  ]);
+  new Map(
+    testState.serverConfigsLoaded
+      ? [
+          [
+            "environment-primary",
+            {
+              settings: {
+                ...testState.targetSettings,
+                newWorktreesStartFromOrigin: !testState.targetSettings.newWorktreesStartFromOrigin,
+              },
+              providers: testState.providers,
+            },
+          ],
+          [
+            "environment-ssh",
+            { settings: testState.targetSettings, providers: testState.providers },
+          ],
+        ]
+      : [],
+  );
 
 vi.mock("../rpc/atomRegistry", () => ({
   appAtomRegistry: {
@@ -194,6 +275,26 @@ vi.mock("@t3tools/shared/projectSettings", () => ({
     projectSettings: { settings: { defaultThreadEnvMode: "local" | "worktree" } };
   }) => input.projectSettings.settings.defaultThreadEnvMode,
 }));
+vi.mock("@t3tools/shared/usageLimits", () => ({
+  resolveNewThreadModelSelection: (input: {
+    readonly defaultSelection: { readonly instanceId: string; readonly model: string } | null;
+    readonly fallbackSelection: { readonly instanceId: string; readonly model: string } | null;
+    readonly providers: ReadonlyArray<{ readonly instanceId: string }>;
+  }) => {
+    if (!testState.forceUsageFallback || !input.fallbackSelection) {
+      return { selection: input.defaultSelection, fallback: null };
+    }
+    return {
+      selection: input.fallbackSelection,
+      fallback: {
+        provider: input.providers.find(
+          (provider) => provider.instanceId === input.defaultSelection?.instanceId,
+        ),
+        resetsAt: null,
+      },
+    };
+  },
+}));
 vi.mock("@tanstack/react-router", () => ({
   useParams: () => null,
   useRouter: () => testState.router,
@@ -218,10 +319,21 @@ vi.mock("../composerDraftStore", () => {
 });
 vi.mock("../lib/chatThreadActions", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/chatThreadActions")>()),
-  hasExplicitComposerModelSelection: () => false,
-  resolveNewThreadModelSelectionOverride: () => null,
+  hasExplicitComposerModelSelection: (
+    draft: { readonly modelSelectionExplicit?: boolean } | null,
+  ) => draft?.modelSelectionExplicit === true,
 }));
-vi.mock("../providerInstances", () => ({ resolveDefaultProviderModelSelection: () => null }));
+vi.mock("../providerInstances", () => ({
+  draftDefaultProvidersFor: (entries: typeof testState.providers) => entries,
+  resolveDefaultProviderModelSelection: () => null,
+  resolveProjectDefaultProviderModelSelection: (entries: typeof testState.providers) => {
+    const provider = entries.find(
+      (entry) => !entry.instanceId.startsWith("aix-") && entry.enabled && entry.status === "ready",
+    );
+    const model = provider?.models.find((candidate) => candidate.isDefault) ?? provider?.models[0];
+    return provider && model ? { instanceId: provider.instanceId, model: model.slug } : null;
+  },
+}));
 vi.mock("../lib/t3ProjectFileDefaults", () => ({
   readT3ProjectFile: () => testState.projectFileRead,
 }));
@@ -245,7 +357,7 @@ vi.mock("../state/entities", () => {
   return {
     readProject: () => (testState.projectRemoved ? null : project),
     readProjects: () => (testState.projectRemoved ? [] : [project]),
-    readThreadShell: () => null,
+    readThreadShell: () => testState.sourceThread,
     readThreadShells: () => [],
     useProjects: () => [],
     useThread: () => null,
@@ -261,7 +373,7 @@ vi.mock("../state/server", () => ({
   primaryServerSettingsAtom: "primary-settings",
 }));
 vi.mock("../threadRoutes", () => ({
-  resolveThreadRouteTarget: () => testState.openDraftRoute,
+  resolveThreadRouteTarget: () => testState.routeTarget,
 }));
 vi.mock("../uiStateStore", () => ({
   legacyProjectCwdPreferenceKey: () => "remote-project",
@@ -336,6 +448,195 @@ describe.each([
 });
 
 describe("useNewThreadHandler", () => {
+  it("clears a stale non-explicit model selection when no default resolves", async () => {
+    testState.reset(null);
+
+    const pending = useNewThreadHandler()({
+      environmentId: "environment-ssh",
+      projectId: "project-remote",
+    } as never);
+    testState.completeProjectFileRead(null);
+    await pending;
+
+    expect(testState.draftStore.setModelSelection).toHaveBeenCalledWith("draft-delayed", null, {
+      replaceOptions: true,
+    });
+  });
+
+  it("keeps the stored model selection while the environment config is not loaded", async () => {
+    testState.reset(null);
+    testState.unloadServerConfigs();
+
+    const pending = useNewThreadHandler()({
+      environmentId: "environment-ssh",
+      projectId: "project-remote",
+    } as never);
+    testState.completeProjectFileRead(null);
+    await pending;
+
+    expect(testState.draftStore.setModelSelection).not.toHaveBeenCalledWith(
+      expect.anything(),
+      null,
+      expect.anything(),
+    );
+  });
+
+  it("does not carry an exhausted explicit source model into a new draft", async () => {
+    testState.reset(null);
+    testState.providers = [
+      {
+        instanceId: "claudeAgent",
+        driver: "claudeAgent",
+        enabled: true,
+        installed: true,
+        status: "ready",
+        models: [{ slug: "carried-model" }],
+      },
+      {
+        instanceId: "codex",
+        driver: "codex",
+        enabled: true,
+        installed: true,
+        status: "ready",
+        models: [{ slug: "fallback-model", isDefault: true }],
+      },
+    ];
+    testState.setFallbackSelection({ instanceId: "codex", model: "fallback-model" });
+    testState.useUsageFallback();
+    testState.openServerThread({ instanceId: "claudeAgent", model: "carried-model" }, true);
+
+    const pending = useNewThreadHandler()({
+      environmentId: "environment-ssh",
+      projectId: "project-remote",
+    } as never);
+    testState.completeProjectFileRead(null);
+    await pending;
+
+    expect(testState.draftStore.setModelSelection).toHaveBeenCalledWith(
+      "draft-delayed",
+      { instanceId: "codex", model: "fallback-model" },
+      { replaceOptions: true },
+    );
+  });
+
+  it("carries the current route model into a new draft when its scope matches", async () => {
+    testState.reset(null);
+    testState.providers = [
+      {
+        instanceId: "codex",
+        driver: "codex",
+        enabled: true,
+        installed: true,
+        status: "ready",
+        models: [{ slug: "provider-default", isDefault: true }],
+      },
+      {
+        instanceId: "claudeAgent",
+        driver: "claudeAgent",
+        enabled: true,
+        installed: true,
+        status: "ready",
+        models: [{ slug: "carried-model" }],
+      },
+    ];
+    testState.openServerThread({ instanceId: "claudeAgent", model: "carried-model" });
+
+    const pending = useNewThreadHandler()({
+      environmentId: "environment-ssh",
+      projectId: "project-remote",
+    } as never);
+    testState.completeProjectFileRead(null);
+    await pending;
+
+    expect(testState.draftStore.setModelSelection).toHaveBeenCalledWith(
+      "draft-delayed",
+      { instanceId: "claudeAgent", model: "carried-model" },
+      { replaceOptions: true },
+    );
+  });
+
+  it("starts a personal draft on its ready subscription default when the global sticky is aix", async () => {
+    testState.reset(null);
+    testState.providers = [
+      {
+        instanceId: "aix-codex-team",
+        driver: "codex",
+        enabled: true,
+        installed: true,
+        status: "ready",
+        models: [{ slug: "work-default", isDefault: true }],
+      },
+      {
+        instanceId: "codex",
+        driver: "codex",
+        enabled: true,
+        installed: true,
+        status: "ready",
+        models: [{ slug: "personal-default", isDefault: true }],
+      },
+    ];
+    testState.draftStore.stickyActiveProviderByScope = {
+      personal: null,
+      work: "aix-codex-team",
+    };
+    testState.draftStore.stickyModelSelectionByProvider = {
+      "aix-codex-team": { instanceId: "aix-codex-team", model: "work-last" },
+    };
+
+    const pending = useNewThreadHandler()({
+      environmentId: "environment-ssh",
+      projectId: "project-remote",
+    } as never);
+    testState.completeProjectFileRead(null);
+    await pending;
+
+    expect(testState.draftStore.applyStickyState).toHaveBeenCalledWith("draft-delayed", "personal");
+    expect(testState.draftStore.setModelSelection).toHaveBeenCalledWith(
+      "draft-delayed",
+      { instanceId: "codex", model: "personal-default" },
+      { replaceOptions: true },
+    );
+  });
+
+  it("prefers the scope's last-used model over the provider-order default", async () => {
+    testState.reset(null);
+    testState.providers = [
+      {
+        instanceId: "codex",
+        driver: "codex",
+        enabled: true,
+        installed: true,
+        status: "ready",
+        models: [{ slug: "personal-default", isDefault: true }],
+      },
+      {
+        instanceId: "claudeAgent",
+        driver: "claudeAgent",
+        enabled: true,
+        installed: true,
+        status: "ready",
+        models: [{ slug: "claude-default", isDefault: true }, { slug: "claude-last" }],
+      },
+    ];
+    testState.draftStore.stickyActiveProviderByScope = { personal: "claudeAgent", work: null };
+    testState.draftStore.stickyModelSelectionByProvider = {
+      claudeAgent: { instanceId: "claudeAgent", model: "claude-last" },
+    };
+
+    const pending = useNewThreadHandler()({
+      environmentId: "environment-ssh",
+      projectId: "project-remote",
+    } as never);
+    testState.completeProjectFileRead(null);
+    await pending;
+
+    expect(testState.draftStore.setModelSelection).toHaveBeenCalledWith(
+      "draft-delayed",
+      { instanceId: "claudeAgent", model: "claude-last" },
+      { replaceOptions: true },
+    );
+  });
+
   it("keeps the text of a draft that gained some while it waited", async () => {
     testState.reset(null);
     const raced = {

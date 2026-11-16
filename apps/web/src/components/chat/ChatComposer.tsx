@@ -10,6 +10,7 @@ import {
   resolveRuntimeModeOptions,
 } from "./runtimeModeConfig";
 import { isLocalEnvironmentDisabled } from "../../localEnvironment";
+import { useClientEnvironmentScope } from "../../environmentScope";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { useRightPanelStore } from "~/rightPanelStore";
 import { importPastedComposerText, readPastedComposerContext } from "../composerInlineTokenPaste";
@@ -27,6 +28,7 @@ import type {
   EnvironmentId,
   ModelSelection,
   ProjectId,
+  ProjectScope,
   PreviewAnnotationPayload,
   ThreadContextRecord,
   EnvironmentContextRecord,
@@ -412,6 +414,8 @@ export interface ChatComposerProps {
   activeThreadModelSelection: ModelSelection | null | undefined;
   reportedModelSelection?: ModelSelection | null;
   activeProjectId: ProjectId | null;
+  projectScope: ProjectScope | null;
+  nonExplicitDraftScope?: ProjectScope | undefined;
   projectName?: string | undefined;
 
   compactThreadUnavailable: boolean;
@@ -528,6 +532,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeThreadModelSelection,
     reportedModelSelection,
     activeProjectId,
+    projectScope,
+    nonExplicitDraftScope,
     projectName,
     compactThreadUnavailable,
     compactDisabled,
@@ -570,6 +576,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     editingQueuedAttachments,
     onRemoveEditingQueuedAttachment,
   } = props;
+  const { activeScope } = useClientEnvironmentScope();
+  const modelPickerProjectScope = projectScope ?? activeScope;
   const {
     activePendingProgress: incomingPendingProgress,
     activePendingResolvedAnswers,
@@ -885,6 +893,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     projectModelSelection: activeProjectDefaultModelSelection,
     promptInjectionState: getComposerPromptInjectionState(prompt),
     threadStarted: threadHasStarted(activeThread),
+    draftScope: nonExplicitDraftScope,
     candidateInstanceIds: [
       activeThread?.runtime?.providerInstanceId,
       activeThreadModelSelection?.instanceId,
@@ -2437,6 +2446,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const composerControls = (
     <ComposerControlsBar
       environmentId={environmentId}
+      projectScope={modelPickerProjectScope}
       workspaceCwd={gitCwd}
       routeKind={routeKind}
       routeThreadRef={routeThreadRef}

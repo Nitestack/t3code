@@ -1,11 +1,14 @@
 import type { ServerProvider } from "@t3tools/contracts";
 import { formatContextWindowTokens } from "../../lib/contextWindow";
 
-export function aixCatalogStatus(provider: ServerProvider): {
+export function aixCatalogStatus(
+  provider: ServerProvider,
+  aixProfile = provider.aixProfile,
+): {
   readonly kind: "current" | "warning" | "stale" | "unavailable";
   readonly message: string;
 } | null {
-  if (!provider.instanceId.startsWith("aix-")) return null;
+  if (!aixProfile) return null;
   const message = provider.message?.trim();
   if (provider.status === "error") {
     return { kind: "unavailable", message: message || "The aix catalog is unavailable." };

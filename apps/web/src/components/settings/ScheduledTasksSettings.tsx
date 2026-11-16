@@ -71,6 +71,7 @@ import {
 } from "../../state/entities";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { resolveModelPickerProjectScope } from "@t3tools/client-runtime/provider-picker-hierarchy";
 import { environmentAtomList, environmentIdsKey } from "../../state/environmentAtomList";
 import { useThreadSearch } from "../../state/queries";
 import { formatEnvironmentQueryError, useEnvironmentQuery } from "../../state/query";
@@ -1796,6 +1797,12 @@ function ScheduledTaskEditorForm({
                 disabled={saving || !connected || draft.threadId !== ""}
                 activeInstanceId={shownInstanceId}
                 model={shownModel}
+                {...(selectedProject &&
+                environment?.serverConfig?.environment.capabilities.projectScope === true
+                  ? {
+                      projectScope: resolveModelPickerProjectScope(selectedProject.scope, true),
+                    }
+                  : {})}
                 lockedProvider={null}
                 instanceEntries={instanceEntries}
                 modelOptionsByInstance={modelOptionsByInstance}

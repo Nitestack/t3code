@@ -322,6 +322,7 @@ export interface LimitAccount {
   readonly driver: ServerProvider["driver"];
   readonly displayName: string | null;
   readonly profileName?: string | undefined;
+  readonly profileLabel?: string | undefined;
   readonly email: string | undefined;
   readonly plan: string | undefined;
   readonly accentColor: string | undefined;
@@ -436,8 +437,11 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
         key,
         providerInstanceId: provider.instanceId,
         driver: provider.driver,
-        displayName: profileName ?? (provider.displayName?.trim() || null),
+        displayName: profileName
+          ? provider.aixProfileLabel?.trim() || profileName
+          : provider.displayName?.trim() || null,
         ...(profileName ? { profileName } : {}),
+        ...(profileName ? { profileLabel: provider.aixProfileLabel?.trim() || profileName } : {}),
         email: profileName ? undefined : provider.auth.email,
         plan: profileName ? undefined : provider.auth.label,
         accentColor: profileName ? undefined : provider.accentColor,
@@ -503,7 +507,9 @@ export function collectLimitNotices(presentations: LimitPresentations): readonly
         continue;
       if (provider.usageLimits?.unavailable?.reason === "unsupported") continue;
       const notice = provider.usageLimits ? limitsNotice(provider.usageLimits) : null;
-      const name = profileName ?? (provider.displayName?.trim() || String(provider.driver));
+      const name = profileName
+        ? provider.aixProfileLabel?.trim() || profileName
+        : provider.displayName?.trim() || String(provider.driver);
       if (notice) notices.add(`${label(environmentLabel, name)}: ${notice}`);
     }
     for (const source of presentation.serverConfig?.usageLimitSources ?? []) {
@@ -544,6 +550,7 @@ export interface LimitPoolWindow {
 export interface LimitPool {
   readonly driver: ServerProvider["driver"];
   readonly profileName?: string | undefined;
+  readonly profileLabel?: string | undefined;
   readonly accounts: readonly LimitAccount[];
   readonly windows: readonly LimitPoolWindow[];
 }
@@ -604,6 +611,7 @@ export function collectLimitPools(
     {
       readonly driver: ServerProvider["driver"];
       readonly profileName?: string;
+      readonly profileLabel?: string;
       members: LimitAccount[];
     }
   >();
@@ -615,10 +623,11 @@ export function collectLimitPools(
       byDriver.set(key, {
         driver: account.driver,
         ...(account.profileName ? { profileName: account.profileName } : {}),
+        ...(account.profileLabel ? { profileLabel: account.profileLabel } : {}),
         members: [account],
       });
   }
-  return [...byDriver.values()].map(({ driver, profileName, members }) => {
+  return [...byDriver.values()].map(({ driver, profileName, profileLabel, members }) => {
     const orderWindow = members
       .flatMap((account) => account.limits.windows)
       .sort((left, right) => WINDOW_KIND_ORDER[left.kind] - WINDOW_KIND_ORDER[right.kind])[0];
@@ -640,6 +649,7 @@ export function collectLimitPools(
     return {
       driver,
       ...(profileName ? { profileName } : {}),
+      ...(profileLabel ? { profileLabel } : {}),
       accounts: sorted,
       windows: poolWindows(sorted, now),
     };

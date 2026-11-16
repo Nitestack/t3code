@@ -52,8 +52,16 @@ import { DraftProjectName } from "./DraftProjectName";
 import { DraftHeroProjectHeading } from "./DraftHeroProjectHeading";
 import { TriageDraftHero } from "./TriageDraftHero";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
-import { resolveProjectDefaultProviderModelSelection } from "../../providerInstances";
+import {
+  draftDefaultProvidersFor,
+  resolveProjectDefaultProviderModelSelection,
+} from "../../providerInstances";
 import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
+import {
+  resolveDraftModelSelectionAfterUsageLimitFallback,
+  resolveDraftModelSelectionForScope,
+  resolveModelPickerProjectScope,
+} from "@t3tools/client-runtime/provider-picker-hierarchy";
 
 const ADD_PROJECT_VALUE = "add-project";
 
@@ -197,7 +205,6 @@ export function DraftHeroHeadline({
       draftId,
     );
     if (!hasExplicitComposerModelSelection(currentDraft)) {
-      applyStickyState(draftId);
       const environmentConfig = environments.find(
         (environment) => environment.environmentId === project.environmentId,
       )?.serverConfig;
@@ -206,29 +213,56 @@ export function DraftHeroHeadline({
         ? resolveProjectSettings(environmentSettings, project.id, project).settings
             .defaultModelSelection
         : project.defaultModelSelection;
+      const providers = providersByEnvironment.get(project.environmentId) ?? [];
+      const resolverProviders = environmentSettings
+        ? draftDefaultProvidersFor(providers, environmentSettings, project.id)
+        : providers;
+      const scope = resolveModelPickerProjectScope(
+        project.scope,
+        environmentConfig?.environment?.capabilities?.projectScope === true,
+      );
+      applyStickyState(draftId, scope);
+      const normalDefault = defaultSelection ?? null;
+      const orderedDefault = environmentSettings
+        ? resolveProjectDefaultProviderModelSelection(providers, environmentSettings, project.id)
+        : null;
+      const stickyState = useComposerDraftStore.getState();
+      const stickyProviderForScope = stickyState.stickyActiveProviderByScope[scope];
+      const stickySelectionForScope = stickyProviderForScope
+        ? (stickyState.stickyModelSelectionByProvider[stickyProviderForScope] ?? null)
+        : null;
+      const initialDefaultSelection = resolveDraftModelSelectionForScope({
+        scope,
+        normalDefault,
+        orderedDefault,
+        stickySelection: stickySelectionForScope,
+        providers: resolverProviders,
+      });
       const fallbackResolution = resolveNewThreadModelSelection({
-        defaultSelection:
-          defaultSelection ??
-          (useComposerDraftStore.getState().stickyActiveProvider !== null || !environmentSettings
-            ? null
-            : resolveProjectDefaultProviderModelSelection(
-                providersByEnvironment.get(project.environmentId) ?? [],
-                environmentSettings,
-                project.id,
-              )),
+        defaultSelection: initialDefaultSelection,
         fallbackSelection: environmentSettings?.fallbackModelSelection ?? null,
-        providers: providersByEnvironment.get(project.environmentId) ?? [],
+        providers,
         ...(environmentSettings ? { settings: environmentSettings } : {}),
         projectId: project.id,
         now: Date.now(),
       });
       const defaultModelSelection = fallbackResolution.fallback
-        ? fallbackResolution.selection
-        : defaultSelection;
+        ? resolveDraftModelSelectionAfterUsageLimitFallback({
+            scope,
+            exhaustedSelection: initialDefaultSelection,
+            fallbackSelection: fallbackResolution.selection,
+            normalDefault,
+            orderedDefault,
+            stickySelection: stickySelectionForScope,
+            providers: resolverProviders,
+          })
+        : initialDefaultSelection;
       if (defaultModelSelection) {
         setModelSelection(draftId, defaultModelSelection, {
           replaceOptions: true,
         });
+      } else {
+        setModelSelection(draftId, null);
       }
     }
   };

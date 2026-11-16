@@ -17,6 +17,8 @@ import {
   resolveProviderInstanceDisplayName,
   shouldShowInstanceBadge,
 } from "@t3tools/client-runtime/state/provider-instance-display";
+import { aixMetadataFromInstanceId } from "@t3tools/client-runtime/provider-picker-hierarchy";
+import type { DraftDefaultProvider } from "@t3tools/client-runtime/provider-picker-hierarchy";
 
 export { normalizeProviderAccentColor, shouldShowInstanceBadge };
 
@@ -30,6 +32,8 @@ export interface ProviderInstanceEntry {
   readonly instanceId: ProviderInstanceId;
   readonly driverKind: ProviderDriverKind;
   readonly displayName: string;
+  readonly aixProfile?: string | undefined;
+  readonly aixProfileLabel?: string | undefined;
   readonly accentColor?: string | undefined;
   readonly acpRegistryAgentId?: string | undefined;
   readonly acpRegistryIconUrl?: string | undefined;
@@ -50,7 +54,7 @@ export function hasInstanceBadge(entries: ReadonlyArray<ProviderInstanceEntry>):
 
 /** Disabled instances may retain ready status until reconciliation. */
 export function isProviderInstancePickerReady(entry: ProviderInstanceEntry): boolean {
-  return entry.enabled && entry.isAvailable && entry.status === "ready";
+  return entry.enabled && entry.installed && entry.isAvailable && entry.status === "ready";
 }
 
 export function isProviderInstancePickerVisible(entry: ProviderInstanceEntry): boolean {
@@ -65,10 +69,21 @@ export function deriveProviderInstanceEntries(
     const driverKind = snapshot.driver;
     const defaultId = defaultInstanceIdForDriver(driverKind);
     const isDefault = instanceId === defaultId;
+    const aixMetadata = aixMetadataFromInstanceId(instanceId, driverKind);
     return {
       instanceId,
       driverKind,
       displayName: resolveProviderInstanceDisplayName(snapshot),
+      ...(snapshot.aixProfile
+        ? { aixProfile: snapshot.aixProfile }
+        : aixMetadata
+          ? { aixProfile: aixMetadata.aixProfile }
+          : {}),
+      ...(snapshot.aixProfileLabel
+        ? { aixProfileLabel: snapshot.aixProfileLabel }
+        : aixMetadata
+          ? { aixProfileLabel: aixMetadata.aixProfileLabel }
+          : {}),
       accentColor: normalizeProviderAccentColor(snapshot.accentColor),
       ...(driverKind === "acpRegistry" && snapshot.iconUrl
         ? { acpRegistryIconUrl: snapshot.iconUrl }
@@ -171,6 +186,27 @@ export function providerInstanceEntriesFor(
   );
 }
 
+export function draftDefaultProvidersFor(
+  providers: ReadonlyArray<ServerProvider>,
+  settings: Pick<ServerSettings, "providerInstances" | "projectSettingsOverrides">,
+  projectId: ProjectId | null,
+): ReadonlyArray<DraftDefaultProvider> {
+  return applyProviderInstanceSettings(
+    deriveProviderInstanceEntries(providers),
+    settings,
+    projectId,
+  ).map((entry) => ({
+    instanceId: entry.instanceId,
+    driver: entry.driverKind,
+    enabled: entry.enabled,
+    installed: entry.installed,
+    status: entry.status,
+    availability: entry.isAvailable ? "available" : "unavailable",
+    ...(entry.aixProfile ? { aixProfile: entry.aixProfile } : {}),
+    models: entry.models,
+  }));
+}
+
 function sortProviderInstanceEntries(
   entries: ReadonlyArray<ProviderInstanceEntry>,
 ): ReadonlyArray<ProviderInstanceEntry> {
@@ -226,10 +262,7 @@ export function resolveSelectableProviderInstanceEntry(
       return requested;
     }
   }
-  return (
-    entries.find(isProviderInstancePickerReady) ??
-    entries.find((entry) => isSelectableProviderInstanceEntry(entry) && entry.status !== "error")
-  );
+  return entries.find(isProviderInstancePickerReady);
 }
 
 export function resolveSelectableProviderInstance(

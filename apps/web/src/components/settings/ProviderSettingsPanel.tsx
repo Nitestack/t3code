@@ -4,6 +4,7 @@ import {
   AuthSettingsWriteScope,
   AuthProvidersManageScope,
   AuthOrchestrationReadScope,
+  type ProjectScope,
 } from "@t3tools/contracts";
 import { useEnvironmentScope, readEnvironmentScope } from "../../state/session";
 import { useAtomValue } from "@effect/atom-react";
@@ -63,6 +64,7 @@ import {
   serverEnvironment,
 } from "../../state/server";
 import { useEnvironmentSessionState } from "../../state/session";
+import { useClientEnvironmentScope } from "../../environmentScope";
 import { useProjects } from "../../state/entities";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useRelativeTimeState } from "../../hooks/useRelativeTimeState";
@@ -88,6 +90,7 @@ import {
 } from "../ui/empty";
 import { ScrollArea } from "../ui/scroll-area";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { AddProviderInstanceDialog } from "./AddProviderInstanceDialog";
@@ -129,6 +132,10 @@ import {
   resolveRemoteOperateAccess,
   resolveSelectedProviderEnvironmentId,
 } from "./ProviderSettingsPanel.logic";
+import {
+  providerSettingsEntryProfile,
+  resolveProviderSettingsHierarchy,
+} from "@t3tools/client-runtime/provider-settings-hierarchy";
 
 function providerInstanceName(instance: ProviderInstanceConfig): string {
   return (
@@ -775,13 +782,53 @@ export function EnvironmentProviderSettings({
     }
   }
 
+  const { activeScope } = useClientEnvironmentScope();
+  const [providerViewScope, setProviderViewScope] = useState<ProjectScope>(() => {
+    const target = rows.find((row) => row.instanceId === targetInstanceId);
+    return target &&
+      providerSettingsEntryProfile({
+        instanceId: target.instanceId,
+        driverKind: target.driver,
+      })
+      ? "work"
+      : activeScope;
+  });
+  const [providerProfileId, setProviderProfileId] = useState<string | undefined>(() => {
+    const target = rows.find((row) => row.instanceId === targetInstanceId);
+    return target
+      ? providerSettingsEntryProfile({
+          instanceId: target.instanceId,
+          driverKind: target.driver,
+          aixProfileLabel: target.explicitInstance?.aixProfileLabel,
+        })?.aixProfile
+      : undefined;
+  });
+  const settingsHierarchy = resolveProviderSettingsHierarchy({
+    entries: rows.map((row) => {
+      const liveProvider = serverProviders.find(
+        (provider) => provider.instanceId === row.instanceId,
+      );
+      return {
+        instanceId: row.instanceId,
+        driverKind: row.driver,
+        enabled: resolveProviderInstanceEnabled(row.explicitInstance ?? { driver: row.driver }),
+        aixProfile: liveProvider?.aixProfile,
+        aixProfileLabel: liveProvider?.aixProfileLabel ?? row.explicitInstance?.aixProfileLabel,
+      };
+    }),
+    scope: providerViewScope,
+    profileId: providerProfileId,
+  });
+  const visibleIds = new Set(settingsHierarchy.visibleEntries.map((entry) => entry.instanceId));
+  const visibleRows = rows.filter((row) => visibleIds.has(row.instanceId));
+
   const targetInstanceMissing =
     targetInstanceId !== undefined &&
     selectedInstanceId === targetInstanceId &&
     !rows.some((row) => row.instanceId === targetInstanceId);
   const selectedRow =
-    rows.find((row) => row.instanceId === selectedInstanceId) ??
-    (targetInstanceMissing ? null : (rows[0] ?? null));
+    visibleRows.find((row) => row.instanceId === selectedInstanceId) ??
+    (targetInstanceMissing ? null : (visibleRows[0] ?? null));
 
   const persistInstance = async (
     instanceId: ProviderInstanceId,
@@ -923,7 +970,23 @@ export function EnvironmentProviderSettings({
     writeProjectOverride,
     updateModelPreferences: stableUpdateModelPreferences,
     toggleModelFavorite: stableToggleModelFavorite,
-    selectInstance: setSelectedInstanceId,
+    selectInstance: (instanceId) => {
+      setSelectedInstanceId(instanceId);
+      const row = rows.find((candidate) => candidate.instanceId === instanceId);
+      if (!row) return;
+      const profile = providerSettingsEntryProfile({
+        instanceId: row.instanceId,
+        driverKind: row.driver,
+        aixProfile: serverProviders.find((provider) => provider.instanceId === instanceId)
+          ?.aixProfile,
+        aixProfileLabel:
+          serverProviders.find((provider) => provider.instanceId === instanceId)?.aixProfileLabel ??
+          row.explicitInstance?.aixProfileLabel,
+      });
+      const scope = profile ? "work" : "personal";
+      setProviderViewScope(scope);
+      if (profile) setProviderProfileId(profile.aixProfile);
+    },
   };
   // resolveModelPreferences falls back to a fresh `[]`; keep it stable for the rows.
   const favorites = settings.favorites.length > 0 ? settings.favorites : NO_FAVORITES;
@@ -1046,13 +1109,52 @@ export function EnvironmentProviderSettings({
           )}
         >
           <div className="border-b border-border/60 bg-muted/10 @min-[48rem]/providers:flex @min-[48rem]/providers:min-h-0 @min-[48rem]/providers:flex-col @min-[48rem]/providers:border-r @min-[48rem]/providers:border-b-0">
+            {settingsHierarchy.hasAixProfiles ? (
+              <div className="flex min-w-0 flex-col gap-2 border-b border-border/50 p-2">
+                <ToggleGroup
+                  aria-label="Provider scope"
+                  variant="segmented"
+                  value={[providerViewScope]}
+                  onValueChange={(next) => {
+                    const scope = next[0];
+                    if (scope === "personal" || scope === "work") setProviderViewScope(scope);
+                  }}
+                >
+                  <Toggle value="personal">Personal</Toggle>
+                  <Toggle value="work">Work</Toggle>
+                </ToggleGroup>
+                {providerViewScope === "work" && settingsHierarchy.profiles.length > 0 ? (
+                  <Select
+                    value={settingsHierarchy.profileId}
+                    onValueChange={(value) => {
+                      if (value) setProviderProfileId(value);
+                    }}
+                  >
+                    <SelectTrigger size="sm" aria-label="Work profile">
+                      <SelectValue>
+                        {settingsHierarchy.profiles.find(
+                          (profile) => profile.id === settingsHierarchy.profileId,
+                        )?.label ?? "Select profile"}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectPopup align="start" alignItemWithTrigger={false}>
+                      {settingsHierarchy.profiles.map((profile) => (
+                        <SelectItem key={profile.id} value={profile.id}>
+                          {profile.label}
+                        </SelectItem>
+                      ))}
+                    </SelectPopup>
+                  </Select>
+                ) : null}
+              </div>
+            ) : null}
             <ScrollArea
               scrollFade
               chainVerticalScroll
               className="@min-[48rem]/providers:min-h-0 @min-[48rem]/providers:flex-1"
             >
               <div className="divide-y divide-border/50">
-                {rows.map((row) => renderProviderInstance(row, "list"))}
+                {visibleRows.map((row) => renderProviderInstance(row, "list"))}
                 {canAddProvider ? (
                   <button
                     type="button"
@@ -1178,7 +1280,11 @@ export function EnvironmentProviderSettings({
           environmentId={environmentId}
           environmentLabel={environmentLabel}
           onOpenChange={setIsAddInstanceDialogOpen}
-          onCreated={setSelectedInstanceId}
+          onCreated={(instanceId) => {
+            // Added instances are never aix-managed, so they live in the Personal view.
+            setSelectedInstanceId(instanceId);
+            setProviderViewScope("personal");
+          }}
         />
       ) : null}
     </>

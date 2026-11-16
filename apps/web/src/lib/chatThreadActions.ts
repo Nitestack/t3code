@@ -7,6 +7,10 @@ import type {
   ScopedProjectRef,
 } from "@t3tools/contracts";
 import { resolveProjectScope, type EnvironmentScope } from "@t3tools/client-runtime/environment";
+import {
+  isModelSelectionInProjectScope,
+  type DraftDefaultProvider,
+} from "@t3tools/client-runtime/provider-picker-hierarchy";
 import type { ComposerThreadDraftState, DraftThreadEnvMode } from "../composerDraftStore";
 
 type ComposerModelSelectionState = Pick<
@@ -58,10 +62,22 @@ export function resolveNewThreadModelSelectionOverride(input: {
   readonly carrySelection: ModelSelection | null;
   readonly carrySourceDraftId: string | null;
   readonly destinationDraftId: string;
+  readonly scope?: "personal" | "work" | undefined;
+  readonly providers?: ReadonlyArray<Pick<DraftDefaultProvider, "instanceId" | "aixProfile">>;
 }): ModelSelection | null {
+  const inScope = (selection: ModelSelection | null) =>
+    selection !== null &&
+    (input.scope === undefined ||
+      isModelSelectionInProjectScope({
+        scope: input.scope,
+        selection,
+        providers: input.providers ?? [],
+      }));
   return (
-    input.projectDefaultSelection ??
-    (input.carrySourceDraftId === input.destinationDraftId ? null : input.carrySelection)
+    (inScope(input.projectDefaultSelection) ? input.projectDefaultSelection : null) ??
+    (input.carrySourceDraftId === input.destinationDraftId || !inScope(input.carrySelection)
+      ? null
+      : input.carrySelection)
   );
 }
 

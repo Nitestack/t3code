@@ -15,6 +15,8 @@ import {
 } from "../../modelSelection";
 import { providerInstanceEntriesFor } from "../../providerInstances";
 import { useEnvironmentProviders, useEnvironments } from "../../state/environments";
+import { useProjects } from "../../state/entities";
+import { resolveModelPickerProjectScope } from "@t3tools/client-runtime/provider-picker-hierarchy";
 import { firstManagedDenial } from "../../state/managedPolicy";
 import { EMPTY_SERVER_PROVIDERS } from "../../state/server";
 import { resolveEnvModeLabel, WORKTREE_SUBMODULES_LABELS } from "../BranchToolbar.logic";
@@ -55,6 +57,7 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
   const updateSettings = useUpdateScopedSettings();
   const navigate = useNavigate();
   const { environments } = useEnvironments();
+  const projects = useProjects();
   const providersByEnvironment = useEnvironmentProviders();
   const representative = target
     ? environments.find((environment) => environment.environmentId === target.environmentId)
@@ -78,6 +81,17 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
     selection?.model,
   );
   const activeEntry = entries.find((entry) => entry.instanceId === selection?.instanceId);
+  const projectScope =
+    target?.projectId &&
+    representative?.serverConfig?.environment.capabilities.projectScope === true
+      ? resolveModelPickerProjectScope(
+          projects.find(
+            (project) =>
+              project.environmentId === target.environmentId && project.id === target.projectId,
+          )?.scope,
+          true,
+        )
+      : undefined;
   const mixedModel = defaultModelSelectionsAreMixed(
     clientSettings,
     targets.map((candidate) => ({
@@ -156,6 +170,7 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
               environmentId={representative?.environmentId ?? null}
               activeInstanceId={selection.instanceId}
               model={selection.model}
+              {...(projectScope ? { projectScope } : {})}
               lockedProvider={null}
               instanceEntries={entries}
               modelOptionsByInstance={modelOptions}
@@ -267,6 +282,7 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
               environmentId={representative?.environmentId ?? null}
               activeInstanceId={fallbackSelection.instanceId}
               model={fallbackSelection.model}
+              {...(projectScope ? { projectScope } : {})}
               lockedProvider={null}
               instanceEntries={entries}
               modelOptionsByInstance={fallbackModelOptions}

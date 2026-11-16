@@ -449,12 +449,15 @@ export function UsageLimitsSection({
               <View className="flex-row items-center gap-2 px-1">
                 {pool.profileName ? null : <ProviderIcon provider={pool.driver} size={18} />}
                 <Text className="text-base font-t3-medium text-foreground">
-                  {pool.profileName ?? providerClients.get(pool.driver)?.label ?? pool.driver}
+                  {pool.profileLabel ??
+                    pool.profileName ??
+                    providerClients.get(pool.driver)?.label ??
+                    pool.driver}
                 </Text>
               </View>
               {pool.profileName ? (
                 <Text className="-mt-2 px-1 text-xs text-foreground-muted">
-                  AIX profile
+                  Work profile
                   {pool.accounts[0]?.environments[0]?.label
                     ? ` · ${pool.accounts[0].environments[0].label}`
                     : ""}
@@ -564,7 +567,7 @@ export function UsageLimitAccountScreen({ route }: AccountScreenProps) {
   const reset = pool?.resets.find((candidate) => candidate.member.account.key === accountKey);
   const [revealed, setRevealed] = useState(false);
   return (
-    <SettingsScreen title={account?.profileName ?? "Account"}>
+    <SettingsScreen title={account?.profileLabel ?? account?.profileName ?? "Account"}>
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
         contentContainerClassName="gap-5 p-5"

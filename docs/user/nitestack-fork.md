@@ -20,10 +20,13 @@ T3 reads the profile list from aix and asks aix for each profile's endpoint and 
 process. Keys are never written to T3 settings or sent to clients. ChatGPT sign-in profiles are not
 supported; keep using the regular Codex provider for a ChatGPT subscription.
 
-Each usable profile appears in the model picker as one or more provider instances named after the
-profile, such as `Work · Codex` or `Work · OpenCode`. A model's details show its family, context
-window, maximum output, input and output prices per million tokens, and reasoning levels. Values the
-gateway does not report show as Unknown. The model ID sent to the gateway is the original ID.
+The model picker follows the selected project's scope. Personal projects show subscription
+providers. Work projects show aix instances; choose a profile from the picker footer to see its
+Codex, Claude Code, and OpenCode instances (for example, `adCare · Codex`). If a thread already
+uses a model from the other scope, that selection stays visible until you choose another model.
+A model's details show its family, context window, maximum output, input and output prices per
+million tokens, and reasoning levels. Values the gateway does not report show as Unknown. The model
+ID sent to the gateway is the original ID.
 
 Each model runs in the agent that matches its family:
 

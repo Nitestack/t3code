@@ -17,6 +17,7 @@ import {
   type ProjectId,
   type ProviderInteractionMode,
   type ProviderOptionSelection,
+  type ProjectScope,
   type RuntimeMode,
   type ScopedThreadRef,
   type ThreadId,
@@ -526,6 +527,7 @@ const PersistedComposerDraftsSchema = Schema.Struct({
   schemaVersion: Schema.Literal(COMPOSER_DRAFTS_SCHEMA_VERSION),
   drafts: Schema.Record(Schema.String, ComposerDraftSchema),
   stickyModelSelection: Schema.optional(ModelSelectionSchema),
+  stickyModelSelectionByScope: Schema.optional(Schema.Unknown),
   modelOptionMemory: Schema.optional(
     Schema.Record(
       Schema.String,
@@ -547,6 +549,20 @@ const PersistedComposerDraftsSchema = Schema.Struct({
 const decodePersistedComposerDraftsDocument = Schema.decodeUnknownSync(
   PersistedComposerDraftsSchema,
 );
+const decodeStickyModelSelection = Schema.decodeUnknownOption(ModelSelectionSchema);
+
+function persistedStickyModelSelectionsByScope(
+  value: unknown,
+): StickyComposerModelSelectionByScope {
+  const record =
+    value !== null && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  return {
+    personal: Option.getOrNull(decodeStickyModelSelection(record.personal)),
+    work: Option.getOrNull(decodeStickyModelSelection(record.work)),
+  };
+}
 
 const EMPTY_DRAFT: ComposerDraft = {
   text: "",
@@ -568,10 +584,13 @@ export const composerDraftsLoadedAtom = Atom.make(false).pipe(
   Atom.withLabel("mobile:composer-drafts-loaded"),
 );
 
-export const stickyComposerModelSelectionAtom = Atom.make<ModelSelection | null>(null).pipe(
-  Atom.keepAlive,
-  Atom.withLabel("mobile:sticky-composer-model-selection"),
-);
+type StickyComposerModelSelectionByScope = Record<ProjectScope, ModelSelection | null>;
+
+export const stickyComposerModelSelectionByScopeAtom =
+  Atom.make<StickyComposerModelSelectionByScope>({
+    personal: null,
+    work: null,
+  }).pipe(Atom.keepAlive, Atom.withLabel("mobile:sticky-composer-model-selection-by-scope"));
 
 export type ModelOptionMemoryState = Readonly<
   Record<string, Readonly<Record<string, ReadonlyArray<ProviderOptionSelection>>>>
@@ -747,11 +766,19 @@ export function migrateLegacyNewTaskDraft(
 export function decodePersistedComposerState(value: unknown): {
   readonly drafts: Record<string, ComposerDraft>;
   readonly stickyModelSelection: ModelSelection | null;
+  readonly stickyModelSelectionByScope: StickyComposerModelSelectionByScope;
   readonly modelOptionMemory: ModelOptionMemoryState;
   readonly cloudDrafts: ComposerCloudDraftState;
 } {
   const parsed = decodePersistedComposerDraftsDocument(value);
   const now = new Date().toISOString();
+  const stickyModelSelectionByScope: StickyComposerModelSelectionByScope = {
+    ...persistedStickyModelSelectionsByScope(parsed.stickyModelSelectionByScope),
+  };
+  if (parsed.stickyModelSelection) {
+    const scope = parsed.stickyModelSelection.instanceId.startsWith("aix-") ? "work" : "personal";
+    stickyModelSelectionByScope[scope] ??= parsed.stickyModelSelection;
+  }
   return {
     drafts: Object.fromEntries(
       Object.entries(parsed.drafts)
@@ -776,6 +803,7 @@ export function decodePersistedComposerState(value: unknown): {
         .filter(([key]) => !isQueuedEditDraftKey(key)),
     ),
     stickyModelSelection: parsed.stickyModelSelection ?? null,
+    stickyModelSelectionByScope,
     modelOptionMemory: parsed.modelOptionMemory ?? {},
     cloudDrafts: {
       accountId: parsed.cloudAccountId ?? null,
@@ -813,6 +841,7 @@ async function loadPersistedComposerState(): Promise<
       return {
         drafts: {},
         stickyModelSelection: null,
+        stickyModelSelectionByScope: { personal: null, work: null },
         modelOptionMemory: {},
         cloudDrafts: { accountId: null, signedOut: {} },
       };
@@ -833,7 +862,7 @@ async function loadPersistedComposerState(): Promise<
 
 async function writePersistedComposerState(
   drafts: Record<string, ComposerDraft>,
-  stickyModelSelection: ModelSelection | null,
+  stickyModelSelectionByScope: StickyComposerModelSelectionByScope,
   cloudDrafts = appAtomRegistry.get(composerCloudDraftsAtom),
 ): Promise<void> {
   let operation: ComposerDraftPersistenceError["operation"] = "open";
@@ -846,7 +875,7 @@ async function writePersistedComposerState(
     const document = {
       schemaVersion: COMPOSER_DRAFTS_SCHEMA_VERSION,
       drafts: nonEmptyDrafts,
-      ...(stickyModelSelection ? { stickyModelSelection } : {}),
+      stickyModelSelectionByScope,
       ...(Object.keys(appAtomRegistry.get(modelOptionMemoryAtom)).length > 0
         ? { modelOptionMemory: appAtomRegistry.get(modelOptionMemoryAtom) }
         : {}),
@@ -895,7 +924,7 @@ export async function flushComposerDrafts(): Promise<void> {
         await persistenceQueue.run(() =>
           writePersistedComposerState(
             appAtomRegistry.get(composerDraftsAtom),
-            appAtomRegistry.get(stickyComposerModelSelectionAtom),
+            appAtomRegistry.get(stickyComposerModelSelectionByScopeAtom),
           ),
         );
       } catch (error) {
@@ -1099,7 +1128,7 @@ export function schedulePersistComposerState(): void {
         await waitForComposerDraftsLoaded();
         await writePersistedComposerState(
           appAtomRegistry.get(composerDraftsAtom),
-          appAtomRegistry.get(stickyComposerModelSelectionAtom),
+          appAtomRegistry.get(stickyComposerModelSelectionByScopeAtom),
         );
         persistRetryNeeded = false;
       } catch (error) {
@@ -1124,12 +1153,11 @@ export function ensureComposerDraftsLoaded(): void {
         ...current,
       });
     }
-    if (
-      persisted.stickyModelSelection !== null &&
-      appAtomRegistry.get(stickyComposerModelSelectionAtom) === null
-    ) {
-      appAtomRegistry.set(stickyComposerModelSelectionAtom, persisted.stickyModelSelection);
-    }
+    const currentStickyByScope = appAtomRegistry.get(stickyComposerModelSelectionByScopeAtom);
+    appAtomRegistry.set(stickyComposerModelSelectionByScopeAtom, {
+      personal: currentStickyByScope.personal ?? persisted.stickyModelSelectionByScope.personal,
+      work: currentStickyByScope.work ?? persisted.stickyModelSelectionByScope.work,
+    });
     if (Object.keys(persisted.modelOptionMemory).length > 0) {
       const current = appAtomRegistry.get(modelOptionMemoryAtom);
       appAtomRegistry.set(modelOptionMemoryAtom, {
@@ -1370,7 +1398,11 @@ function updateComposerDrafts(
 }
 
 export function setStickyComposerModelSelection(modelSelection: ModelSelection): void {
-  appAtomRegistry.set(stickyComposerModelSelectionAtom, modelSelection);
+  const scope = modelSelection.instanceId.startsWith("aix-") ? "work" : "personal";
+  appAtomRegistry.update(stickyComposerModelSelectionByScopeAtom, (current) => ({
+    ...current,
+    [scope]: modelSelection,
+  }));
   schedulePersistComposerState();
 }
 
@@ -1861,7 +1893,7 @@ export async function mergeComposerDraftContent(
     appAtomRegistry.set(composerDraftsAtom, next);
   }
   await persistenceQueue.run(() =>
-    writePersistedComposerState(next, appAtomRegistry.get(stickyComposerModelSelectionAtom)),
+    writePersistedComposerState(next, appAtomRegistry.get(stickyComposerModelSelectionByScopeAtom)),
   );
   return { skippedAttachmentCount };
 }
@@ -1953,7 +1985,7 @@ export async function undoComposerDraftMerge(
   );
   appAtomRegistry.set(composerDraftsAtom, next);
   await persistenceQueue.run(() =>
-    writePersistedComposerState(next, appAtomRegistry.get(stickyComposerModelSelectionAtom)),
+    writePersistedComposerState(next, appAtomRegistry.get(stickyComposerModelSelectionByScopeAtom)),
   );
 }
 
@@ -2121,7 +2153,7 @@ export async function clearComposerDraftsEnvironment(environmentId: EnvironmentI
   }
   appAtomRegistry.set(composerDraftsAtom, next);
   await persistenceQueue.run(() =>
-    writePersistedComposerState(next, appAtomRegistry.get(stickyComposerModelSelectionAtom)),
+    writePersistedComposerState(next, appAtomRegistry.get(stickyComposerModelSelectionByScopeAtom)),
   );
   await releaseUnusedComposerAttachmentFiles(removedAttachments);
 }
@@ -2221,11 +2253,11 @@ export function useComposerDraft(draftKey: string | null): ComposerDraft {
   return draft;
 }
 
-export function useStickyComposerModelSelection(): ModelSelection | null {
-  const selection = useAtomValue(stickyComposerModelSelectionAtom);
+export function useStickyComposerModelSelections(): StickyComposerModelSelectionByScope {
+  const selections = useAtomValue(stickyComposerModelSelectionByScopeAtom);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- starts loading persisted composer drafts from native storage on first use
   useEffect(() => {
     ensureComposerDraftsLoaded();
   }, []);
-  return selection;
+  return selections;
 }

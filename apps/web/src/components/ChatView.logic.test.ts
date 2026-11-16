@@ -60,6 +60,7 @@ import { makeThreadFixture, makeThreadProjectionFixture } from "../test-fixtures
 import {
   getAntigravitySendBlockReason,
   resolveComposerProviderSelection,
+  resolveDraftFallbackBannerDefault,
   resolveWorktreeSetupProgress,
   peekRememberedThreadTimeline,
   rememberReadyThreadTimeline,
@@ -182,6 +183,38 @@ describe("buildExpiredTerminalContextToastCopy", () => {
     expect(buildExpiredTerminalContextToastCopy(1, "omitted").description).toBe(
       "Re-add it if you want that terminal output included.",
     );
+  });
+});
+
+it("keeps a fallback banner's default provider, model, and action selection together", () => {
+  const selection = {
+    instanceId: ProviderInstanceId.make("claudeAgent"),
+    model: "claude-sonnet",
+  };
+  const resolved = resolveDraftFallbackBannerDefault({
+    selection,
+    providers: [
+      {
+        instanceId: ProviderInstanceId.make("codex"),
+        driver: ProviderDriverKind.make("codex"),
+        displayName: "Codex",
+        models: [{ slug: "gpt", name: "GPT", isCustom: false, capabilities: null }],
+      },
+      {
+        instanceId: ProviderInstanceId.make("claudeAgent"),
+        driver: ProviderDriverKind.make("claudeAgent"),
+        displayName: "Claude",
+        models: [
+          { slug: "claude-sonnet", name: "Claude Sonnet", isCustom: false, capabilities: null },
+        ],
+      },
+    ],
+  });
+
+  expect(resolved).toEqual({
+    selection,
+    providerName: "Claude",
+    modelName: "Claude Sonnet",
   });
 });
 
@@ -734,6 +767,19 @@ describe("resolveComposerProviderSelection", () => {
     expect(
       getAntigravitySendBlockReason(selection.selectedProviderEntry?.snapshot, "gemini-pro"),
     ).toBe("Sign in to Antigravity in provider settings before sending.");
+  });
+
+  it("does not select an aix provider as an implicit personal draft fallback", () => {
+    const aix = entry("codex", "aix-codex-team", { aixProfile: "team" });
+    const selection = resolveComposerProviderSelection({
+      entries: [aix],
+      candidateInstanceIds: [],
+      lockedProvider: null,
+      lockedInstanceId: null,
+      draftScope: "personal",
+    });
+
+    expect(selection.selectedProviderEntry).toBeUndefined();
   });
 
   it("blocks a saved model that a ready catalog no longer lists", () => {

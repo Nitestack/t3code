@@ -26,6 +26,7 @@ import {
   ThreadContextRecord,
   EnvironmentContextRecord,
   type ServerProvider,
+  type ProjectScope,
   type ScopedProjectRef,
   type ScopedThreadRef,
   ThreadId,
@@ -198,7 +199,7 @@ function mergeComposerDraftStates(
     ),
     ...pick("stickyModelSelectionByProvider"),
     ...pick("stickyOptionsByModelByProvider"),
-    ...pick("stickyActiveProvider"),
+    ...pick("stickyActiveProviderByScope"),
   };
 }
 
@@ -441,9 +442,18 @@ const PersistedComposerDraftStoreState = Schema.Struct({
   stickyOptionsByModelByProvider: Schema.optionalKey(
     Schema.Record(ProviderInstanceId, Schema.Record(Schema.String, ProviderOptionSelections)),
   ),
+  stickyActiveProviderByScope: Schema.optionalKey(
+    Schema.Struct({
+      personal: Schema.NullOr(ProviderInstanceId),
+      work: Schema.NullOr(ProviderInstanceId),
+    }),
+  ),
+  // Read older persisted snapshots, then migrate this global selection by instance scope.
   stickyActiveProvider: Schema.optionalKey(Schema.NullOr(ProviderInstanceId)),
 });
 type PersistedComposerDraftStoreState = typeof PersistedComposerDraftStoreState.Type;
+
+type StickyActiveProviderByScope = Record<ProjectScope, ProviderInstanceId | null>;
 
 const PersistedComposerDraftStoreStorage = Schema.Struct({
   version: Schema.Number,
@@ -562,7 +572,7 @@ interface ComposerDraftStoreState {
   stickyOptionsByModelByProvider: Partial<
     Record<ProviderInstanceId, Partial<Record<string, ReadonlyArray<ProviderOptionSelection>>>>
   >;
-  stickyActiveProvider: ProviderInstanceId | null;
+  stickyActiveProviderByScope: StickyActiveProviderByScope;
   getComposerDraft: (target: ComposerThreadTarget) => ComposerThreadDraftState | null;
   getDraftSessionByLogicalProjectKey: (logicalProjectKey: string) => ProjectDraftSession | null;
   getDraftThreadByProjectRef: (projectRef: ScopedProjectRef) => ProjectDraftSession | null;
@@ -648,7 +658,7 @@ interface ComposerDraftStoreState {
   ) => void;
   /** Lets the thread's model show again once the server accepted this exact pick. */
   releaseModelSelection: (threadRef: ScopedThreadRef, modelSelection: ModelSelection) => void;
-  applyStickyState: (threadRef: ComposerThreadTarget) => void;
+  applyStickyState: (threadRef: ComposerThreadTarget, scope?: ProjectScope) => void;
   setProviderModelOptions: (
     threadRef: ComposerThreadTarget,
     provider: ProviderDriverKind,
@@ -848,7 +858,7 @@ const EMPTY_PERSISTED_DRAFT_STORE_STATE = Object.freeze<PersistedComposerDraftSt
   logicalProjectDraftThreadKeyByLogicalProjectKey: {},
   stickyModelSelectionByProvider: {},
   stickyOptionsByModelByProvider: {},
-  stickyActiveProvider: null,
+  stickyActiveProviderByScope: { personal: null, work: null },
 });
 
 const EMPTY_IMAGES: ComposerImageAttachment[] = [];
@@ -2467,7 +2477,7 @@ export function partializeComposerDraftStoreState(
     stickyOptionsByModelByProvider: compactStickyOptionsByModel(
       state.stickyOptionsByModelByProvider,
     ),
-    stickyActiveProvider: state.stickyActiveProvider,
+    stickyActiveProviderByScope: state.stickyActiveProviderByScope,
   };
 }
 
@@ -2526,6 +2536,22 @@ function normalizeCurrentPersistedComposerDraftStoreState(
     stickyActiveProvider = normalizeProviderInstanceId(normalizedPersistedState.stickyProvider);
   }
 
+  const persistedStickyByScope = normalizedPersistedState.stickyActiveProviderByScope;
+  const personalSticky = normalizeProviderInstanceId(persistedStickyByScope?.personal);
+  const workSticky = normalizeProviderInstanceId(persistedStickyByScope?.work);
+  const stickyActiveProviderByScope: StickyActiveProviderByScope = persistedStickyByScope
+    ? {
+        personal: personalSticky?.startsWith("aix-") ? null : (personalSticky ?? null),
+        work: workSticky?.startsWith("aix-") ? workSticky : null,
+      }
+    : { personal: null, work: null };
+  const legacyStickyActive =
+    stickyActiveProvider ?? normalizeProviderInstanceId(normalizedPersistedState.stickyProvider);
+  if (legacyStickyActive) {
+    stickyActiveProviderByScope[legacyStickyActive.startsWith("aix-") ? "work" : "personal"] ??=
+      legacyStickyActive;
+  }
+
   return {
     draftsByThreadKey: normalizePersistedDraftsByThreadId(
       normalizedPersistedState.draftsByThreadKey ?? normalizedPersistedState.draftsByThreadId,
@@ -2538,7 +2564,7 @@ function normalizeCurrentPersistedComposerDraftStoreState(
       normalizedPersistedState.stickyOptionsByModelByProvider === undefined
         ? seedStickyOptionsByModel(stickyModelSelectionByProvider)
         : compactStickyOptionsByModel(normalizedPersistedState.stickyOptionsByModelByProvider),
-    stickyActiveProvider,
+    stickyActiveProviderByScope,
   };
 }
 
@@ -2779,7 +2805,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
         rewindingThreadKeys: new Set<string>(),
         stickyModelSelectionByProvider: {},
         stickyOptionsByModelByProvider: {},
-        stickyActiveProvider: null,
+        stickyActiveProviderByScope: { personal: null, work: null },
         getComposerDraft: (target) => getComposerDraftState(get(), target),
         getDraftSessionByLogicalProjectKey: (logicalProjectKey) => {
           const normalizedLogicalProjectKey = logicalProjectDraftKey(logicalProjectKey);
@@ -3194,25 +3220,39 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               ...state.stickyModelSelectionByProvider,
               [normalized.instanceId]: nextSelection,
             };
+            const scope = normalized.instanceId.startsWith("aix-") ? "work" : "personal";
             if (Equal.equals(state.stickyModelSelectionByProvider, nextMap)) {
-              return state.stickyActiveProvider === normalized.instanceId
+              return state.stickyActiveProviderByScope[scope] === normalized.instanceId
                 ? state
-                : { stickyActiveProvider: normalized.instanceId };
+                : {
+                    stickyActiveProviderByScope: {
+                      ...state.stickyActiveProviderByScope,
+                      [scope]: normalized.instanceId,
+                    },
+                  };
             }
             return {
               stickyModelSelectionByProvider: nextMap,
-              stickyActiveProvider: normalized.instanceId,
+              stickyActiveProviderByScope: {
+                ...state.stickyActiveProviderByScope,
+                [scope]: normalized.instanceId,
+              },
             };
           });
         },
-        applyStickyState: (threadRef) => {
+        applyStickyState: (threadRef, scope = "personal") => {
           const threadKey = resolveComposerDraftKey(get(), threadRef) ?? "";
           if (threadKey.length === 0) {
             return;
           }
           set((state) => {
             const stickyMap = state.stickyModelSelectionByProvider;
-            const stickyActiveProvider = state.stickyActiveProvider;
+            const storedStickyProvider = state.stickyActiveProviderByScope[scope];
+            const stickyActiveProvider =
+              storedStickyProvider &&
+              (storedStickyProvider.startsWith("aix-") ? "work" : "personal") === scope
+                ? storedStickyProvider
+                : null;
             const existing = state.draftsByThreadKey[threadKey];
             const base = existing ?? createEmptyThreadDraft();
             const nextMap = compactModelSelectionByProvider(stickyMap);
@@ -3317,8 +3357,10 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
                   current?.options,
                 );
               }
+            } else if (base.activeProvider) {
+              delete nextMap[base.activeProvider];
             }
-            const nextActiveProvider = normalized?.instanceId ?? base.activeProvider;
+            const nextActiveProvider = normalized?.instanceId ?? null;
             if (
               opts?.explicit !== true &&
               Equal.equals(base.modelSelectionByProvider, nextMap) &&
@@ -3396,7 +3438,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
 
             let nextStickyMap = state.stickyModelSelectionByProvider;
             let nextOptionsByModel = state.stickyOptionsByModelByProvider;
-            let nextStickyActiveProvider = state.stickyActiveProvider;
+            let nextStickyActiveProviderByScope = state.stickyActiveProviderByScope;
             if (options?.persistSticky === true) {
               nextStickyMap = { ...state.stickyModelSelectionByProvider };
               const stickyBase =
@@ -3436,9 +3478,14 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
                   [instanceKey]: rememberedByModel,
                 };
               }
-              nextStickyActiveProvider = options.instanceId
+              const activeProvider = options.instanceId
                 ? instanceKey
                 : (base.activeProvider ?? instanceKey);
+              const stickyScope = activeProvider.startsWith("aix-") ? "work" : "personal";
+              nextStickyActiveProviderByScope = {
+                ...state.stickyActiveProviderByScope,
+                [stickyScope]: activeProvider,
+              };
             }
 
             const { modelSelectionExplicit: _previousExplicit, ...restBase } = base;
@@ -3461,7 +3508,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
                 ? {
                     stickyModelSelectionByProvider: nextStickyMap,
                     stickyOptionsByModelByProvider: nextOptionsByModel,
-                    stickyActiveProvider: nextStickyActiveProvider,
+                    stickyActiveProviderByScope: nextStickyActiveProviderByScope,
                   }
                 : {}),
             };
@@ -4475,7 +4522,10 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             normalizedPersisted.logicalProjectDraftThreadKeyByLogicalProjectKey,
           stickyModelSelectionByProvider: normalizedPersisted.stickyModelSelectionByProvider ?? {},
           stickyOptionsByModelByProvider: normalizedPersisted.stickyOptionsByModelByProvider ?? {},
-          stickyActiveProvider: normalizedPersisted.stickyActiveProvider ?? null,
+          stickyActiveProviderByScope: normalizedPersisted.stickyActiveProviderByScope ?? {
+            personal: null,
+            work: null,
+          },
         };
       },
     },

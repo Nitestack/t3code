@@ -19,6 +19,10 @@ const CARRIED_SELECTION: ModelSelection = {
   instanceId: ProviderInstanceId.make("codex"),
   model: "carried-model",
 };
+const WORK_CARRIED_SELECTION: ModelSelection = {
+  instanceId: ProviderInstanceId.make("aix-codex-team"),
+  model: "work-model",
+};
 
 describe("chatThreadActions", () => {
   it("does not carry a non-explicit model from the destination draft back into itself", () => {
@@ -41,6 +45,29 @@ describe("chatThreadActions", () => {
         destinationDraftId: "draft-b",
       }),
     ).toEqual(PROJECT_DEFAULT_SELECTION);
+  });
+
+  it("carries a route model only when it belongs to the destination scope", () => {
+    expect(
+      resolveNewThreadModelSelectionOverride({
+        projectDefaultSelection: null,
+        carrySelection: CARRIED_SELECTION,
+        carrySourceDraftId: null,
+        destinationDraftId: "draft-new",
+        scope: "personal",
+        providers: [{ instanceId: CARRIED_SELECTION.instanceId }],
+      }),
+    ).toEqual(CARRIED_SELECTION);
+    expect(
+      resolveNewThreadModelSelectionOverride({
+        projectDefaultSelection: null,
+        carrySelection: WORK_CARRIED_SELECTION,
+        carrySourceDraftId: null,
+        destinationDraftId: "draft-new",
+        scope: "personal",
+        providers: [{ instanceId: WORK_CARRIED_SELECTION.instanceId }],
+      }),
+    ).toBeNull();
   });
 
   it("uses the selected scope's project when the open thread belongs to another scope", () => {

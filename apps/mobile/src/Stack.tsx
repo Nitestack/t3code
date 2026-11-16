@@ -1,4 +1,7 @@
-import { isDraftThreadRoute } from "./features/threads/thread-route-state";
+import {
+  decodeDraftCarriedSelection,
+  isDraftThreadRoute,
+} from "./features/threads/thread-route-state";
 import { ComponentCatalogScreen } from "./features/development/ComponentCatalogScreen";
 import { PullRequestGuideStopScreen } from "./features/pull-requests/guide/PullRequestGuideScreen";
 import { PullRequestInlineCommentScreen } from "./features/pull-requests/PullRequestInlineCommentScreen";
@@ -400,7 +403,14 @@ function RootStackLayout(props: {
     draftRoute !== undefined &&
     props.state.routes.findLast((route) => route.name === "Thread") === draftRoute;
   const draftParams = (
-    draftRoute?.params as { draft?: { draftId?: string | string[] } } | undefined
+    draftRoute?.params as
+      | {
+          draft?: {
+            draftId?: string | string[];
+            carriedSelection?: unknown;
+          };
+        }
+      | undefined
   )?.draft;
   const routeDraftId = Array.isArray(draftParams?.draftId)
     ? draftParams.draftId[0]
@@ -411,6 +421,7 @@ function RootStackLayout(props: {
       active={draftRouteOnTop}
       flowKey={draftRoute === undefined ? undefined : newTaskFlowKey(draftRoute)}
       routeDraftId={routeDraftId}
+      carriedSelection={decodeDraftCarriedSelection(draftParams?.carriedSelection)}
     >
       <HardwareKeyboardCommandProvider pathname={pathname}>
         <ShowcaseReadyMarker />

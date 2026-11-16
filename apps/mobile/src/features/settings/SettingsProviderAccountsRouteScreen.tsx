@@ -7,6 +7,7 @@ import {
 import {
   AuthProvidersManageScope,
   isManagedDriverAllowed,
+  PROVIDER_DISPLAY_NAMES,
   type ProviderAuthResponse,
   type ServerProvider,
 } from "@t3tools/contracts";
@@ -21,12 +22,18 @@ import { AppActivityIndicator } from "../../components/ui/AppActivityIndicator";
 import { AppText as Text } from "../../components/ui/AppText";
 import { ControlPill } from "../../components/ui/ControlPill";
 import { Menu } from "../../components/ui/Menu";
+import { SegmentedControl } from "../../components/ui/SegmentedControl";
 import { ScreenScrollView } from "../../components/ui/ScreenScrollView";
 import { environmentPresentations } from "../../state/presentation";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
 import { useEnvironmentsWithScope } from "../../state/session";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { useMobileEnvironmentScope } from "../environment-scope/useMobileEnvironmentScope";
+import {
+  providerSettingsRowLabels,
+  resolveProviderSettingsHierarchy,
+} from "@t3tools/client-runtime/provider-settings-hierarchy";
 import { ListActionRow as SettingsActionRow } from "../../components/ui/ListActionRow";
 import { useSettingsEnvironmentMenu } from "./components/SettingsEnvironmentFilterHeader";
 import { SettingsScreen } from "./components/SettingsScreen";
@@ -82,6 +89,9 @@ function EnvironmentProviders({
   readonly environment: SettingsTarget;
   readonly providers: ReadonlyArray<ServerProvider>;
 }) {
+  const { activeScope } = useMobileEnvironmentScope();
+  const [scope, setScope] = useState(activeScope);
+  const [profileId, setProfileId] = useState<string | undefined>();
   const accounts = providers.filter(canManageProvider);
   // Claude has no in-app sign-in; each account is its own instance on a signed-in config folder.
   const claudeAccounts = providers.filter(
@@ -91,9 +101,52 @@ function EnvironmentProviders({
     environment.serverConfig.managedPolicy,
     CLAUDE_DRIVER,
   );
+  const hierarchy = resolveProviderSettingsHierarchy({
+    entries: providers.map((provider) => ({
+      instanceId: provider.instanceId,
+      driverKind: provider.driver,
+      enabled: provider.enabled,
+      aixProfile: provider.aixProfile,
+      aixProfileLabel: provider.aixProfileLabel,
+    })),
+    scope,
+    profileId,
+  });
+  const visibleIds = new Set(hierarchy.visibleEntries.map((provider) => provider.instanceId));
+  const visibleAccounts = accounts.filter((provider) => visibleIds.has(provider.instanceId));
+  const visibleClaudeAccounts = claudeAccounts.filter((provider) =>
+    visibleIds.has(provider.instanceId),
+  );
+  const selectedProfile = hierarchy.profiles.find((profile) => profile.id === hierarchy.profileId);
   return (
     <>
-      {accounts.map((provider, index) => (
+      {hierarchy.hasAixProfiles ? (
+        <View className="gap-2 border-b border-border-subtle p-3">
+          <SegmentedControl
+            options={[
+              { value: "personal", label: "Personal" },
+              { value: "work", label: "Work" },
+            ]}
+            selected={scope}
+            onSelect={(value) => setScope(value)}
+            size="compact"
+          />
+          {scope === "work" && hierarchy.profiles.length > 0 ? (
+            <Menu
+              title="Work profile"
+              actions={hierarchy.profiles.map((profile) => ({
+                id: profile.id,
+                title: profile.label,
+                state: hierarchy.profileId === profile.id ? "on" : "off",
+              }))}
+              onPressAction={({ nativeEvent }) => setProfileId(nativeEvent.event)}
+            >
+              <ControlPill label={selectedProfile?.label ?? "Select profile"} />
+            </Menu>
+          ) : null}
+        </View>
+      ) : null}
+      {visibleAccounts.map((provider, index) => (
         <ProviderAccount
           key={provider.instanceId}
           environment={environment}
@@ -101,15 +154,19 @@ function EnvironmentProviders({
           divider={index > 0}
         />
       ))}
-      {accounts.length === 0 ? (
+      {visibleAccounts.length === 0 && visibleClaudeAccounts.length === 0 ? (
         <Text className="p-4 text-foreground-muted">
-          Configure a provider with in-app sign-in in web or desktop Settings.
+          {hierarchy.scope === "work"
+            ? "No providers in this profile."
+            : "Configure a provider with in-app sign-in in web or desktop Settings."}
         </Text>
       ) : null}
-      {claudeAccounts.map((provider) => (
+      {visibleClaudeAccounts.map((provider) => (
         <ClaudeAccount key={provider.instanceId} environment={environment} provider={provider} />
       ))}
-      {canAddClaude ? <AddClaudeAccount environment={environment} /> : null}
+      {canAddClaude && hierarchy.scope === "personal" ? (
+        <AddClaudeAccount environment={environment} />
+      ) : null}
     </>
   );
 }
@@ -225,7 +282,6 @@ function ProviderAccount({
       />
     );
   }
-  const name = provider.displayName ?? provider.driver;
   const email = signedIn && !active && provider.enabled ? provider.auth.email?.trim() : undefined;
   const methods = state?.methods ?? [];
   // The status line says why a provider that is missing or turned off can't sign in.
@@ -259,6 +315,15 @@ function ProviderAccount({
                 : usesCredentials
                   ? "Connect to load models"
                   : "Not signed in";
+  const rowLabels = providerSettingsRowLabels({
+    driverLabel: PROVIDER_DISPLAY_NAMES[provider.driver] ?? String(provider.driver),
+    displayName: provider.displayName,
+    isAix: provider.aixProfile !== undefined,
+    version: provider.version,
+    status: status ?? "Checking provider status",
+    accountSource: signedIn ? (provider.auth.label ?? provider.auth.type) : undefined,
+  });
+  const name = `${rowLabels.title}${rowLabels.version ? ` ${rowLabels.version}` : ""}`;
   // A provider with several sign-in methods picks one from a menu on the same control.
   const methodActions: MenuAction[] = methods.map((method) => ({
     id: `method:${method.id}`,
@@ -405,7 +470,7 @@ function ProviderAccount({
             : "min-h-16 flex-row items-center gap-3 px-4 py-3"
         }
       >
-        <ProviderAccountSummary key={email} name={name} status={status} email={email} />
+        <ProviderAccountSummary key={email} name={name} status={rowLabels.detail} email={email} />
         {trailing}
       </View>
       {interaction?.type === "deviceCode" ||

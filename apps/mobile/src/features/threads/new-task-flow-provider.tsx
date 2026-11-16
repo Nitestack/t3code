@@ -1,5 +1,11 @@
 import { ActiveNewTaskContext } from "../../state/active-new-task";
 import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
+import {
+  isModelSelectionInProjectScope,
+  resolveDraftModelSelectionAfterUsageLimitFallback,
+  resolveDraftModelSelectionForScope,
+  resolveModelPickerProjectScope,
+} from "@t3tools/client-runtime/provider-picker-hierarchy";
 import { useNowMinuteMs } from "../../lib/clock";
 import * as Dialog from "../../components/ui/Dialog";
 import React, { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
@@ -15,6 +21,7 @@ import {
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   MessageId,
+  resolveProjectProviderInstanceEnabled,
   repositoryGroupingKeyOf,
   ThreadId,
 } from "@t3tools/contracts";
@@ -31,7 +38,6 @@ import {
   buildModelOptions,
   groupByProvider,
   resolveDefaultableModelSelection,
-  resolveNewTaskModelSelection,
   resolveSelectableModelSelection,
   serverConfigForCwd,
 } from "../../lib/modelOptions";
@@ -57,7 +63,7 @@ import {
   setStickyComposerModelSelection,
   updateComposerDraftSettings,
   useComposerDraft,
-  useStickyComposerModelSelection,
+  useStickyComposerModelSelections,
 } from "../../state/use-composer-drafts";
 import {
   rememberModelOptions,
@@ -225,6 +231,7 @@ export function NewTaskFlowProvider(
     /** Identifies the draft route this flow serves; a new key starts a fresh flow. */
     flowKey?: string;
     routeDraftId?: string;
+    carriedSelection?: ModelSelection;
   }>,
 ) {
   const allProjects = useProjects();
@@ -367,7 +374,7 @@ export function NewTaskFlowProvider(
   }, [scopedProjects, selectableProjects, selectedEnvironmentId]);
 
   const linkedEnvironments = useLinkedEnvironments(selectedProject?.environmentId ?? null);
-  const storedStickyModelSelection = useStickyComposerModelSelection();
+  const storedStickyModelsByScope = useStickyComposerModelSelections();
   const modelSelectionNow = useNowMinuteMs();
   const projectDefaults = useNewTaskProjectDefaults(selectedProject);
   const isScratchDraft = projectDefaults.isScratch;
@@ -480,6 +487,11 @@ export function NewTaskFlowProvider(
     projectDefaults.serverConfig,
     workspaceCwd,
   );
+  const projectScope = resolveModelPickerProjectScope(
+    selectedProject?.scope,
+    selectedEnvironmentServerConfig?.environment?.capabilities?.projectScope === true,
+  );
+  const storedStickyModelSelection = storedStickyModelsByScope[projectScope];
   // Keep the user's explicit choice separate from the resolved display value:
   // only the explicit flag is ever written back to the draft, so the resolved
   // value keeps tracking the server setting when the config loads late.
@@ -518,16 +530,63 @@ export function NewTaskFlowProvider(
     selectedProject?.id ?? null,
   );
 
-  const selectedDefaultModel = resolveNewTaskModelSelection({
-    draftSelection: draftModelSelection,
-    projectDefaultSelection: projectDefaultModelSelection,
-    stickySelection: stickyModelSelection,
-    modelOptions,
-  });
-  const selectedModel = resolveNewThreadModelSelection({
-    defaultSelection: selectedDefaultModel,
-    explicitSelection:
-      draftModelSelection ?? (projectDefaultModelSelection ? null : stickyModelSelection),
+  const resolverProviders = selectedEnvironmentServerConfig
+    ? selectedEnvironmentServerConfig.providers.map((provider) => ({
+        ...provider,
+        enabled: selectedEnvironmentServerConfig.settings
+          ? resolveProjectProviderInstanceEnabled(
+              selectedEnvironmentServerConfig.settings,
+              selectedProject?.id ?? null,
+              provider.instanceId,
+            )
+          : provider.enabled,
+      }))
+    : [];
+  const firstReadyProvider = resolverProviders.find(
+    (provider) =>
+      provider.enabled &&
+      provider.installed &&
+      provider.availability !== "unavailable" &&
+      provider.status === "ready" &&
+      isModelSelectionInProjectScope({
+        scope: projectScope,
+        selection: { instanceId: provider.instanceId, model: "" },
+        providers: resolverProviders,
+      }),
+  );
+  const firstReadyProviderOptions = firstReadyProvider
+    ? modelOptions.filter(
+        (option) =>
+          option.selection.instanceId === firstReadyProvider.instanceId && !option.isUnavailable,
+      )
+    : [];
+  const isCustomModelOption = (option: (typeof firstReadyProviderOptions)[number]) =>
+    firstReadyProvider?.models.find((model) => model.slug === option.selection.model)?.isCustom ===
+    true;
+  const orderedDefault =
+    firstReadyProviderOptions.find((option) => option.isDefault && !isCustomModelOption(option))
+      ?.selection ??
+    firstReadyProviderOptions.find((option) => !isCustomModelOption(option))?.selection ??
+    firstReadyProviderOptions[0]?.selection;
+
+  const scopedDefaultModel = selectedEnvironmentServerConfig
+    ? resolveDraftModelSelectionForScope({
+        scope: projectScope,
+        explicitSelection: draftModelSelection,
+        carriedSelection: props.carriedSelection,
+        stickySelection: stickyModelSelection,
+        normalDefault: projectDefaultModelSelection,
+        orderedDefault,
+        providers: resolverProviders,
+      })
+    : (draftModelSelection ??
+      [projectDefaultModelSelection, stickyModelSelection].find((selection) =>
+        isModelSelectionInProjectScope({ scope: projectScope, selection, providers: [] }),
+      ) ??
+      null);
+  const usageResolution = resolveNewThreadModelSelection({
+    defaultSelection: scopedDefaultModel,
+    explicitSelection: draftModelSelection,
     fallbackSelection: selectedEnvironmentServerConfig?.settings.fallbackModelSelection ?? null,
     providers: selectedEnvironmentServerConfig?.providers ?? [],
     ...(selectedEnvironmentServerConfig
@@ -535,7 +594,20 @@ export function NewTaskFlowProvider(
       : {}),
     projectId: selectedProject?.id ?? null,
     now: modelSelectionNow,
-  }).selection;
+  });
+  const selectedModel =
+    usageResolution.fallback && selectedEnvironmentServerConfig
+      ? resolveDraftModelSelectionAfterUsageLimitFallback({
+          scope: projectScope,
+          exhaustedSelection: scopedDefaultModel,
+          fallbackSelection: usageResolution.selection,
+          normalDefault: projectDefaultModelSelection,
+          carriedSelection: props.carriedSelection,
+          stickySelection: stickyModelSelection,
+          orderedDefault,
+          providers: resolverProviders,
+        })
+      : usageResolution.selection;
   const selectedModelKey = selectedModel
     ? `${selectedModel.instanceId}:${selectedModel.model}`
     : null;

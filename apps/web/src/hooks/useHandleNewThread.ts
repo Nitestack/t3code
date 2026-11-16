@@ -50,8 +50,16 @@ import { useAtomValue } from "@effect/atom-react";
 import { defaultProjectFallbackReadyAtom } from "../state/projects";
 import { useThreadRouteTarget } from "./useThreadRouteTarget";
 import { readUnloadedThreadCount } from "../state/olderSettledShelf";
-import { resolveProjectDefaultProviderModelSelection } from "../providerInstances";
+import {
+  draftDefaultProvidersFor,
+  resolveProjectDefaultProviderModelSelection,
+} from "../providerInstances";
 import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
+import {
+  resolveDraftModelSelectionAfterUsageLimitFallback,
+  resolveDraftModelSelectionForScope,
+  resolveModelPickerProjectScope,
+} from "@t3tools/client-runtime/provider-picker-hierarchy";
 import { filterProjectsByScope } from "@t3tools/client-runtime/environment";
 import { useClientEnvironmentScope } from "../environmentScope";
 
@@ -170,35 +178,85 @@ export function createNewThreadHandler(router: AnyRouter) {
       project?.id ?? null,
       project,
     );
+    const environmentConfig = environmentServerConfigs.get(projectRef.environmentId);
+    const providers = environmentConfig?.providers ?? [];
+    const resolverProviders = draftDefaultProvidersFor(
+      providers,
+      targetServerSettings,
+      projectRef.projectId,
+    );
+    const projectScope = resolveModelPickerProjectScope(
+      project?.scope,
+      environmentConfig?.environment?.capabilities?.projectScope === true,
+    );
     const configuredDefaultModelSelection = projectSettings.settings.defaultModelSelection ?? null;
+    const orderedDefaultModelSelection = resolveProjectDefaultProviderModelSelection(
+      providers,
+      targetServerSettings,
+      projectRef.projectId,
+    );
+    const stickyState = useComposerDraftStore.getState();
+    const stickyProviderForScope = stickyState.stickyActiveProviderByScope[projectScope];
+    const stickySelectionForScope = stickyProviderForScope
+      ? (stickyState.stickyModelSelectionByProvider[stickyProviderForScope] ?? null)
+      : null;
+    const carrySelectionForScope = resolveNewThreadModelSelectionOverride({
+      projectDefaultSelection: null,
+      carrySelection: carryModelSelection,
+      carrySourceDraftId: currentRouteTarget?.kind === "draft" ? currentRouteTarget.draftId : null,
+      destinationDraftId: "new-thread-selection",
+      scope: projectScope,
+      providers,
+    });
+    const defaultModelSelection = resolveDraftModelSelectionForScope({
+      scope: projectScope,
+      carriedSelection: carrySelectionForScope,
+      normalDefault: configuredDefaultModelSelection,
+      orderedDefault: orderedDefaultModelSelection,
+      stickySelection: stickySelectionForScope,
+      providers: resolverProviders,
+    });
     const fallbackResolution = resolveNewThreadModelSelection({
-      defaultSelection:
-        configuredDefaultModelSelection ??
-        (carryModelSelection || useComposerDraftStore.getState().stickyActiveProvider !== null
-          ? null
-          : resolveProjectDefaultProviderModelSelection(
-              environmentServerConfigs.get(projectRef.environmentId)?.providers ?? [],
-              targetServerSettings,
-              projectRef.projectId,
-            )),
+      defaultSelection: defaultModelSelection,
       fallbackSelection: targetServerSettings.fallbackModelSelection ?? null,
-      providers: environmentServerConfigs.get(projectRef.environmentId)?.providers ?? [],
+      providers,
       settings: targetServerSettings,
       projectId: projectRef.projectId,
       now: Date.now(),
     });
     const projectDefaultModelSelection = fallbackResolution.fallback
-      ? fallbackResolution.selection
-      : configuredDefaultModelSelection;
-    const defaultRuntimeMode = projectSettings.settings.defaultRuntimeMode;
-    const resolveModelSelectionOverride = (destinationDraftId: DraftId) =>
-      resolveNewThreadModelSelectionOverride({
-        projectDefaultSelection: projectDefaultModelSelection ?? null,
+      ? resolveDraftModelSelectionAfterUsageLimitFallback({
+          scope: projectScope,
+          exhaustedSelection: defaultModelSelection,
+          fallbackSelection: fallbackResolution.selection,
+          normalDefault: configuredDefaultModelSelection,
+          carriedSelection: carrySelectionForScope,
+          stickySelection: stickySelectionForScope,
+          orderedDefault: orderedDefaultModelSelection,
+          providers: resolverProviders,
+        })
+      : defaultModelSelection;
+    const resolveModelSelectionOverride = (destinationDraftId: DraftId) => {
+      const carrySelection = resolveNewThreadModelSelectionOverride({
+        projectDefaultSelection: null,
         carrySelection: carryModelSelection,
         carrySourceDraftId:
           currentRouteTarget?.kind === "draft" ? currentRouteTarget.draftId : null,
         destinationDraftId,
+        scope: projectScope,
+        providers,
       });
+      if (fallbackResolution.fallback) return projectDefaultModelSelection;
+      return resolveDraftModelSelectionForScope({
+        scope: projectScope,
+        normalDefault: projectDefaultModelSelection,
+        carriedSelection: carrySelection,
+        stickySelection: stickySelectionForScope,
+        orderedDefault: orderedDefaultModelSelection,
+        providers: resolverProviders,
+      });
+    };
+    const defaultRuntimeMode = projectSettings.settings.defaultRuntimeMode;
     const resolveDefaultEnvMode = async (): Promise<DraftThreadEnvMode> => {
       // Environment queries wait for a connection, so reading the project file on an
       // offline machine would never settle and the draft would never open.
@@ -314,11 +372,11 @@ export function createNewThreadHandler(router: AnyRouter) {
         const storedDraft = getComposerDraft(emptyStoredDraftThread.draftId);
         const storedDraftHasExplicitModelPick = hasExplicitComposerModelSelection(storedDraft);
         if (!storedDraftHasExplicitModelPick) {
-          applyStickyState(emptyStoredDraftThread.draftId);
+          applyStickyState(emptyStoredDraftThread.draftId, projectScope);
           const modelSelectionOverride = resolveModelSelectionOverride(
             emptyStoredDraftThread.draftId,
           );
-          if (modelSelectionOverride) {
+          if (modelSelectionOverride || environmentConfig) {
             setModelSelection(emptyStoredDraftThread.draftId, modelSelectionOverride, {
               replaceOptions: true,
             });
@@ -431,9 +489,10 @@ export function createNewThreadHandler(router: AnyRouter) {
         runtimeMode: defaultRuntimeMode,
         ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
       });
-      applyStickyState(draftId);
+      applyStickyState(draftId, projectScope);
       const modelSelectionOverride = resolveModelSelectionOverride(draftId);
-      if (modelSelectionOverride) {
+      // Without a loaded config nothing can resolve; keep what the draft already has.
+      if (modelSelectionOverride || environmentConfig) {
         setModelSelection(draftId, modelSelectionOverride, { replaceOptions: true });
       }
       seedPrompt(draftId);

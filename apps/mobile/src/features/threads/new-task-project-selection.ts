@@ -1,7 +1,12 @@
 import type { EnvironmentConnectionPhase } from "@t3tools/client-runtime/connection";
 import { availableScratchWorkspaceRoot } from "@t3tools/client-runtime/operations/projects";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
-import { repositoryGroupingKeyOf, type EnvironmentId, type ServerConfig } from "@t3tools/contracts";
+import {
+  repositoryGroupingKeyOf,
+  type EnvironmentId,
+  type ModelSelection,
+  type ServerConfig,
+} from "@t3tools/contracts";
 
 import { scopedProjectKey } from "../../lib/scopedEntities";
 import type { HomeProjectScope } from "../home/homeThreadList";
@@ -190,6 +195,7 @@ export function newTaskDestination(options: {
   readonly currentProject: ProjectRef | undefined;
   readonly filteredProject: ProjectRef | undefined;
   readonly lastProject: ProjectRef | undefined;
+  readonly carriedSelection?: ModelSelection | undefined;
 }) {
   const find = (ref: ProjectRef | undefined) =>
     ref &&
@@ -210,7 +216,13 @@ export function newTaskDestination(options: {
           requestId: options.requestId,
           environmentId: String(project.environmentId),
           projectId: String(project.id),
+          ...(options.carriedSelection ? { carriedSelection: options.carriedSelection } : {}),
         },
       }
-    : { draft: { requestId: options.requestId } };
+    : {
+        draft: {
+          requestId: options.requestId,
+          ...(options.carriedSelection ? { carriedSelection: options.carriedSelection } : {}),
+        },
+      };
 }

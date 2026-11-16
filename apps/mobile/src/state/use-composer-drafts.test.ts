@@ -216,7 +216,7 @@ import {
   setComposerDraftAttachmentUpload,
   waitForComposerDraftsLoaded,
   setStickyComposerModelSelection,
-  stickyComposerModelSelectionAtom,
+  stickyComposerModelSelectionByScopeAtom,
   undoComposerDraftMergeState,
   updateComposerDraftSettings,
 } from "./use-composer-drafts";
@@ -240,7 +240,7 @@ afterEach(() => {
   composerDraftFileMocks.readImage.mockResolvedValue("YWJj");
   appAtomRegistry.set(composerDraftsAtom, {});
   appAtomRegistry.set(composerCloudDraftsAtom, { accountId: null, signedOut: {} });
-  appAtomRegistry.set(stickyComposerModelSelectionAtom, null);
+  appAtomRegistry.set(stickyComposerModelSelectionByScopeAtom, { personal: null, work: null });
   appAtomRegistry.set(modelOptionMemoryAtom, {});
   appAtomRegistry.set(threadOutboxManager.queuedMessagesByThreadKeyAtom, {});
   composerAttachmentCleanupMocks.remove.mockClear();
@@ -361,6 +361,35 @@ function modelReconciliationHarness(
 }
 
 describe("mobile composer drafts", () => {
+  it("migrates the old global sticky model to the scope named by its instance id", () => {
+    expect(
+      decodePersistedComposerState({
+        schemaVersion: 1,
+        drafts: {},
+        stickyModelSelection: { instanceId: "aix-codex-team", model: "gpt-work" },
+      }).stickyModelSelectionByScope,
+    ).toEqual({
+      personal: null,
+      work: { instanceId: "aix-codex-team", model: "gpt-work" },
+    });
+  });
+
+  it("drops malformed per-scope sticky values without discarding valid values", () => {
+    expect(
+      decodePersistedComposerState({
+        schemaVersion: 1,
+        drafts: {},
+        stickyModelSelectionByScope: {
+          personal: { instanceId: 42, model: null },
+          work: { instanceId: "aix-codex-team", model: "gpt-work" },
+        },
+      }).stickyModelSelectionByScope,
+    ).toEqual({
+      personal: null,
+      work: { instanceId: "aix-codex-team", model: "gpt-work" },
+    });
+  });
+
   it.each([false, true])(
     "restores visible file chips from legacy drafts (archived: %s)",
     async (archived) => {
@@ -2116,9 +2145,9 @@ describe("mobile composer drafts", () => {
       text: "New prompt",
       attachments: [],
     });
-    expect(written.stickyModelSelection).toEqual({
-      instanceId: "codex",
-      model: "gpt-5.6-sol",
+    expect(written.stickyModelSelectionByScope).toEqual({
+      personal: { instanceId: "codex", model: "gpt-5.6-sol" },
+      work: null,
     });
   });
 
@@ -2197,9 +2226,9 @@ describe("mobile composer drafts", () => {
       drafts: {
         "environment-2:thread-2": { text: "keep", attachments: [] },
       },
-      stickyModelSelection: {
-        instanceId: "codex",
-        model: "gpt-5.6-sol",
+      stickyModelSelectionByScope: {
+        personal: { instanceId: "codex", model: "gpt-5.6-sol" },
+        work: null,
       },
     });
   });

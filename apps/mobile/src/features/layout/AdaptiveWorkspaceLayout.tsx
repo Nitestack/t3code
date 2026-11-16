@@ -599,14 +599,15 @@ function AdaptiveWorkspaceLayoutContent(
     const environmentId = first(params?.environmentId);
     const threadId = first(params?.threadId);
     // The full index, not the sidebar list: subagent and archived threads are current threads too.
-    const projectId =
+    const currentThread =
       environmentId && threadId
         ? appAtomRegistry
             .get(
               environmentThreadShells.environmentThreadIndexAtom(EnvironmentId.make(environmentId)),
             )
-            .get(ThreadId.make(threadId))?.projectId
+            .get(ThreadId.make(threadId))
         : undefined;
+    const projectId = currentThread?.projectId;
     const preferences = appAtomRegistry.get(mobilePreferencesAtom);
     const saved = AsyncResult.isSuccess(preferences) ? preferences.value : undefined;
     // Resolve the thread list's filter as useHomeListOptions does: a removed connection's filter reads as all.
@@ -633,6 +634,7 @@ function AdaptiveWorkspaceLayoutContent(
         requestId: uuidv4(),
         useLastProject: saved?.useLastProjectForNewThreads,
         currentProject: environmentId && projectId ? { environmentId, projectId } : undefined,
+        carriedSelection: currentThread?.modelSelection,
         filteredProject: filteredScope
           ? newTaskFilteredProject(
               filteredScope,

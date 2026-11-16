@@ -2,6 +2,11 @@ import { ChildThreadApprovals } from "./chat/ChildThreadApprovals";
 import { workspaceAreaProps } from "../lib/workspaceFocus";
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
 import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
+import {
+  resolveDraftModelSelectionAfterUsageLimitFallback,
+  resolveDraftModelSelectionForScope,
+  resolveModelPickerProjectScope,
+} from "@t3tools/client-runtime/provider-picker-hierarchy";
 import { queuedRunEditBlockedReason } from "@t3tools/client-runtime/queued-run-edit";
 import { ScrollToEndButton, WorkspaceFileDropOverlay } from "./chat/TimelineOverlays";
 import { usePasteToFocusComposer } from "./chat/usePasteToFocusComposer";
@@ -15,6 +20,7 @@ import {
   deriveAvailableRevertTurnCounts,
   deriveThreadPendingBackgroundTasks,
   presentThreadShellFromProjection,
+  resolveDraftFallbackBannerDefault,
 } from "./ChatView.logic";
 import { usePullRequestDraftThread } from "./chat/usePullRequestDraftThread";
 import { usePullRequestLinking } from "../hooks/usePullRequestLinking";
@@ -215,6 +221,7 @@ import {
 } from "~/lib/sideChatPane";
 import {
   NO_PROVIDER_MODEL_SELECTION,
+  draftDefaultProvidersFor,
   providerInstanceEntriesFor,
   resolveProjectDefaultProviderModelSelection,
   shouldShowInstanceBadge,
@@ -802,38 +809,94 @@ export default function ChatView(props: ChatViewProps) {
     }
   }
   const nowMinute = useNowMinute();
+  const draftServerSettings = draftThread
+    ? (environmentById.get(draftThread.environmentId)?.serverConfig?.settings ?? settings)
+    : settings;
   const draftDefaultModelSelection = draftThread
     ? resolveProjectSettings(
-        settings,
+        draftServerSettings,
         fallbackDraftProject?.id ?? null,
         fallbackDraftProject ?? undefined,
       ).settings.defaultModelSelection
     : null;
-  const draftModelResolution = draftThread
-    ? resolveNewThreadModelSelection({
-        defaultSelection:
-          draftDefaultModelSelection ??
-          resolveProjectDefaultProviderModelSelection(
-            providersByEnvironment.get(draftThread.environmentId) ?? [],
-            settings,
-            draftThread.projectId,
-          ),
-        fallbackSelection: settings.fallbackModelSelection,
-        providers: providersByEnvironment.get(draftThread.environmentId) ?? [],
-        settings,
-        projectId: draftThread.projectId,
-        now: Date.parse(`${nowMinute}:00Z`),
+  const draftProviders = draftThread
+    ? (providersByEnvironment.get(draftThread.environmentId) ?? [])
+    : [];
+  const draftResolverProviders = draftThread
+    ? draftDefaultProvidersFor(draftProviders, draftServerSettings, draftThread.projectId)
+    : [];
+  const draftNormalDefault = draftDefaultModelSelection ?? null;
+  const draftOrderedDefault = draftThread
+    ? resolveProjectDefaultProviderModelSelection(
+        draftProviders,
+        draftServerSettings,
+        draftThread.projectId,
+      )
+    : null;
+  const draftEnvironment = draftThread ? environmentById.get(draftThread.environmentId) : null;
+  const draftProjectScope = resolveModelPickerProjectScope(
+    fallbackDraftProject?.scope,
+    draftEnvironment?.serverConfig?.environment?.capabilities?.projectScope === true,
+  );
+  const draftStickySelection = useComposerDraftStore((store) => {
+    const instanceId = store.stickyActiveProviderByScope[draftProjectScope];
+    return instanceId ? (store.stickyModelSelectionByProvider[instanceId] ?? null) : null;
+  });
+  const draftExplicitModelSelection =
+    composerModelSelectionExplicit && composerSelectedModelSelection
+      ? composerSelectedModelSelection
+      : null;
+  const draftScopedDefault = draftThread
+    ? resolveDraftModelSelectionForScope({
+        scope: draftProjectScope,
+        explicitSelection: draftExplicitModelSelection,
+        carriedSelection:
+          draftExplicitModelSelection === null ? composerSelectedModelSelection : null,
+        stickySelection: draftStickySelection,
+        normalDefault: draftNormalDefault,
+        orderedDefault: draftOrderedDefault,
+        providers: draftResolverProviders,
       })
     : null;
-  const draftFallback = draftModelResolution?.fallback ? draftModelResolution : null;
+  const draftModelResolution =
+    draftThread && draftExplicitModelSelection === null
+      ? resolveNewThreadModelSelection({
+          defaultSelection: draftScopedDefault,
+          fallbackSelection: settings.fallbackModelSelection,
+          providers: draftProviders,
+          settings,
+          projectId: draftThread.projectId,
+          now: Date.parse(`${nowMinute}:00Z`),
+        })
+      : null;
+  const scopedDraftFallbackSelection = draftModelResolution?.fallback
+    ? resolveDraftModelSelectionAfterUsageLimitFallback({
+        scope: draftProjectScope,
+        exhaustedSelection: draftScopedDefault,
+        fallbackSelection: draftModelResolution.selection,
+        normalDefault: draftNormalDefault,
+        carriedSelection:
+          draftExplicitModelSelection === null ? composerSelectedModelSelection : null,
+        stickySelection: draftStickySelection,
+        orderedDefault: draftOrderedDefault,
+        providers: draftResolverProviders,
+      })
+    : null;
+  const draftFallback =
+    draftModelResolution?.fallback && scopedDraftFallbackSelection
+      ? { ...draftModelResolution, selection: scopedDraftFallbackSelection }
+      : null;
+  const draftResolvedSelection = draftModelResolution?.fallback
+    ? scopedDraftFallbackSelection
+    : draftScopedDefault;
   const localDraftThread = draftThread
     ? buildLocalDraftThread(
         threadId,
         draftThread,
-        (draftFallback ? draftFallback.selection : draftDefaultModelSelection) ??
-          NO_PROVIDER_MODEL_SELECTION,
+        draftResolvedSelection ?? NO_PROVIDER_MODEL_SELECTION,
       )
     : undefined;
+  const draftComposerSelection = draftResolvedSelection;
   const isServerThread = serverThread !== null;
   const activeThread = isServerThread ? serverThread : localDraftThread;
   const serverLatestRun =
@@ -1277,10 +1340,16 @@ export default function ChatView(props: ChatViewProps) {
     { modelSelectionExplicit: composerModelSelectionExplicit },
     threadHasStarted(activeThread),
   );
-  const selectedProviderByThreadId = composerModelSelectionApplies ? composerActiveProvider : null;
+  const selectedProviderByThreadId = composerModelSelectionApplies
+    ? composerActiveProvider
+    : draftThread
+      ? (draftComposerSelection?.instanceId ?? null)
+      : null;
   const threadProvider =
     activeThread?.modelSelection.instanceId ??
-    activeProjectDefaultModelSelection?.instanceId ??
+    (draftThread
+      ? draftComposerSelection?.instanceId
+      : activeProjectDefaultModelSelection?.instanceId) ??
     null;
   const lockedProvider = deriveLockedProvider({
     thread: activeThread,
@@ -1355,12 +1424,16 @@ export default function ChatView(props: ChatViewProps) {
     entries: providerInstanceEntries,
     candidateInstanceIds: [
       selectedProviderByThreadId,
+      draftComposerSelection?.instanceId,
       activeRuntime?.providerInstanceId,
       activeThreadModelInstanceId,
-      activeProjectDefaultModelSelection?.instanceId,
+      draftThread
+        ? draftComposerSelection?.instanceId
+        : activeProjectDefaultModelSelection?.instanceId,
     ],
     lockedProvider,
     lockedInstanceId: activeRuntime?.providerInstanceId ?? activeThreadModelInstanceId,
+    ...(draftThread && !composerModelSelectionExplicit ? { draftScope: draftProjectScope } : {}),
   });
   const selectedProvider = selectedProviderEntry?.driverKind ?? requestedDriverKind;
   const activeProviderInstanceId = selectedProviderEntry?.instanceId ?? null;
@@ -2339,7 +2412,7 @@ export default function ChatView(props: ChatViewProps) {
     publishComposerOverlayHeightStable,
   ]);
 
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- observes the composer overlay element's size before paint and publishes its height
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- observes the composer overlay element size before paint and publishes its height
   useLayoutEffect(() => {
     if (!composerOverlayElement) return;
 
@@ -2610,13 +2683,12 @@ export default function ChatView(props: ChatViewProps) {
       : null;
   const composerBannerItems = (() => {
     const fallbackSelection = draftFallback?.selection;
-    const defaultSelection =
-      draftDefaultModelSelection ??
-      resolveProjectDefaultProviderModelSelection(
-        providerStatuses,
-        settings,
-        draftThread?.projectId ?? null,
-      );
+    const defaultBannerSelection = draftThread
+      ? resolveDraftFallbackBannerDefault({
+          selection: draftScopedDefault,
+          providers: draftProviders,
+        })
+      : null;
     const fallback =
       !isServerThread &&
       multipleModelSelections === null &&
@@ -2633,7 +2705,7 @@ export default function ChatView(props: ChatViewProps) {
     const fallbackItems: ComposerBannerStackItem[] =
       fallback &&
       fallbackSelection &&
-      defaultSelection &&
+      defaultBannerSelection &&
       fallbackWindow !== dismissedFallbackWindow
         ? [
             modelFallbackBannerItem({
@@ -2642,14 +2714,15 @@ export default function ChatView(props: ChatViewProps) {
                   .find((provider) => provider.instanceId === fallbackSelection.instanceId)
                   ?.models.find((model) => model.slug === fallbackSelection.model)?.name ??
                 fallbackSelection.model,
-              defaultProviderName: fallback.provider.displayName ?? fallback.provider.driver,
-              defaultModelName:
-                fallback.provider.models.find((model) => model.slug === defaultSelection.model)
-                  ?.name ?? defaultSelection.model,
+              defaultProviderName: defaultBannerSelection.providerName,
+              defaultModelName: defaultBannerSelection.modelName,
               resetsAt: fallback.resetsAt,
               timestampFormat,
               onUseDefault: () =>
-                onProviderModelSelectStable(defaultSelection.instanceId, defaultSelection.model),
+                onProviderModelSelectStable(
+                  defaultBannerSelection.selection.instanceId,
+                  defaultBannerSelection.selection.model,
+                ),
               onDismiss: () => setDismissedFallbackWindow(fallbackWindow),
             }),
           ]
@@ -3716,10 +3789,26 @@ export default function ChatView(props: ChatViewProps) {
                                 providerStatuses={providerStatuses as ServerProvider[]}
                                 providerCatalogKnown={serverConfig !== null}
                                 activeProjectDefaultModelSelection={
-                                  activeProjectDefaultModelSelection
+                                  draftThread
+                                    ? draftComposerSelection
+                                    : activeProjectDefaultModelSelection
                                 }
                                 activeThreadModelSelection={activeThread?.modelSelection}
                                 activeProjectId={activeProject?.id ?? null}
+                                projectScope={
+                                  activeProject === null
+                                    ? null
+                                    : resolveModelPickerProjectScope(
+                                        activeProject.scope,
+                                        serverConfig?.environment.capabilities.projectScope ===
+                                          true,
+                                      )
+                                }
+                                nonExplicitDraftScope={
+                                  draftThread && !composerModelSelectionExplicit
+                                    ? draftProjectScope
+                                    : undefined
+                                }
                                 projectName={activeProject?.title}
                                 compactThreadUnavailable={compactThreadUnavailable}
                                 compactDisabled={compactDisabled}

@@ -200,6 +200,7 @@ describe("aixDesiredInstances", () => {
     expect(codex).toMatchObject({
       driver: CODEX,
       displayName: "Work · Codex",
+      aixProfileLabel: "Work",
       enabled: true,
       environment: [{ name: "T3_AIX_PROFILE", value: "work", sensitive: false }],
       config: { aixProfile: "work", customModels: [{ slug: "gpt-6.1-sol", name: "GPT-6.1 Sol" }] },
@@ -256,6 +257,11 @@ describe("aixDesiredInstances", () => {
         instanceId,
         driver: instance.driver,
         displayName: instance.displayName,
+        aixProfile:
+          typeof instance.config === "object" && instance.config !== null
+            ? (instance.config as { readonly aixProfile?: string }).aixProfile
+            : undefined,
+        aixProfileLabel: instance.aixProfileLabel,
         enabled: true,
         installed: true,
         version: "1.0.0",
@@ -279,6 +285,13 @@ describe("aixDesiredInstances", () => {
         provider.models.map((model) => ({ instanceId: provider.instanceId, model: model.slug })),
       );
     expect(wire.payload.providers[0]?.models[0]).toHaveProperty("catalogMetadata");
+    expect(
+      providers.map(({ aixProfile, aixProfileLabel }) => [aixProfile, aixProfileLabel]),
+    ).toEqual([
+      ["work", "Work"],
+      ["work", "Work"],
+      ["claude", "Claude"],
+    ]);
     const withMetadata = choices(wire);
     for (const provider of wire.payload.providers) {
       for (const model of provider.models) delete model.catalogMetadata;
@@ -361,6 +374,28 @@ describe("planAixInstanceSync", () => {
     expect(planAixInstanceSync({ current, desired: work, unavailableProfiles: new Set() })).toEqual(
       [],
     );
+  });
+
+  it("adds the profile label to existing managed instances", () => {
+    const current = Object.fromEntries(
+      [...work].map(([instanceId, instance]) => {
+        const { aixProfileLabel: _label, ...legacyInstance } = instance;
+        return [instanceId, legacyInstance];
+      }),
+    ) as ProviderInstanceConfigMap;
+
+    expect(
+      planAixInstanceSync({ current, desired: work, unavailableProfiles: new Set() }).map(
+        (mutation) => [
+          mutation.operation,
+          mutation.instanceId,
+          "instance" in mutation ? mutation.instance.aixProfileLabel : undefined,
+        ],
+      ),
+    ).toEqual([
+      ["upsert", "aix-codex-work", "Work"],
+      ["upsert", "aix-opencode-work", "Work"],
+    ]);
   });
 
   it("never overwrites a manual instance that uses the same id", () => {

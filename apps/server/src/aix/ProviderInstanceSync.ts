@@ -167,6 +167,7 @@ export function aixDesiredInstances(
       desired.set(instanceId, {
         driver,
         displayName: `${profile.label} · ${driverLabel(driver)}`,
+        aixProfileLabel: profile.label,
         enabled: true,
         environment: [{ name: AIX_PROFILE_VARIABLE, value: profile.name, sensitive: false }],
         config: {
@@ -188,12 +189,14 @@ const sameOwnedFields = (left: ProviderInstanceConfig, right: ProviderInstanceCo
     {
       driver: left.driver,
       displayName: left.displayName,
+      aixProfileLabel: left.aixProfileLabel,
       environment: left.environment,
       config: left.config,
     },
     {
       driver: right.driver,
       displayName: right.displayName,
+      aixProfileLabel: right.aixProfileLabel,
       environment: right.environment,
       config: right.config,
     },

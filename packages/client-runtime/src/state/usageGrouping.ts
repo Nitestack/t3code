@@ -9,9 +9,33 @@ import {
   type LimitAccount,
   type LimitPresentations,
 } from "@t3tools/shared/usageLimits";
+import { aixMetadataFromInstanceId, aixProfileLabels } from "../providerPickerHierarchy.ts";
 
 export type UsageLimitGroup = "personal" | "work";
 export type UsageScope = UsageLimitGroup;
+
+export function usageAixProfileLabels(
+  presentations: LimitPresentations,
+): ReadonlyMap<string, string> {
+  const entries = [];
+  for (const presentation of presentations.values()) {
+    for (const provider of presentation.serverConfig?.providers ?? []) {
+      const profileId =
+        provider.aixProfile ??
+        provider.usageLimits?.profileName ??
+        aixMetadataFromInstanceId(provider.instanceId, provider.driver)?.aixProfile;
+      if (!profileId) continue;
+      entries.push({
+        instanceId: provider.instanceId,
+        driverKind: provider.driver,
+        enabled: true,
+        aixProfile: profileId,
+        aixProfileLabel: provider.aixProfileLabel,
+      });
+    }
+  }
+  return aixProfileLabels(entries);
+}
 
 function usageScopeForBucket(bucket: Pick<UsageBucket, "scope">): UsageScope {
   return bucket.scope === "work" ? "work" : "personal";
@@ -76,7 +100,7 @@ export function resolveUsageLimitGroup(
 
 export const usageLimitEmptyMessage = (group: UsageLimitGroup) =>
   group === "work"
-    ? "No AIX profile limits are available for the selected environments."
+    ? "No Work profile limits are available for the selected environments."
     : "No personal subscription limits are available for the selected environments.";
 
 export function groupLimitAccounts(accounts: readonly LimitAccount[]): {

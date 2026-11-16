@@ -1,6 +1,7 @@
 import * as NodeModule from "node:module";
 import { describe, expect, it } from "vite-plus/test";
 import {
+  decodeDraftCarriedSelection,
   draftRouteIdentity,
   isDraftThreadRoute,
   submittedThreadParams,
@@ -106,6 +107,15 @@ describe("draft route identity", () => {
       draftRouteIdentity({ environmentId: ["env"], projectId: ["project"], title: "Old" }),
     ).toBe(draftRouteIdentity({ environmentId: "env", projectId: "project", title: "New" }));
   });
+});
+
+it("drops invalid carried model selections from draft route params", () => {
+  expect(decodeDraftCarriedSelection({ instanceId: "codex", model: "gpt-5.4" })).toEqual({
+    instanceId: "codex",
+    model: "gpt-5.4",
+  });
+  expect(decodeDraftCarriedSelection({ instanceId: "codex", model: "  " })).toBeUndefined();
+  expect(decodeDraftCarriedSelection({ instanceId: 42, model: "gpt-5.4" })).toBeUndefined();
 });
 
 it("starts a fresh controller for repeated new-task requests in the same project", () => {

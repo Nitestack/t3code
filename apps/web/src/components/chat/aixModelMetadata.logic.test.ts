@@ -6,6 +6,8 @@ function provider(overrides: Partial<ServerProvider> = {}): ServerProvider {
   return {
     instanceId: ProviderInstanceId.make("aix-codex-work"),
     driver: ProviderDriverKind.make("codex"),
+    aixProfile: "work",
+    aixProfileLabel: "Work",
     enabled: true,
     installed: true,
     version: null,
@@ -20,6 +22,12 @@ function provider(overrides: Partial<ServerProvider> = {}): ServerProvider {
 }
 
 describe("aix model picker metadata", () => {
+  it("shows catalog status for older snapshots classified by the instance id", () => {
+    expect(
+      aixCatalogStatus(provider({ aixProfile: undefined, aixProfileLabel: undefined }), "work"),
+    ).toMatchObject({ kind: "current" });
+  });
+
   it("marks stale and unavailable aix catalogs and leaves T3 providers unchanged", () => {
     expect(
       aixCatalogStatus(
@@ -32,7 +40,11 @@ describe("aix model picker metadata", () => {
     expect(aixCatalogStatus(provider({ status: "error" }))).toMatchObject({
       kind: "unavailable",
     });
-    expect(aixCatalogStatus(provider({ instanceId: ProviderInstanceId.make("codex") }))).toBeNull();
+    expect(
+      aixCatalogStatus(
+        provider({ instanceId: ProviderInstanceId.make("custom-codex"), aixProfile: undefined }),
+      ),
+    ).toBeNull();
   });
 
   it("prioritizes provider errors over stale notes and preserves unrelated warnings", () => {

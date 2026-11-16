@@ -3,6 +3,7 @@ import {
   type ProviderInstanceId,
   type EnvironmentId,
   type ProviderDriverKind,
+  type ProjectScope,
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
 import { RegistryContext } from "@effect/atom-react";
@@ -21,12 +22,23 @@ import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
+import { useClientEnvironmentScope } from "../../environmentScope";
 import { ModelPickerContent, resolveModelPickerSelectedModel } from "./ModelPickerContent";
 import { retainedModelWhileProviderLocked } from "./ProviderModelPicker.logic";
 import { ChatGptSharingControl } from "./ChatGptSharingControl";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import { ModelEsque, getDisplayModelName, getTriggerDisplayModelName } from "./providerIconUtils";
-import { shouldShowInstanceBadge, type ProviderInstanceEntry } from "../../providerInstances";
+import {
+  isProviderInstancePickerVisible,
+  shouldShowInstanceBadge,
+  type ProviderInstanceEntry,
+} from "../../providerInstances";
+import {
+  resolveAixProfileId,
+  resolvePickerHierarchy,
+} from "@t3tools/client-runtime/provider-picker-hierarchy";
+import { ModelPickerHierarchyContext } from "./ModelPickerHierarchyContext";
+import { ModelPickerHierarchyFooterControls } from "./ModelPickerHierarchyFooter";
 import { ComposerControl, type ComposerControlSize } from "./ComposerControl";
 import { takeOpenTarget, useComposerMenuProps } from "./composerEventScope";
 import { shortcutLabelForCommand } from "../../keybindings";
@@ -93,6 +105,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   environmentId: EnvironmentId | null;
   workspaceCwd?: string | null;
   activeInstanceId: ProviderInstanceId;
+  projectScope?: ProjectScope;
   model: string;
   selectedModels?: ReadonlyArray<{ instanceId: ProviderInstanceId; model: string }>;
   onToggleModel?: (instanceId: ProviderInstanceId, model: string) => void;
@@ -131,6 +144,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   footer?: ReactNode;
 }) {
   const composerFloatingLayerProps = useComposerMenuProps();
+  const { activeScope } = useClientEnvironmentScope();
   const [uncontrolledIsMenuOpen, setUncontrolledIsMenuOpen] = useState(false);
   const isMenuOpen = props.open ?? uncontrolledIsMenuOpen;
   const registry = useContext(RegistryContext);
@@ -187,6 +201,40 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
 
   const activeEntry =
     props.instanceEntries.find((entry) => entry.instanceId === props.activeInstanceId) ?? null;
+  const hierarchyScope = props.projectScope ?? activeScope;
+  const hierarchyEntries = props.instanceEntries.filter(isProviderInstancePickerVisible);
+  const [hierarchyProfileId, setHierarchyProfileId] = useState<string | undefined>(
+    activeEntry?.aixProfile,
+  );
+  const resolvedHierarchy = resolvePickerHierarchy({
+    entries: hierarchyEntries,
+    scope: hierarchyScope,
+    rememberedProfileId: hierarchyProfileId,
+    selectedModelProfileId: activeEntry?.aixProfile,
+    selectedInstanceId: props.activeInstanceId,
+  });
+  const aixProfiles = resolvedHierarchy.profiles;
+  const resolvedProfileId = resolvedHierarchy.profileId;
+  const hierarchy = {
+    profiles: aixProfiles,
+    scope: hierarchyScope,
+    profileId: resolvedProfileId,
+    onProfileChange: setHierarchyProfileId,
+  };
+  const resetProfileId = resolveAixProfileId({
+    profiles: aixProfiles,
+    selectedModelProfileId: activeEntry?.aixProfile,
+  });
+  const resetHierarchyProfile = () => {
+    setHierarchyProfileId(resetProfileId);
+  };
+  const [wasOpen, setWasOpen] = useState(props.open === true);
+  if (props.open === true && !wasOpen) {
+    setWasOpen(true);
+    resetHierarchyProfile();
+  } else if (props.open !== true && wasOpen) {
+    setWasOpen(false);
+  }
 
   const activeInstanceId = props.activeInstanceId;
   const selectedInstanceOptions = props.modelOptionsByInstance.get(activeInstanceId) ?? [];
@@ -212,6 +260,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     activeEntry !== null && shouldShowInstanceBadge(activeEntry, props.instanceEntries);
 
   const setIsMenuOpen = (open: boolean) => {
+    if (open && props.open === undefined) resetHierarchyProfile();
     props.onOpenChange?.(open);
     if (props.open === undefined) {
       setUncontrolledIsMenuOpen(open);
@@ -491,36 +540,50 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
         padding="none"
         touchBackdrop
       >
-        {props.effortColumn ? (
-          <DockedPickerContext value={{ modelLabel: triggerTitle }}>
-            <div className="flex max-h-(--available-height) flex-col">
-              {/* One fixed height, so a model with more options never resizes the popup. Short
+        <ModelPickerHierarchyContext.Provider value={hierarchy}>
+          {props.effortColumn ? (
+            <DockedPickerContext value={{ modelLabel: triggerTitle }}>
+              <div className="flex max-h-(--available-height) flex-col">
+                {/* One fixed height, so a model with more options never resizes the popup. Short
                   windows shrink it and keep the footer. */}
-              <div className="flex h-86.5 min-h-0 max-sm:h-auto max-sm:flex-col">
-                {picker}
-                <div
-                  data-model-picker-effort
-                  className="flex min-h-0 w-48 flex-col sm:shrink-0 border-l border-border/70 bg-muted/40 max-sm:h-64 max-sm:w-full max-sm:border-t max-sm:border-l-0"
-                  onKeyDown={(event) => {
-                    if (event.key !== "ArrowLeft" || event.altKey || event.ctrlKey || event.metaKey)
-                      return;
-                    event.preventDefault();
-                    event.stopPropagation();
-                    searchInputRef.current?.focus();
-                  }}
-                >
-                  {props.effortColumn}
+                <div className="flex h-86.5 min-h-0 max-sm:h-auto max-sm:flex-col">
+                  {picker}
+                  <div
+                    data-model-picker-effort
+                    className="flex min-h-0 w-48 flex-col sm:shrink-0 border-l border-border/70 bg-muted/40 max-sm:h-64 max-sm:w-full max-sm:border-t max-sm:border-l-0"
+                    onKeyDown={(event) => {
+                      if (
+                        event.key !== "ArrowLeft" ||
+                        event.altKey ||
+                        event.ctrlKey ||
+                        event.metaKey
+                      )
+                        return;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      searchInputRef.current?.focus();
+                    }}
+                  >
+                    {props.effortColumn}
+                  </div>
                 </div>
+                {props.footer}
               </div>
-              {props.footer}
+            </DockedPickerContext>
+          ) : hierarchyScope === "work" && aixProfiles.length > 0 ? (
+            <div className="flex flex-col">
+              {picker}
+              <div className="flex shrink-0 items-center gap-2 border-t border-border/70 bg-muted/40 px-3 py-2">
+                <ModelPickerHierarchyFooterControls />
+              </div>
             </div>
-          </DockedPickerContext>
-        ) : (
-          picker
-        )}
-        {props.selectedModels === undefined && !docked ? (
-          <ChatGptSharingControl provider={activeEntry?.snapshot ?? null} />
-        ) : null}
+          ) : (
+            picker
+          )}
+          {props.selectedModels === undefined && !docked ? (
+            <ChatGptSharingControl provider={activeEntry?.snapshot ?? null} />
+          ) : null}
+        </ModelPickerHierarchyContext.Provider>
       </PopoverPopup>
     </Popover>
   );

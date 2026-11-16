@@ -22,6 +22,7 @@ import {
   getProviderOptionDescriptors,
 } from "@t3tools/shared/model";
 import { resolveModelShortName } from "@t3tools/client-runtime/provider-clients";
+import { aixMetadataFromInstanceId } from "@t3tools/client-runtime/provider-picker-hierarchy";
 import { resolveProvidersForCwd } from "@t3tools/client-runtime/providerSkills";
 
 export type ModelOption = {
@@ -32,6 +33,8 @@ export type ModelOption = {
   readonly providerKey: string;
   readonly providerLabel: string;
   readonly providerDriver: string;
+  readonly aixProfile?: string | undefined;
+  readonly aixProfileLabel?: string | undefined;
   readonly supportedRuntimeModes?: ReadonlyArray<RuntimeMode>;
   readonly providerIconUrl?: string | undefined;
   readonly providerBadge?: {
@@ -65,7 +68,14 @@ function providerDisplayLabel(provider: {
   readonly displayName?: string | undefined;
   readonly driver: string;
   readonly instanceId: string;
+  readonly aixProfile?: string | undefined;
 }): string {
+  if (provider.aixProfile) {
+    if (provider.driver === "codex") return "Codex";
+    if (provider.driver === "claudeAgent") return "Claude";
+    if (provider.driver === "opencode") return "OpenCode";
+    return provider.driver;
+  }
   if (provider.displayName) return provider.displayName;
   if (provider.driver === "codex") return "Codex";
   if (provider.driver === "claudeAgent") return "Claude";
@@ -262,13 +272,7 @@ export function resolveDefaultableModelSelection(
   selection: ModelSelection | null,
   projectId: ProjectId | null,
 ): ModelSelection | null {
-  const usable = resolveSelectableModelSelection(config, selection, projectId);
-  if (!usable || !config) {
-    return usable;
-  }
-  const provider = config.providers.find((candidate) => candidate.instanceId === usable.instanceId);
-  const model = provider?.models.find((candidate) => candidate.slug === usable.model);
-  return provider?.driver !== "antigravity" && model?.isLegacy === true ? null : usable;
+  return resolveSelectableModelSelection(config, selection, projectId);
 }
 
 export function resolveNewTaskModelSelection(input: {
@@ -333,6 +337,9 @@ export function buildModelOptions(
   };
   const badgeEntries = (config?.providers ?? []).map((provider) => ({
     driverKind: provider.driver,
+    aixProfile:
+      provider.aixProfile ??
+      aixMetadataFromInstanceId(provider.instanceId, provider.driver)?.aixProfile,
     enabled: provider.enabled,
     acpRegistryAgentId: registryAgentId(provider.instanceId),
   }));
@@ -354,6 +361,8 @@ export function buildModelOptions(
       showBadge: shouldShowInstanceBadge(
         {
           driverKind: driver,
+          aixProfile:
+            snapshot?.aixProfile ?? aixMetadataFromInstanceId(instanceId, driver)?.aixProfile,
           accentColor,
           acpRegistryAgentId: registryAgentId(instanceId),
           enabled: snapshot?.enabled ?? instance?.enabled ?? false,
@@ -389,6 +398,7 @@ export function buildModelOptions(
     if (order.size > 0)
       models.sort((a, b) => (order.get(a.slug) ?? Infinity) - (order.get(b.slug) ?? Infinity));
     for (const model of models) {
+      const aixMetadata = aixMetadataFromInstanceId(provider.instanceId, provider.driver);
       const key = `${provider.instanceId}:${model.slug}`;
       const shortName = resolveModelShortName(model, provider.driver);
       options.set(key, {
@@ -399,6 +409,16 @@ export function buildModelOptions(
         providerKey: provider.instanceId,
         providerLabel,
         providerDriver: provider.driver,
+        ...(provider.aixProfile
+          ? { aixProfile: provider.aixProfile }
+          : aixMetadata
+            ? { aixProfile: aixMetadata.aixProfile }
+            : {}),
+        ...(provider.aixProfileLabel
+          ? { aixProfileLabel: provider.aixProfileLabel }
+          : aixMetadata
+            ? { aixProfileLabel: aixMetadata.aixProfileLabel }
+            : {}),
         providerBadge,
         ...(provider.supportedRuntimeModes === undefined
           ? {}

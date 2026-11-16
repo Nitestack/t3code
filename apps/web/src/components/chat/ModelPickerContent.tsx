@@ -68,6 +68,11 @@ import {
 } from "../../providerInstances";
 import { providerModelKey, sortProviderModelItems } from "../../modelOrdering";
 import { aixCatalogStatus } from "./aixModelMetadata";
+import {
+  isPickerModelVisibleForProjectScope,
+  providerInstancesForProjectScope,
+} from "@t3tools/client-runtime/provider-picker-hierarchy";
+import { useModelPickerHierarchy } from "./ModelPickerHierarchyContext";
 
 type ModelPickerItem = {
   slug: string;
@@ -267,7 +272,7 @@ function AixCatalogControls(props: {
   const canRefresh = useAtomValue(
     serverEnvironment.refreshProviders.permissionAtom(props.environmentId),
   );
-  const status = aixCatalogStatus(props.entry.snapshot);
+  const status = aixCatalogStatus(props.entry.snapshot, props.entry.aixProfile);
   if (!status) return null;
   const unavailable = status.kind !== "current";
 
@@ -426,10 +431,16 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   const [searchQuery, setSearchQuery] = useState("");
   const modelListRef = useRef<LegendListRef | null>(null);
   const pickerContentRef = useRef<HTMLDivElement>(null);
+  const pickerHierarchy = useModelPickerHierarchy();
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- publishes this picker's mount to global keydown handlers
   useLayoutEffect(() => registerModelPickerContent(), []);
   const highlightedModelKeyRef = useRef<string | null>(null);
   const { favorites } = useEnvironmentModelPreferences(props.environmentId);
+  const hierarchyScope = pickerHierarchy?.scope ?? "personal";
+  const aixProfiles = pickerHierarchy?.profiles ?? [];
+  const selectedAixProfile =
+    pickerHierarchy?.profileId ?? (hierarchyScope === "work" ? aixProfiles[0]?.id : undefined);
+  const hierarchySelectionKey = `${hierarchyScope}:${selectedAixProfile ?? ""}`;
   const activeEntry = props.instanceEntries.find(
     (entry) => entry.instanceId === props.activeInstanceId,
   );
@@ -473,19 +484,23 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       activeEntry,
       modelOptionsByInstance.get(props.activeInstanceId) ?? [],
     );
-  const [selectedInstanceId, setSelectedInstanceId] = useState<ProviderInstanceId | "favorites">(
-    () => {
-      if (
-        props.lockedProvider !== null ||
-        activeInstanceHasSelectableUnavailableModel ||
-        activeInstanceNeedsSetup
-      ) {
-        return props.activeInstanceId;
-      }
+  const [selectedInstanceState, setSelectedInstanceState] = useState<{
+    readonly hierarchyKey: string;
+    readonly instanceId: ProviderInstanceId | "favorites";
+  }>(() => {
+    let instanceId: ProviderInstanceId | "favorites";
+    if (
+      props.lockedProvider !== null ||
+      activeInstanceHasSelectableUnavailableModel ||
+      activeInstanceNeedsSetup
+    ) {
+      instanceId = props.activeInstanceId;
+    } else {
       const hasPickableFavorite = favorites.some((favorite) => {
         const entry = instanceEntries.find((entry) => entry.instanceId === favorite.provider);
         return (
           entry !== undefined &&
+          entry.aixProfile === selectedAixProfile &&
           (modelOptionsByInstance.get(favorite.provider) ?? []).some(
             (option) =>
               option.slug === favorite.model &&
@@ -498,9 +513,39 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           )
         );
       });
-      return hasPickableFavorite ? "favorites" : props.activeInstanceId;
-    },
-  );
+      instanceId = hasPickableFavorite ? "favorites" : props.activeInstanceId;
+    }
+    return { hierarchyKey: hierarchySelectionKey, instanceId };
+  });
+  let selectedInstanceId = selectedInstanceState.instanceId;
+  const setSelectedInstanceId = (instanceId: ProviderInstanceId | "favorites") =>
+    setSelectedInstanceState((current) => ({ ...current, instanceId }));
+  if (selectedInstanceState.hierarchyKey !== hierarchySelectionKey) {
+    const previousEntry =
+      selectedInstanceId === "favorites"
+        ? undefined
+        : instanceEntries.find((entry) => entry.instanceId === selectedInstanceId);
+    const candidates = providerInstancesForProjectScope({
+      entries: instanceEntries,
+      scope: hierarchyScope,
+      ...(hierarchyScope === "work" && selectedAixProfile
+        ? { aixProfile: selectedAixProfile }
+        : {}),
+    }).filter(
+      (entry) =>
+        isProviderInstancePickerVisible(entry) &&
+        (props.lockedProvider === null ||
+          (entry.driverKind === props.lockedProvider &&
+            (!props.lockedContinuationGroupKey ||
+              entry.continuationGroupKey === props.lockedContinuationGroupKey))),
+    );
+    const nextInstanceId =
+      candidates.find((entry) => entry.driverKind === previousEntry?.driverKind)?.instanceId ??
+      candidates[0]?.instanceId ??
+      props.activeInstanceId;
+    selectedInstanceId = nextInstanceId;
+    setSelectedInstanceState({ hierarchyKey: hierarchySelectionKey, instanceId: nextInstanceId });
+  }
   const { scanning: workspaceModelsScanning } = useProviderWorkspaceSnapshotRefresh({
     environmentId: props.environmentId,
     gitCwd: props.workspaceCwd ?? null,
@@ -635,7 +680,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           ...(model.isLegacy ? { isLegacy: true } : {}),
           ...(model.isUnavailable ? { isUnavailable: true } : {}),
           ...(model.catalogMetadata ? { catalogMetadata: model.catalogMetadata } : {}),
-          ...(instanceId.startsWith("aix-") ? { isAixModel: true } : {}),
+          ...(entry.aixProfile ? { isAixModel: true } : {}),
           instanceId,
           driverKind: entry.driverKind,
           instanceDisplayName: entry.displayName,
@@ -650,6 +695,16 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     }
     return out;
   })();
+  const scopeModels = flatModels.filter((model) => {
+    const isSelected = selectedModelKeySet.has(modelPickerModelKey(model.instanceId, model.slug));
+    const entry = entryByInstanceId.get(model.instanceId);
+    return isPickerModelVisibleForProjectScope({
+      scope: hierarchyScope,
+      modelProfileId: entry?.aixProfile,
+      selectedProfileId: selectedAixProfile,
+      isSelected,
+    });
+  });
 
   const isLocked = lockedProvider !== null;
   const isSearching = searchQuery.trim().length > 0;
@@ -668,7 +723,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       if (!matchesLockedProvider(model)) continue;
       const isFavorite = favoritesSet.has(providerModelKey(model.instanceId, model.slug));
       if (isFavorite) addRow("favorites");
-      if (model.isLegacy && !isFavorite) {
+      if (model.isLegacy && !model.isAixModel && !isFavorite) {
         tabsWithLegacyRow.add(model.instanceId);
       } else {
         addRow(model.instanceId);
@@ -690,7 +745,15 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     return disabled;
   })();
   const sidebarInstanceEntries = (() => {
-    const enabledEntries = instanceEntries.filter(isProviderInstancePickerVisible);
+    const levelEntries = providerInstancesForProjectScope({
+      entries: instanceEntries,
+      scope: hierarchyScope,
+      ...(hierarchyScope === "work" && selectedAixProfile
+        ? { aixProfile: selectedAixProfile }
+        : {}),
+      selectedInstanceId: props.activeInstanceId,
+    });
+    const enabledEntries = levelEntries.filter(isProviderInstancePickerVisible);
     if (!isLocked) {
       return enabledEntries;
     }
@@ -709,7 +772,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   const instanceOrder = instanceEntries.map((entry) => entry.instanceId);
 
   const filteredModels = (() => {
-    let result = flatModels;
+    let result = scopeModels;
 
     if (searchQuery.trim()) {
       const candidates =
@@ -727,12 +790,20 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     if (lockedProvider !== null) {
       result = result.filter((m) => matchesLockedProvider(m));
       if (selectedInstanceId === "favorites") {
-        result = result.filter((m) => favoritesSet.has(providerModelKey(m.instanceId, m.slug)));
+        result = result.filter(
+          (model) =>
+            favoritesSet.has(providerModelKey(model.instanceId, model.slug)) ||
+            selectedModelKeySet.has(modelPickerModelKey(model.instanceId, model.slug)),
+        );
       } else {
         result = result.filter((m) => m.instanceId === selectedInstanceId);
       }
     } else if (selectedInstanceId === "favorites") {
-      result = result.filter((m) => favoritesSet.has(providerModelKey(m.instanceId, m.slug)));
+      result = result.filter(
+        (model) =>
+          favoritesSet.has(providerModelKey(model.instanceId, model.slug)) ||
+          selectedModelKeySet.has(modelPickerModelKey(model.instanceId, model.slug)),
+      );
     } else {
       result = result.filter((m) => m.instanceId === selectedInstanceId);
     }
@@ -752,7 +823,9 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     const legacyModels: ModelPickerItem[] = [];
     for (const model of filteredModels) {
       const isLegacy =
-        model.isLegacy && !favoritesSet.has(providerModelKey(model.instanceId, model.slug));
+        model.isLegacy &&
+        !model.isAixModel &&
+        !favoritesSet.has(providerModelKey(model.instanceId, model.slug));
       (isLegacy ? legacyModels : currentModels).push(model);
     }
     if (legacyModels.length === 0) {
@@ -792,7 +865,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
               : filteredModels.length === 0) &&
             !(
               entry.instanceId === selectedEntry?.instanceId &&
-              entry.instanceId.startsWith("aix-") &&
+              entry.aixProfile !== undefined &&
               props.environmentId !== null &&
               props.onRefreshAixCatalog
             ),
@@ -812,9 +885,9 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     .slice(0, MODEL_PICKER_JUMP_KEYBINDING_COMMANDS.length)
     .map((model) => modelPickerModelKey(model.instanceId, model.slug));
   const allItemKeys = ((): string[] => [
-    ...flatModels.map((model) => modelPickerModelKey(model.instanceId, model.slug)),
+    ...scopeModels.map((model) => modelPickerModelKey(model.instanceId, model.slug)),
     ...new Set(
-      flatModels
+      scopeModels
         .filter((model) => model.isLegacy)
         .map((model) => modelPickerLegacySectionKey(model.instanceId)),
     ),
@@ -906,7 +979,6 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     )?.name;
     announce(`Model: ${name ?? selectedSlug}`, "model-picker");
   };
-
   return (
     <TooltipProvider delay={0}>
       <WindowKeyDownListener onKeyDown={onWindowKeyDown} />
@@ -1019,10 +1091,18 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                   const sidebar = e.currentTarget
                     .closest("[data-model-picker-content]")
                     ?.querySelector("[data-model-picker-sidebar]");
+                  const selectedHarnessId =
+                    selectedInstanceId === "favorites"
+                      ? activeEntry?.instanceId
+                      : selectedInstanceId;
+                  const selectedHarness = sidebar
+                    ? Array.from(
+                        sidebar.querySelectorAll<HTMLElement>("[data-model-picker-provider]"),
+                      ).find((item) => item.dataset.modelPickerProvider === selectedHarnessId)
+                    : undefined;
                   const button =
-                    sidebar?.querySelector<HTMLButtonElement>(
-                      'button[aria-pressed="true"]:not(:disabled)',
-                    ) ?? sidebar?.querySelector<HTMLButtonElement>("button:not(:disabled)");
+                    selectedHarness?.querySelector<HTMLButtonElement>("button:not(:disabled)") ??
+                    sidebar?.querySelector<HTMLButtonElement>("button:not(:disabled)");
                   if (button) {
                     e.preventDefault();
                     e.stopPropagation();
@@ -1082,7 +1162,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
               onTouchStart={(e) => e.stopPropagation()}
             />
 
-            {selectedEntry?.instanceId.startsWith("aix-") &&
+            {selectedEntry?.aixProfile !== undefined &&
             props.environmentId !== null &&
             props.onRefreshAixCatalog ? (
               <AixCatalogControls

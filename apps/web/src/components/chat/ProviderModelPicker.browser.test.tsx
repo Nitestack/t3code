@@ -260,6 +260,68 @@ it("opens on the active provider when every favorite belongs to a disabled provi
   await expect.element(page.getByRole("option", { name: /Codex model/ })).toBeVisible();
 });
 
+it("starts in Favorites when a Personal favorite exists beside aix profiles", async () => {
+  const entries = deriveProviderInstanceEntries([
+    {
+      instanceId: ProviderInstanceId.make("codex"),
+      driver: ProviderDriverKind.make("codex"),
+      enabled: true,
+      installed: true,
+      version: null,
+      status: "ready" as const,
+      auth: { status: "authenticated" as const },
+      checkedAt: "2026-01-01T00:00:00.000Z",
+      models: [
+        { slug: "personal-model", name: "Personal model", isCustom: false, capabilities: {} },
+      ],
+      slashCommands: [],
+      skills: [],
+    },
+    {
+      instanceId: ProviderInstanceId.make("aix-codex-work"),
+      driver: ProviderDriverKind.make("codex"),
+      enabled: true,
+      installed: true,
+      version: null,
+      status: "ready" as const,
+      auth: { status: "authenticated" as const },
+      checkedAt: "2026-01-01T00:00:00.000Z",
+      models: [{ slug: "work-model", name: "Work model", isCustom: false, capabilities: {} }],
+      slashCommands: [],
+      skills: [],
+      aixProfile: "work",
+      aixProfileLabel: "Work",
+    },
+  ]);
+  const personal = entries.find((entry) => entry.instanceId === "codex")!;
+  __setClientSettingsForTests({
+    ...DEFAULT_CLIENT_SETTINGS,
+    favorites: [{ provider: personal.instanceId, model: "personal-model" }],
+  });
+  using _settings = {
+    [Symbol.dispose]: () => __setClientSettingsForTests(DEFAULT_CLIENT_SETTINGS),
+  };
+
+  await using screen = await render(
+    <ProviderModelPicker
+      environmentId={null}
+      projectScope="personal"
+      activeInstanceId={personal.instanceId}
+      model="personal-model"
+      lockedProvider={null}
+      instanceEntries={entries}
+      modelOptionsByInstance={new Map(entries.map((entry) => [entry.instanceId, entry.models]))}
+      triggerAriaLabel="Choose model"
+      onInstanceModelChange={() => {}}
+    />,
+  );
+  await screen.getByRole("button", { name: "Choose model" }).click();
+  await expect
+    .element(page.getByRole("button", { name: "Favorites" }))
+    .toHaveAttribute("aria-pressed", "true");
+  await expect.element(page.getByRole("option", { name: /Personal model/ })).toBeVisible();
+});
+
 const aixEnvironmentId = EnvironmentId.make("aix-test");
 const aixInstanceId = ProviderInstanceId.make("aix-codex-work");
 const aixEntries = deriveProviderInstanceEntries([
@@ -295,6 +357,7 @@ const aixModelOptions = new Map([
       {
         slug: "vendor/beta-v2",
         name: "Beta",
+        isLegacy: true,
         catalogMetadata: { contextTokens: 128000 },
       },
     ],
@@ -308,6 +371,7 @@ function renderAixPicker(permission: boolean) {
     return (
       <ProviderModelPicker
         environmentId={aixEnvironmentId}
+        projectScope="work"
         activeInstanceId={aixInstanceId}
         model={model}
         lockedProvider={null}

@@ -29,12 +29,17 @@ export function resolveThreadProviderInstance(
     driverKind: snapshot.driver,
     displayName: resolveProviderInstanceDisplayName(snapshot),
     accentColor: normalizeProviderAccentColor(snapshot.accentColor),
+    aixProfile: snapshot.aixProfile,
   };
   return {
     ...entry,
     showBadge: shouldShowInstanceBadge(
       { ...entry, enabled: snapshot.enabled },
-      providers.map((provider) => ({ driverKind: provider.driver, enabled: provider.enabled })),
+      providers.map((provider) => ({
+        driverKind: provider.driver,
+        enabled: provider.enabled,
+        aixProfile: provider.aixProfile,
+      })),
     ),
   };
 }

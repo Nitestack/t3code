@@ -77,6 +77,8 @@ import {
   settleCustomModelSave,
 } from "./customModelSaves.logic";
 import { getProviderRestartNotice } from "../ProviderUpdateLaunchNotification.logic";
+import { aixMetadataFromInstanceId } from "@t3tools/client-runtime/provider-picker-hierarchy";
+import { providerSettingsRowLabels } from "@t3tools/client-runtime/provider-settings-hierarchy";
 import {
   getProviderVersionAdvisoryPresentation,
   PROVIDER_STATUS_STYLES,
@@ -823,6 +825,8 @@ export function ProviderInstanceCard({
   const urlAuthAction = liveProvider?.auth.action;
   const displayName =
     instance.displayName?.trim() || driverOption?.label || String(instance.driver);
+  const aixProfile =
+    liveProvider?.aixProfile ?? aixMetadataFromInstanceId(instanceId, instance.driver)?.aixProfile;
   const accentColor = normalizeProviderAccentColor(instance.accentColor);
   const managedPolicy = useManagedPolicy(environmentId);
   const instanceLocks = managedInstanceLocks(managedPolicy, instance.driver);
@@ -992,6 +996,15 @@ export function ProviderInstanceCard({
         ? "Unsupported"
         : "Limited support"
     : summary.detail;
+  const rowLabels = providerSettingsRowLabels({
+    driverLabel: driverOption?.label ?? String(instance.driver),
+    displayName: instance.displayName,
+    isAix: aixProfile !== undefined,
+    version: versionLabel,
+    status: updateProgress
+      ? `Updating · ${updateProgress}`
+      : `${summary.headline}${needsAttention && inlineStatusDetail ? ` · ${inlineStatusDetail}` : ""}`,
+  });
   const editorStatusNode =
     isAuthenticated && authEmail ? (
       <>
@@ -1149,10 +1162,12 @@ export function ProviderInstanceCard({
           {titleIconNode}
           <span className="min-w-0 flex-1">
             <span className="flex min-w-0 items-center gap-2">
-              <span className="truncate text-sm font-medium text-foreground">{displayName}</span>
-              {versionLabel ? (
+              <span className="truncate text-sm font-medium text-foreground">
+                {rowLabels.title}
+              </span>
+              {rowLabels.version ? (
                 <code className="max-w-24 shrink-0 truncate text-xs text-muted-foreground">
-                  {versionLabel}
+                  {rowLabels.version}
                 </code>
               ) : null}
               {versionAdvisoryNode}
@@ -1167,14 +1182,7 @@ export function ProviderInstanceCard({
                   aria-live="polite"
                   className="pointer-events-auto line-clamp-2 [overflow-wrap:anywhere]"
                 >
-                  {updateProgress ? (
-                    `Updating · ${updateProgress}`
-                  ) : (
-                    <>
-                      {summary.headline}
-                      {needsAttention && inlineStatusDetail ? ` · ${inlineStatusDetail}` : null}
-                    </>
-                  )}
+                  {rowLabels.detail}
                 </span>
               </ProviderStatusDiagnostic>
             </span>

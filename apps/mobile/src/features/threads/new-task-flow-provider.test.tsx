@@ -7,6 +7,9 @@ import {
   DEFAULT_SERVER_SETTINGS,
   EnvironmentId,
   ProjectId,
+  ProviderDriverKind,
+  ProviderInstanceId,
+  type ModelSelection,
   type VcsListRefsResult,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -94,7 +97,7 @@ vi.mock("../../state/use-composer-drafts", () => ({
   retargetNewTaskDraft: mocks.retargetDraft,
   updateComposerDraftSettings: mocks.writeSettings,
   setComposerDraftText: mocks.writeText,
-  useStickyComposerModelSelection: () => null,
+  useStickyComposerModelSelections: () => ({ personal: null, work: null }),
   isNewTaskDraftKey: (key: string) => key.startsWith("new-task:"),
   clearComposerDraft: vi.fn(),
   appendComposerDraftAttachments: vi.fn(),
@@ -130,6 +133,57 @@ function project(environment: string, id: string): EnvironmentProject {
     scripts: [],
     createdAt: "2026-10-26T00:00:00Z",
     updatedAt: "2026-10-26T00:00:00Z",
+  };
+}
+
+function serverConfig(options: {
+  readonly defaultModelSelection?: ModelSelection | null;
+  readonly hideCodexDefault?: boolean;
+  readonly withoutCodexDefault?: boolean;
+}) {
+  const models = (values: ReadonlyArray<{ slug: string; isDefault?: boolean }>) =>
+    values.map((model) => ({
+      ...model,
+      name: model.slug,
+      isCustom: false,
+      isLegacy: false,
+      capabilities: null,
+    }));
+  return {
+    settings: {
+      ...DEFAULT_SERVER_SETTINGS,
+      defaultModelSelection: options.defaultModelSelection ?? null,
+      ...(options.hideCodexDefault
+        ? { providerModelPreferences: { codex: { hiddenModels: ["hidden-default"] } } }
+        : {}),
+    },
+    environment: { capabilities: { projectScope: true } },
+    providers: [
+      {
+        instanceId: ProviderInstanceId.make("codex"),
+        driver: ProviderDriverKind.make("codex"),
+        displayName: "Codex",
+        enabled: true,
+        installed: true,
+        status: "ready",
+        auth: { status: "authenticated" },
+        models: models(
+          options.withoutCodexDefault
+            ? [{ slug: "codex-first" }, { slug: "codex-second" }]
+            : [{ slug: "hidden-default", isDefault: true }, { slug: "codex-visible" }],
+        ),
+      },
+      {
+        instanceId: ProviderInstanceId.make("claudeAgent"),
+        driver: ProviderDriverKind.make("claudeAgent"),
+        displayName: "Claude",
+        enabled: true,
+        installed: true,
+        status: "ready",
+        auth: { status: "authenticated" },
+        models: models([{ slug: "claude-default", isDefault: true }]),
+      },
+    ],
   };
 }
 
@@ -269,7 +323,12 @@ function setup() {
     get current() {
       return current;
     },
-    async render(active: boolean, routeDraftId?: string, stampedProject?: EnvironmentProject) {
+    async render(
+      active: boolean,
+      routeDraftId?: string,
+      stampedProject?: EnvironmentProject,
+      carriedSelection?: ModelSelection,
+    ) {
       if (routeDraftId !== undefined && stampedProject !== undefined) {
         write(routeDraftId, {
           project: {
@@ -286,6 +345,7 @@ function setup() {
               active={active}
               flowKey="test-flow"
               {...(routeDraftId === undefined ? {} : { routeDraftId })}
+              {...(carriedSelection === undefined ? {} : { carriedSelection })}
             >
               <Probe />
             </NewTaskFlowProvider>
@@ -306,6 +366,49 @@ function setup() {
     },
   };
 }
+
+it("uses the provider-order default after excluding hidden model defaults", async () => {
+  using screen = setup();
+  mocks.serverConfig.mockReturnValue(serverConfig({ hideCodexDefault: true }) as never);
+  await screen.render(true);
+
+  expect(screen.current.selectedModel).toEqual({
+    instanceId: ProviderInstanceId.make("codex"),
+    model: "codex-visible",
+  });
+});
+
+it("uses the first ready provider's first model when it has no default model", async () => {
+  using screen = setup();
+  mocks.serverConfig.mockReturnValue(serverConfig({ withoutCodexDefault: true }) as never);
+  await screen.render(true);
+
+  expect(screen.current.selectedModel).toEqual({
+    instanceId: ProviderInstanceId.make("codex"),
+    model: "codex-first",
+  });
+});
+
+it("prefers a ready in-scope carried model over the configured default", async () => {
+  using screen = setup();
+  mocks.serverConfig.mockReturnValue(
+    serverConfig({
+      defaultModelSelection: {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: "codex-visible",
+      },
+    }) as never,
+  );
+  await screen.render(true, undefined, undefined, {
+    instanceId: ProviderInstanceId.make("claudeAgent"),
+    model: "claude-default",
+  });
+
+  expect(screen.current.selectedModel).toEqual({
+    instanceId: ProviderInstanceId.make("claudeAgent"),
+    model: "claude-default",
+  });
+});
 
 it("owns a status stream only while the draft is active, retaining draft choices on reopen", async () => {
   using screen = setup();

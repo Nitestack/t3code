@@ -3,7 +3,6 @@ import {
   deriveEffectiveComposerModelState,
   useComposerDraftModelState,
 } from "../../composerDraftStore";
-import { draftModelSelectionApplies } from "../../lib/chatThreadActions";
 import {
   type ModelSelection,
   type ProjectId,
@@ -51,6 +50,7 @@ export function useComposerProviderModel(
     lockedProvider,
     lockedInstanceId,
     threadStarted,
+    draftScope,
   } = input;
   const draftModelState = useComposerDraftModelState(threadRef);
   const providerInstanceEntries: ReadonlyArray<ProviderInstanceEntry> = providerInstanceEntriesFor(
@@ -58,16 +58,16 @@ export function useComposerProviderModel(
     settings,
     activeProjectId,
   );
+  const draftSelectionIsExplicit = draftModelState?.modelSelectionExplicit === true;
   const selection = resolveComposerProviderSelection({
     entries: providerInstanceEntries,
     candidateInstanceIds: [
-      draftModelSelectionApplies(draftModelState, threadStarted)
-        ? draftModelState.activeProvider
-        : null,
+      draftSelectionIsExplicit ? draftModelState?.activeProvider : null,
       ...candidateInstanceIds,
     ],
     lockedProvider,
     lockedInstanceId,
+    draftScope,
   });
   const selectedInstanceId =
     selection.selectedProviderEntry?.instanceId ?? NO_PROVIDER_MODEL_SELECTION.instanceId;

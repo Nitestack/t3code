@@ -24,6 +24,7 @@ function makeConfig(
     readonly driver: string;
     readonly displayName?: string;
     readonly accentColor?: string;
+    readonly aixProfile?: string;
   }>,
 ): ServerConfig {
   return {
@@ -118,6 +119,51 @@ describe("resolveThreadProviderInstance", () => {
 });
 
 describe("createThreadRowProviderInstanceResolver", () => {
+  it("keeps aix profile metadata in the environment projection and excludes it from badges", () => {
+    const environmentId = EnvironmentId.make("environment-a");
+    const personal = makeThread(environmentId, "codex");
+    const work = makeThread(environmentId, "codex_work");
+    const config = makeConfig([
+      { instanceId: "codex", driver: "codex" },
+      { instanceId: "codex_work", driver: "codex" },
+    ]);
+    const configs = Atom.make<ReadonlyMap<EnvironmentId, ServerConfig>>(
+      new Map([[environmentId, config]]),
+    );
+    const environments = createThreadListEnvironmentsAtom(configs, Atom.make([environmentId]));
+    const registry = AtomRegistry.make();
+    registry.mount(environments);
+    try {
+      registry.set(
+        configs,
+        new Map([
+          [
+            environmentId,
+            {
+              ...config,
+              providers: config.providers.map((provider) =>
+                provider.instanceId === "codex_work"
+                  ? { ...provider, aixProfile: "engineering" }
+                  : provider,
+              ),
+            },
+          ],
+        ]),
+      );
+      const providers = registry.get(environments).providersByEnvironmentId.get(environmentId);
+      expect(providers?.find((provider) => provider.instanceId === "codex_work")?.aixProfile).toBe(
+        "engineering",
+      );
+      const resolve = createThreadRowProviderInstanceResolver(
+        registry.get(environments).providersByEnvironmentId,
+      );
+      expect(resolve(personal)?.showBadge).toBe(false);
+      expect(resolve(work)?.showBadge).toBe(false);
+    } finally {
+      registry.dispose();
+    }
+  });
+
   it("updates thread badges through the environment projection when a sibling is disabled and re-enabled", () => {
     const environmentId = EnvironmentId.make("environment-a");
     const personal = makeThread(environmentId, "codex");
