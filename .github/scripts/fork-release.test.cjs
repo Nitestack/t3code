@@ -12,6 +12,7 @@ const {
   buildForkBuildInfo,
   buildForkNixBuildSummary,
   buildForkReleaseNotes,
+  decideReleaseBranchUpdate,
   requiredReleaseAssets,
   resolveForkUpstreamBase,
   resolveForkRelease,
@@ -38,6 +39,17 @@ const dispatch = {
   sourceOnMain: true,
 };
 const verifiedBase = { expectedVersion: "0.1.9", peeledTagCommit: upstreamBase };
+
+test("release branch moves only forward to newer releases", () => {
+  assert.equal(decideReleaseBranchUpdate("ahead"), "update");
+  assert.equal(decideReleaseBranchUpdate("identical"), "noop");
+  assert.equal(decideReleaseBranchUpdate("behind"), "skip");
+  assert.equal(decideReleaseBranchUpdate("diverged"), "skip");
+  assert.throws(
+    () => decideReleaseBranchUpdate("unknown"),
+    /unsupported release branch comparison/,
+  );
+});
 
 test("upstream base requires a valid marker or an explicit full manual input", () => {
   const markerContents = JSON.stringify({ tag: "v0.1.9", commit: upstreamBase });

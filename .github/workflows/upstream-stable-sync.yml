@@ -6,6 +6,8 @@ on:
       - .github/workflows/upstream-stable-sync.yml
       - scripts/upstream-stable-sync.mjs
       - scripts/upstream-stable-sync.test.mjs
+      - scripts/update-release-package-versions.ts
+      - scripts/lib/tagged-source-version.ts
       - .github/scripts/fork-ci-checks.cjs
       - .github/scripts/fork-ci-checks.test.cjs
   push:
@@ -14,6 +16,8 @@ on:
       - .github/workflows/upstream-stable-sync.yml
       - scripts/upstream-stable-sync.mjs
       - scripts/upstream-stable-sync.test.mjs
+      - scripts/update-release-package-versions.ts
+      - scripts/lib/tagged-source-version.ts
       - .github/scripts/fork-ci-checks.cjs
       - .github/scripts/fork-ci-checks.test.cjs
   workflow_run:
@@ -73,10 +77,15 @@ jobs:
             exit 1
           fi
 
-      - name: Set up Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - name: Set up Vite+
+        uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb # v1.15.0
         with:
-          node-version: 26.12.1
+          node-version-file: package.json
+          cache: true
+          run-install: false
+
+      - name: Install release package updater dependencies
+        run: vp install --filter=@t3tools/scripts... --frozen-lockfile
 
       - name: Test stable sync and exact fork CI checks
         run: node --test scripts/upstream-stable-sync.test.mjs .github/scripts/fork-ci-checks.test.cjs .github/scripts/fork-release.test.cjs
@@ -150,6 +159,18 @@ jobs:
           permission-administration: read
           permission-contents: write
           permission-pull-requests: write
+
+      - name: Set up Vite+
+        if: steps.inspect.outputs.requires_write == 'true'
+        uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb # v1.15.0
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: false
+
+      - name: Install release package updater dependencies
+        if: steps.inspect.outputs.requires_write == 'true'
+        run: vp install --filter=@t3tools/scripts... --frozen-lockfile
 
       - name: Push the update branch and open its pull request
         if: steps.inspect.outputs.requires_write == 'true'

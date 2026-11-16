@@ -78,7 +78,7 @@ For a LiteLLM API key with a reported budget, check the Gateway budget window in
 - Model metadata may be absent. Budget windows and reset times are shown only when the gateway reports them.
 - Official iOS and Android apps have no fork switch or extended model details and have not been verified against a fork server. A separately signed Android build path exists, but no fork APK has been published or device-verified. There is no fork iOS app.
 - The fork's Nix flake builds from source and currently targets `x86_64-linux`; it is not a universal prebuilt binary.
-- [Fork releases](https://github.com/Nitestack/t3code/releases) are empty today. The release workflow is being integrated; the intended stable release name and version follow upstream (for example, **T3 Code v0.1.9**), rather than introducing a separate fork version. The [fork release runbook](./docs/operations/fork-release.md) tracks the process. Upstream download links below install original T3 Code, not this fork.
+- [Fork releases](https://github.com/Nitestack/t3code/releases) use upstream stable versions (for example, **T3 Code v0.1.9**). For Nix, `github:Nitestack/t3code/release` follows the latest published release after the first one; pin a release tag for a reproducible version. `main` includes unreleased fork changes. The [fork release runbook](./docs/operations/fork-release.md) explains the process. Upstream download links below install original T3 Code, not this fork.
 
 For provider details, remote connections, troubleshooting, and mobile boundaries, see the [fork guide](./docs/user/nitestack-fork.md), [provider setup](./docs/user/install.md#providers), [remote access](./docs/user/remote-access.md), and [T3 Connect troubleshooting](./docs/user/t3-connect-troubleshooting.md).
 

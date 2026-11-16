@@ -2,6 +2,7 @@ import * as NodeChildProcess from "node:child_process";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeURL from "node:url";
 import ForkCiChecks from "../.github/scripts/fork-ci-checks.cjs";
+import { releasePackageFiles } from "./lib/tagged-source-version.ts";
 
 const FORK_REPOSITORY = "Nitestack/t3code";
 const UPSTREAM_REPOSITORY = "pingdotgg/t3code";
@@ -344,6 +345,7 @@ export function validateSyncBranch({
   mainRef,
   targetTag,
   targetCommit,
+  expectedMainParent,
   cwd = process.cwd(),
 }) {
   const runGit = (args, options) => git(args, { ...options, cwd });
@@ -360,15 +362,38 @@ export function validateSyncBranch({
   }
 
   const branchParents = runGit(["show", "-s", "--format=%P", branchCommit]).split(" ");
-  const mergesStableTag = branchParents.length === 2 && branchParents[1] === targetCommit;
+  const branchChanges = (commit) =>
+    runGit(["diff", "--name-only", `${commit}^`, commit])
+      .split("\n")
+      .filter(Boolean);
+  const parentIsSyncCommit = (commit) => {
+    const parents = runGit(["show", "-s", "--format=%P", commit]).split(" ");
+    return (
+      (parents.length === 2 && parents[1] === targetCommit) ||
+      (parents.length === 1 && branchChanges(commit).includes(MARKER_PATH))
+    );
+  };
+  const hasVersionCommit =
+    branchParents.length === 1 &&
+    branchChanges(branchCommit).length > 0 &&
+    !branchChanges(branchCommit).includes(MARKER_PATH) &&
+    parentIsSyncCommit(branchParents[0]);
+  const syncCommit = hasVersionCommit ? branchParents[0] : branchCommit;
+  const syncParents = runGit(["show", "-s", "--format=%P", syncCommit]).split(" ");
+  const mergesStableTag = syncParents.length === 2 && syncParents[1] === targetCommit;
   const recordsTagAlreadyInMain =
-    branchParents.length === 1 && isAncestor(targetCommit, branchParents[0], cwd);
+    syncParents.length === 1 && isAncestor(targetCommit, syncParents[0], cwd);
   if (!mergesStableTag && !recordsTagAlreadyInMain) {
     throw new Error(
       `Existing update branch ${branch} contains unexpected commits or does not sync the expected upstream stable tag.`,
     );
   }
-  const baseCommit = branchParents[0];
+  const baseCommit = syncParents[0];
+  if (expectedMainParent && baseCommit !== expectedMainParent) {
+    throw new Error(
+      `Existing update branch ${branch} does not preserve the exact fork main parent.`,
+    );
+  }
   if (!isAncestor(baseCommit, mainRef, cwd)) {
     throw new Error(
       `Existing update branch ${branch} is not based on the current fork main history.`,
@@ -382,12 +407,43 @@ export function validateSyncBranch({
   } catch {
     throw new Error(`Existing update branch ${branch} contains an unresolved upstream merge.`);
   }
-  const mergeChanges = runGit(["diff", "--name-only", expectedMergeTree, branchCommit])
+  const mergeChanges = runGit(["diff", "--name-only", expectedMergeTree, syncCommit])
     .split("\n")
     .filter(Boolean);
   if (mergeChanges.length !== 1 || mergeChanges[0] !== MARKER_PATH) {
     throw new Error(
       `Existing update branch ${branch} contains unexpected fork changes or merge resolutions.`,
+    );
+  }
+
+  const version = targetTag.replace(/^v/, "");
+  const expectedVersionChanges = [];
+  for (const file of releasePackageFiles) {
+    const previous = JSON.parse(runGit(["show", `${syncCommit}:${file}`]));
+    const current = JSON.parse(runGit(["show", `${branchCommit}:${file}`]));
+    if (current.version !== version) {
+      throw new Error(
+        `Existing update branch ${branch} has a release manifest with the wrong version.`,
+      );
+    }
+    if (previous.version !== version) expectedVersionChanges.push(file);
+    const previousFields = { ...previous };
+    const currentFields = { ...current };
+    delete previousFields.version;
+    delete currentFields.version;
+    if (JSON.stringify(previousFields) !== JSON.stringify(currentFields)) {
+      throw new Error(
+        `Existing update branch ${branch} contains unexpected release manifest changes.`,
+      );
+    }
+  }
+  const actualVersionChanges = hasVersionCommit ? branchChanges(branchCommit) : [];
+  if (
+    JSON.stringify(actualVersionChanges.toSorted()) !==
+    JSON.stringify(expectedVersionChanges.toSorted())
+  ) {
+    throw new Error(
+      `Existing update branch ${branch} contains unexpected commits or release manifest changes.`,
     );
   }
 }
@@ -430,22 +486,13 @@ export function validateMergedSyncReleaseSource({ sourceSha, mainRef, cwd = proc
     throw new Error("The upstream marker base does not equal the peeled stable tag commit.");
   }
   const expectedBranch = `${BRANCH_PREFIX}${marker.tag}-${targetCommit.slice(0, 8)}`;
-  const syncParents = runGit(["show", "-s", "--format=%P", syncBranchCommit]).split(" ");
-  const syncBranchMergesTag =
-    syncParents.length === 2 && syncParents[0] === mainParent && syncParents[1] === targetCommit;
-  const syncBranchRecordsTagAlreadyOnMain =
-    syncParents.length === 1 &&
-    syncParents[0] === mainParent &&
-    isAncestor(targetCommit, mainParent, cwd);
-  if (!syncBranchMergesTag && !syncBranchRecordsTagAlreadyOnMain) {
-    throw new Error("The fork integration merge does not preserve the exact sync PR parents.");
-  }
   validateSyncBranch({
     branch: expectedBranch,
     branchCommit: syncBranchCommit,
     mainRef: mainParent,
     targetTag: marker.tag,
     targetCommit,
+    expectedMainParent: mainParent,
     cwd,
   });
   const manifest = JSON.parse(runGit(["show", `${sourceSha}:apps/server/package.json`]));
@@ -1390,6 +1437,22 @@ async function main() {
     );
     git(["add", "--", MARKER_PATH]);
     git(["commit", "--no-edit", "-m", `chore: sync upstream stable ${targetTag}`]);
+
+    const version = targetTag.replace(/^v/, "");
+    const updater = NodeURL.fileURLToPath(
+      new URL("./update-release-package-versions.ts", import.meta.url),
+    );
+    run(process.execPath, [updater, version, "--root", process.cwd()]);
+    const versionChanges = git(["diff", "--name-only"]).split("\n").filter(Boolean);
+    if (versionChanges.some((file) => !releasePackageFiles.includes(file))) {
+      throw new Error(
+        "Release version update changed files outside the release package manifests.",
+      );
+    }
+    if (versionChanges.length > 0) {
+      git(["add", "--", ...versionChanges]);
+      git(["commit", "-m", `chore: set release package versions to ${version}`]);
+    }
   }
 
   const commits = git(["log", "--format=%s (%h)", `${baseCommit}..${targetCommit}`])

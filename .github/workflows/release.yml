@@ -896,6 +896,76 @@ jobs:
           --target "$RELEASE_SHA"
           --notes-file release-notes.md
 
+      - name: Advance the latest-release branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_SHA: ${{ needs.fork_preflight.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ref="repos/$GH_REPO/git/ref/heads/release"
+          current_sha="$(gh api "$ref" --jq '.object.sha' 2>"$RUNNER_TEMP/release-ref.err" || true)"
+          if [[ -z "$current_sha" ]]; then
+            if ! grep -q "HTTP 404" "$RUNNER_TEMP/release-ref.err"; then
+              cat "$RUNNER_TEMP/release-ref.err" >&2
+              exit 1
+            fi
+            if printf '{"ref":"refs/heads/release","sha":"%s"}\n' "$RELEASE_SHA" |
+              gh api --method POST "repos/$GH_REPO/git/refs" --input - >/dev/null 2>"$RUNNER_TEMP/release-ref-create.err"
+            then
+              message="Created the release branch at $RELEASE_SHA."
+              echo "::notice::$message"
+              echo "$message" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            current_sha="$(gh api "$ref" --jq '.object.sha')"
+          fi
+
+          compare_status="$(gh api "repos/$GH_REPO/compare/$current_sha...$RELEASE_SHA" --jq '.status')"
+          action="$(RELEASE_BRANCH_COMPARE_STATUS="$compare_status" node - <<'NODE'
+          const { decideReleaseBranchUpdate } = require("./.github/scripts/fork-release.cjs");
+          process.stdout.write(decideReleaseBranchUpdate(process.env.RELEASE_BRANCH_COMPARE_STATUS));
+          NODE
+          )"
+          case "$action" in
+            noop)
+              message="The release branch already points to $RELEASE_SHA."
+              echo "::notice::$message"
+              echo "$message" >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            skip)
+              message="The release branch is newer than or diverged from $RELEASE_SHA; leaving it unchanged."
+              echo "::notice::$message"
+              echo "$message" >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            update)
+              if printf '{"sha":"%s","force":false}\n' "$RELEASE_SHA" |
+                gh api --method PATCH "$ref" --input - >/dev/null 2>"$RUNNER_TEMP/release-ref-update.err"
+              then
+                message="Advanced the release branch to $RELEASE_SHA."
+                echo "::notice::$message"
+                echo "$message" >> "$GITHUB_STEP_SUMMARY"
+              else
+                current_sha="$(gh api "$ref" --jq '.object.sha')"
+                compare_status="$(gh api "repos/$GH_REPO/compare/$current_sha...$RELEASE_SHA" --jq '.status')"
+                action="$(RELEASE_BRANCH_COMPARE_STATUS="$compare_status" node - <<'NODE'
+          const { decideReleaseBranchUpdate } = require("./.github/scripts/fork-release.cjs");
+          process.stdout.write(decideReleaseBranchUpdate(process.env.RELEASE_BRANCH_COMPARE_STATUS));
+          NODE
+          )"
+                if [[ "$action" == skip || "$action" == noop ]]; then
+                  message="The release branch changed during publication and is no longer behind $RELEASE_SHA; leaving it unchanged."
+                  echo "::notice::$message"
+                  echo "$message" >> "$GITHUB_STEP_SUMMARY"
+                else
+                  cat "$RUNNER_TEMP/release-ref-update.err" >&2
+                  exit 1
+                fi
+              fi
+              ;;
+          esac
+
   # Picks the commit every later job builds. Nightlies and tag pushes build the
   # triggering commit. Manual stable releases build the commit of the latest
   # published nightly, so stable only ever ships a build that nightly users

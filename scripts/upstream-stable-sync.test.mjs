@@ -66,6 +66,15 @@ async function createSyncFixture({
     NodePath.join(upstreamWork, "apps", "server", "package.json"),
     JSON.stringify({ version: "0.1.9" }, null, 2) + "\n",
   );
+  for (const relativePath of [
+    "apps/desktop/package.json",
+    "apps/web/package.json",
+    "packages/contracts/package.json",
+  ]) {
+    const filePath = NodePath.join(upstreamWork, relativePath);
+    await NodeFSP.mkdir(NodePath.dirname(filePath), { recursive: true });
+    await NodeFSP.writeFile(filePath, JSON.stringify({ version: "0.1.9" }, null, 2) + "\n");
+  }
   git(upstreamWork, ["add", "."]);
   git(upstreamWork, ["commit", "-m", "upstream 0.1.9"]);
   git(upstreamWork, ["tag", "v0.1.9"]);
@@ -839,6 +848,27 @@ NodeTest.test(
       NodeAssert.equal(result.status, 0, result.output);
       const state = await fixture.readState();
       const branch = state.pullRequests[0].headRefName;
+      const syncCommit = fixture.git(fixture.checkout, ["rev-parse", `${branch}^`]);
+      fixture.git(fixture.checkout, ["switch", "-C", branch, syncCommit]);
+      for (const path of [
+        "apps/server/package.json",
+        "apps/desktop/package.json",
+        "apps/web/package.json",
+        "packages/contracts/package.json",
+      ]) {
+        const filePath = NodePath.join(fixture.checkout, path);
+        const manifest = JSON.parse(await NodeFSP.readFile(filePath, "utf8"));
+        manifest.version = path === "apps/server/package.json" ? "0.1.9" : "0.1.10";
+        await NodeFSP.writeFile(filePath, JSON.stringify(manifest, null, 2) + "\n");
+      }
+      fixture.git(fixture.checkout, [
+        "add",
+        "apps/server/package.json",
+        "apps/desktop/package.json",
+        "apps/web/package.json",
+        "packages/contracts/package.json",
+      ]);
+      fixture.git(fixture.checkout, ["commit", "-m", "invalid release versions"]);
       fixture.git(fixture.checkout, ["switch", "main"]);
       fixture.git(fixture.checkout, ["fetch", "origin", "main"]);
       fixture.git(fixture.checkout, ["merge", "--no-ff", "--no-edit", branch]);
@@ -852,7 +882,7 @@ NodeTest.test(
             mainRef: "refs/remotes/origin/main",
             cwd: fixture.checkout,
           }),
-        /integration version does not match its upstream stable marker/,
+        /release manifest with the wrong version/,
       );
     } finally {
       await NodeFSP.rm(fixture.root, { recursive: true, force: true });
@@ -1251,6 +1281,19 @@ NodeTest.test(
         () => validateSyncBranch({ ...args, targetCommit: "0".repeat(40) }),
         /unexpected upstream marker/,
       );
+
+      fixture.git(fixture.checkout, ["switch", branch]);
+      await NodeFSP.writeFile(NodePath.join(fixture.checkout, "unexpected.txt"), "extra\n");
+      fixture.git(fixture.checkout, ["add", "unexpected.txt"]);
+      fixture.git(fixture.checkout, ["commit", "-m", "unexpected extra commit"]);
+      NodeAssert.throws(
+        () =>
+          validateSyncBranch({
+            ...args,
+            branchCommit: fixture.git(fixture.checkout, ["rev-parse", "HEAD"]),
+          }),
+        /not based on the current fork main history|unexpected commits or release manifest changes/,
+      );
     } finally {
       await NodeFSP.rm(fixture.root, { recursive: true, force: true });
     }
@@ -1260,9 +1303,28 @@ NodeTest.test(
 NodeTest.test(
   "merge handler checks the exact PR head and queues only after exact integration-commit CI",
   async () => {
-    const fixture = await createSyncFixture();
+    const fixture = await createSyncFixture({ manifestVersionOverrides: { "v0.1.10": "0.1.9" } });
     try {
       const event = await prepareSuccessfulCiEvent(fixture);
+      const versionCommitParent = fixture.git(fixture.fork, [
+        "show",
+        "-s",
+        "--format=%P",
+        event.headSha,
+      ]);
+      NodeAssert.deepEqual(
+        fixture
+          .git(fixture.fork, ["diff", "--name-only", `${versionCommitParent}..${event.headSha}`])
+          .split("\n")
+          .filter(Boolean)
+          .toSorted(),
+        [
+          "apps/desktop/package.json",
+          "apps/server/package.json",
+          "apps/web/package.json",
+          "packages/contracts/package.json",
+        ],
+      );
       const result = fixture.runSync({ env: event.env });
       NodeAssert.equal(result.status, 0, result.output);
       NodeAssert.match(
@@ -1309,6 +1371,17 @@ NodeTest.test(
           version: "0.1.10",
         },
       );
+      for (const path of [
+        "apps/server/package.json",
+        "apps/desktop/package.json",
+        "apps/web/package.json",
+        "packages/contracts/package.json",
+      ]) {
+        NodeAssert.equal(
+          JSON.parse(fixture.git(fixture.checkout, ["show", `${integrationSha}:${path}`])).version,
+          "0.1.10",
+        );
+      }
 
       const mainCiRunId = 79002;
       const completedMainRun = {
