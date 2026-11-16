@@ -168,13 +168,11 @@ export function createNewThreadHandler(router: AnyRouter) {
       environmentConfig?.environment?.capabilities?.projectScope === true,
     );
     const configuredDefaultModelSelection = projectSettings.settings.defaultModelSelection ?? null;
-    const normalDefaultModelSelection =
-      configuredDefaultModelSelection ??
-      resolveProjectDefaultProviderModelSelection(
-        providers,
-        targetServerSettings,
-        projectRef.projectId,
-      );
+    const orderedDefaultModelSelection = resolveProjectDefaultProviderModelSelection(
+      providers,
+      targetServerSettings,
+      projectRef.projectId,
+    );
     const stickyState = useComposerDraftStore.getState();
     const stickyProviderForScope = stickyState.stickyActiveProviderByScope[projectScope];
     const stickySelectionForScope = stickyProviderForScope
@@ -182,7 +180,8 @@ export function createNewThreadHandler(router: AnyRouter) {
       : null;
     const defaultModelSelection = resolveDraftModelSelectionForScope({
       scope: projectScope,
-      normalDefault: normalDefaultModelSelection,
+      normalDefault: configuredDefaultModelSelection,
+      orderedDefault: orderedDefaultModelSelection,
       stickySelection: stickySelectionForScope,
       providers,
     });

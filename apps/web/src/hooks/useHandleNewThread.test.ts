@@ -407,6 +407,45 @@ describe("useNewThreadHandler", () => {
     );
   });
 
+  it("prefers the scope's last-used model over the provider-order default", async () => {
+    testState.reset(null);
+    testState.providers = [
+      {
+        instanceId: "codex",
+        driver: "codex",
+        enabled: true,
+        installed: true,
+        status: "ready",
+        models: [{ slug: "personal-default", isDefault: true }],
+      },
+      {
+        instanceId: "claudeAgent",
+        driver: "claudeAgent",
+        enabled: true,
+        installed: true,
+        status: "ready",
+        models: [{ slug: "claude-default", isDefault: true }, { slug: "claude-last" }],
+      },
+    ];
+    testState.draftStore.stickyActiveProviderByScope = { personal: "claudeAgent", work: null };
+    testState.draftStore.stickyModelSelectionByProvider = {
+      claudeAgent: { instanceId: "claudeAgent", model: "claude-last" },
+    };
+
+    const pending = useNewThreadHandler()({
+      environmentId: "environment-ssh",
+      projectId: "project-remote",
+    } as never);
+    testState.completeProjectFileRead(null);
+    await pending;
+
+    expect(testState.draftStore.setModelSelection).toHaveBeenCalledWith(
+      "draft-delayed",
+      { instanceId: "claudeAgent", model: "claude-last" },
+      { replaceOptions: true },
+    );
+  });
+
   it("keeps the text of a draft that gained some while it waited", async () => {
     testState.reset(null);
     const raced = {

@@ -215,11 +215,10 @@ export function DraftHeroHeadline({
         environmentConfig?.environment?.capabilities?.projectScope === true,
       );
       applyStickyState(draftId, scope);
-      const normalDefault =
-        defaultSelection ??
-        (environmentSettings
-          ? resolveProjectDefaultProviderModelSelection(providers, environmentSettings, project.id)
-          : null);
+      const normalDefault = defaultSelection ?? null;
+      const orderedDefault = environmentSettings
+        ? resolveProjectDefaultProviderModelSelection(providers, environmentSettings, project.id)
+        : null;
       const stickyState = useComposerDraftStore.getState();
       const stickyProviderForScope = stickyState.stickyActiveProviderByScope[scope];
       const stickySelectionForScope = stickyProviderForScope
@@ -229,6 +228,7 @@ export function DraftHeroHeadline({
         defaultSelection: resolveDraftModelSelectionForScope({
           scope,
           normalDefault,
+          orderedDefault,
           stickySelection: stickySelectionForScope,
           providers,
         }),
@@ -241,6 +241,7 @@ export function DraftHeroHeadline({
       const defaultModelSelection = resolveDraftModelSelectionForScope({
         scope,
         normalDefault: fallbackResolution.fallback ? fallbackResolution.selection : normalDefault,
+        orderedDefault,
         stickySelection: stickySelectionForScope,
         providers,
       });

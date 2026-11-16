@@ -816,9 +816,9 @@ export default function ChatView(props: ChatViewProps) {
   const draftProviders = draftThread
     ? (providersByEnvironment.get(draftThread.environmentId) ?? [])
     : [];
-  const draftNormalDefault = draftThread
-    ? (draftDefaultModelSelection ??
-      resolveProjectDefaultProviderModelSelection(draftProviders, settings, draftThread.projectId))
+  const draftNormalDefault = draftDefaultModelSelection ?? null;
+  const draftOrderedDefault = draftThread
+    ? resolveProjectDefaultProviderModelSelection(draftProviders, settings, draftThread.projectId)
     : null;
   const draftEnvironment = draftThread ? environmentById.get(draftThread.environmentId) : null;
   const draftProjectScope = resolveModelPickerProjectScope(
@@ -839,6 +839,7 @@ export default function ChatView(props: ChatViewProps) {
         explicitSelection: draftExplicitModelSelection,
         stickySelection: draftStickySelection,
         normalDefault: draftNormalDefault,
+        orderedDefault: draftOrderedDefault,
         providers: draftProviders,
       })
     : null;

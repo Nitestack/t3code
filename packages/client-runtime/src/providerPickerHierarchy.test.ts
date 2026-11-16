@@ -338,6 +338,23 @@ describe("provider picker hierarchy", () => {
     expect(
       resolveDraftModelSelectionForScope({
         scope: "personal",
+        orderedDefault: selection("codex", "personal-default"),
+        stickySelection: selection("claudeAgent", "sticky"),
+        providers,
+      }),
+    ).toEqual(selection("claudeAgent", "sticky"));
+
+    expect(
+      resolveDraftModelSelectionForScope({
+        scope: "personal",
+        orderedDefault: selection("claudeAgent", "ordered"),
+        providers,
+      }),
+    ).toEqual(selection("claudeAgent", "ordered"));
+
+    expect(
+      resolveDraftModelSelectionForScope({
+        scope: "personal",
         stickySelection: selection("codex", "disabled-sticky"),
         providers: providers.map((provider) =>
           provider.instanceId === "codex" ? { ...provider, enabled: false } : provider,

@@ -194,6 +194,8 @@ export function resolveDraftModelSelectionForScope(input: {
   readonly stickySelection?: ModelSelection | null | undefined;
   /** The project's configured model, before scope and readiness are applied. */
   readonly normalDefault?: ModelSelection | null | undefined;
+  /** Provider-order default; unlike a configured one it ranks below the last-used selection. */
+  readonly orderedDefault?: ModelSelection | null | undefined;
   readonly providers: ReadonlyArray<DraftDefaultProvider>;
 }): ModelSelection | null {
   if (input.explicitSelection) return input.explicitSelection;
@@ -223,6 +225,8 @@ export function resolveDraftModelSelectionForScope(input: {
   if (configured) return configured;
   const sticky = selectable(input.stickySelection);
   if (sticky) return sticky;
+  const ordered = selectable(input.orderedDefault);
+  if (ordered) return ordered;
   const firstReady = providers.find((provider) => inScope(provider) && ready(provider));
   return firstReady ? defaultSelectionForProvider(firstReady) : null;
 }
