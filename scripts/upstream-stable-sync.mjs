@@ -156,16 +156,16 @@ export function getSyncDecision(
       release,
     };
   }
-  const missingUpstreamCommits = [
-    ...new Set(
-      pending.flatMap((candidate) => missingUpstreamCommitsByTag[candidate.tag_name] ?? []),
-    ),
-  ].toSorted();
   return {
     kind: "incompatible-upstream-history",
     tags: pending.map((candidate) => candidate.tag_name),
     upstreamCommits: upstreamCommitsPresentInMain,
-    missingUpstreamCommits,
+    missingUpstreamCommitsByTag: Object.fromEntries(
+      pending.map((candidate) => [
+        candidate.tag_name,
+        missingUpstreamCommitsByTag[candidate.tag_name] ?? [],
+      ]),
+    ),
   };
 }
 
@@ -612,9 +612,16 @@ function commitsAt(ref) {
   return git(["rev-list", ref]).split("\n").filter(Boolean);
 }
 
-function describeSkippedStableTags({ tags, missingCommits, upstreamCommitCount }) {
+export function describeSkippedStableTags({ tags, missingCommitsByTag, upstreamCommitCount }) {
+  const [newest, ...others] = tags;
+  if (!newest) return "No upstream stable tags were skipped.";
+  const missingCommits = missingCommitsByTag[newest] ?? [];
   const firstCommits = missingCommits.slice(0, 5).map((commit) => commit.slice(0, 12));
-  return `Skipped upstream stable tag(s) ${tags.map((tag) => `\`${tag}\``).join(", ")} because their histories omit ${missingCommits.length} of the ${upstreamCommitCount} upstream commits already in fork main: ${firstCommits.join(", ")}${missingCommits.length > firstCommits.length ? ", …" : ""}. Waiting for a stable tag that contains all upstream commits already in main.`;
+  const otherTags =
+    others.length > 0
+      ? ` Other skipped tags: ${others.map((tag) => `\`${tag}\``).join(", ")}.`
+      : "";
+  return `Skipped newest upstream stable candidate \`${newest}\`: its history omits ${missingCommits.length} of the ${upstreamCommitCount} upstream commits already in fork main${firstCommits.length > 0 ? ` (${firstCommits.join(", ")}${missingCommits.length > firstCommits.length ? ", …" : ""})` : ""}.${otherTags} Waiting for a stable tag that contains all upstream commits already in main.`;
 }
 
 function stableTagMissingCommits(tag, upstreamCommitsPresentInMain) {
@@ -966,7 +973,7 @@ async function mergeSyncPullRequestFromCi() {
   if (missingUpstreamCommits.length > 0) {
     const message = describeSkippedStableTags({
       tags: [release.tag_name],
-      missingCommits: missingUpstreamCommits,
+      missingCommitsByTag: { [release.tag_name]: missingUpstreamCommits },
       upstreamCommitCount: upstreamCommitsPresentInMain.length,
     });
     console.log(message);
@@ -1130,7 +1137,7 @@ async function queueReleaseFromMainCi() {
   if (missingUpstreamCommits.length > 0) {
     const message = describeSkippedStableTags({
       tags: [releaseSource.upstreamTag],
-      missingCommits: missingUpstreamCommits,
+      missingCommitsByTag: { [releaseSource.upstreamTag]: missingUpstreamCommits },
       upstreamCommitCount: upstreamCommitsPresentInMain.length,
     });
     console.log(message);
@@ -1231,7 +1238,7 @@ async function main() {
     if (missingUpstreamCommits.length > 0) {
       const message = describeSkippedStableTags({
         tags: [release.tag_name],
-        missingCommits: missingUpstreamCommits,
+        missingCommitsByTag: { [release.tag_name]: missingUpstreamCommits },
         upstreamCommitCount: upstreamCommitsPresentInMain.length,
       });
       console.log(message);
@@ -1304,7 +1311,7 @@ async function main() {
   if (decision.kind === "incompatible-upstream-history") {
     const message = describeSkippedStableTags({
       tags: decision.tags,
-      missingCommits: decision.missingUpstreamCommits,
+      missingCommitsByTag: decision.missingUpstreamCommitsByTag,
       upstreamCommitCount: decision.upstreamCommits.length,
     });
     console.log(message);
@@ -1316,9 +1323,7 @@ async function main() {
   const skippedTagSummary = decision.skippedTags?.length
     ? describeSkippedStableTags({
         tags: decision.skippedTags,
-        missingCommits: [
-          ...new Set(decision.skippedTags.flatMap((tag) => missingUpstreamCommitsByTag[tag] ?? [])),
-        ].toSorted(),
+        missingCommitsByTag: missingUpstreamCommitsByTag,
         upstreamCommitCount: upstreamCommitsPresentInMain.length,
       })
     : "";

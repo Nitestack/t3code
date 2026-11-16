@@ -5,6 +5,10 @@ pingdotgg and distributed under the MIT License. It keeps T3's providers, thread
 and adds runtime support for [aix](https://github.com/Nitestack/aix) API-key profiles and a
 client-side Work/Personal view of connected environments.
 
+It uses the same T3 Code app name, `t3` and `t3code-desktop` commands, and default state directory
+as upstream, so install it instead of upstream T3 Code, not next to it. Android is the exception:
+its hidden package ID differs, so both Android apps can be installed.
+
 ## aix profiles
 
 Configure aix itself with the [aix setup and profile guide](https://github.com/Nitestack/aix/blob/main/README.md).
@@ -74,9 +78,9 @@ to both an original T3 server and a fork server.
 
 ## Mobile apps
 
-The fork's Android app uses its own package name and link scheme, so it is meant to install next to
-the official app. When a stable fork release is published, its signed APK appears with its SHA-256
-checksum and build metadata; there is no store listing. Its `vX.Y.Z` tag points to the fork
+The Android app's launcher label is **T3 Code**. Its hidden package ID is `com.nitestack.t3code`,
+which lets it install alongside the Play Store app. When a stable release is published, its signed
+APK appears with its SHA-256 checksum and build metadata; there is no store listing. Its `vX.Y.Z` tag points to the fork
 integration merge commit on `main`, whose tree contains fork changes and upstream through the
 matching stable tag. The upstream tag commit is recorded only as the stable base. The release
 workflow also builds a Windows x64 installer and the matching Nix package. Windows signing status is recorded in
@@ -102,8 +106,8 @@ Compared with upstream T3 Code at
   stale-catalog warning.
 - An aix profile's LiteLLM key budget in the usage limits panel.
 - A client-side Work/Personal view on web, desktop, and the fork's Android app.
-- A separately signed Android APK with its own package name, and no fork iOS build.
-- A pinned Nix flake with `t3code-fork` commands that install next to the original T3 Code.
+- A separately signed Android APK with its own package ID, and no fork iOS build.
+- A pinned Nix flake with the `t3code-<version>` package and the usual T3 Code commands.
 - Upstream sync limited to stable releases and proposed as reviewable pull requests.
 
 ## Run the source checkout
@@ -115,7 +119,7 @@ development server and web client:
 git clone https://github.com/Nitestack/t3code.git
 cd t3code
 vp i
-T3CODE_HOME="$HOME/.t3-nitestack" vp run dev
+vp run dev
 ```
 
 Open the local address printed at startup. Set up a supported T3 provider on the machine running
@@ -126,12 +130,12 @@ including an original T3 server. For NixOS development, see the
 
 ## Nix install
 
-The repository has a pinned source flake for `x86_64-linux`, with separate `t3code-fork` and
-`t3code-fork-desktop` commands. It builds the application from a reviewed source commit; there is
-no published fork binary package. Follow the [Nix install and isolated launch instructions](./install.md#t3-code-fork-nix).
+The repository has a pinned source flake for `x86_64-linux` and builds the application from a
+reviewed source commit; there is no published binary package. The flake provides the standard `t3`
+and `t3code-desktop` commands. Follow the [Nix install instructions](./install.md#t3-code-fork-nix).
 Nix installs the application only. It does not configure aix profiles or place API keys or resolved
-endpoints in the store. The Linux coexistence smoke used separate data homes and desktop locks; it
-did not configure or test an aix profile.
+endpoints in the store. Use this package in place of upstream T3 Code because both use the same
+default state directory; it does not configure or test an aix profile.
 
 ## Updates
 

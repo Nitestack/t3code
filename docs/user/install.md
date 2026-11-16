@@ -131,34 +131,32 @@ Nix manages both the desktop app and the bundled
 
 ### T3 Code fork (Nix)
 
-The fork has its own flake and command names, so it can be installed next to the
-nixpkgs `t3code` package. A stable release tag points to the fork integration
-commit on `main`, with fork changes and upstream through the matching stable
-tag; metadata records that upstream tag's peeled commit as the stable base.
-After an authorized release is available, use its upstream-matched version tag;
-the flake reads the application version from the source and pins nixpkgs in
-`flake.lock`:
+This build uses the same T3 Code app name, `t3` and `t3code-desktop` commands, and default state
+directory as upstream, so install it instead of upstream T3 Code, not next to it. Android is the
+exception: its hidden package ID differs, so both Android apps can be installed. A stable release
+tag points to the fork integration commit on `main`, with fork changes and upstream through the
+matching stable tag; metadata records that upstream tag's peeled commit as the stable base. The
+flake reads the application version from the source and pins nixpkgs in `flake.lock`:
 
 ```bash
-nix profile add 'github:Nitestack/t3code/v0.1.9#t3code-fork'
+nix profile add 'github:Nitestack/t3code/v0.1.9'
 ```
 
-Replace `v0.1.9` with the desired release tag. Update by installing the new tag,
-then check `nix profile list` and remove the previous fork entry by its index if
-Nix kept both revisions:
+Replace `v0.1.9` with the desired release tag when updating:
 
 ```bash
-nix profile install 'github:Nitestack/t3code/v0.2.0#t3code-fork'
+nix profile add 'github:Nitestack/t3code/v0.2.0'
 ```
 
-For NixOS, use the same package in `environment.systemPackages`. In a flake-based
-Home Manager configuration, add a pinned input and include
-`inputs.t3code-fork.packages.${pkgs.system}.t3code-fork` in `home.packages`.
-To update either configuration, change the input to the desired release tag and
-rebuild so its lock file records the new source. For a reviewed unreleased build,
-a full fork commit SHA can still be used in place of a tag.
-The package provides `t3code-fork` for the CLI and `t3code-fork-desktop` for the
-desktop app; neither replaces the original `t3` or `t3code-desktop` commands.
+For NixOS, add `inputs.t3code.packages.x86_64-linux.default` to
+`environment.systemPackages`. In Home Manager, point the T3 Code module at the same package:
+
+```nix
+programs.t3code.package = inputs.t3code.packages.x86_64-linux.default;
+```
+
+Update the pinned input to the desired release tag and rebuild so its lock file records the new
+source. For a reviewed unreleased build, a full fork commit SHA can be used in place of a tag.
 
 ### T3 Code fork (Windows and Android)
 
@@ -166,8 +164,8 @@ Before a public fork release is authorized, collaborators can get installable te
 fork's GitHub Actions. Open **Actions → Release**, run it from `main` with channel `stable`, and
 leave **publish** unchecked. If the selected source has no upstream sync marker, enter the full
 40-character upstream commit in `upstream_base`. Download the combined artifact named
-`t3-code-nitestack-installers-<version>-<12-character-commit>` from that run. It contains the
-Windows x64 `.exe`, the signed Android `.apk`, SHA-256 files, and metadata. Check the matching
+`t3-code-installers-<version>-<12-character-commit>` from that run. It contains
+`T3-Code-<version>-x64.exe`, `T3-Code-<version>.apk`, SHA-256 files, and metadata. Check the matching
 checksum before installing. `windows-metadata.json` reports whether the Windows installer has an
 Authenticode signature; current fork builds are expected to be unsigned. Its metadata and
 `BUILD-INFO.md` identify the fork integration commit that was built and the upstream stable tag plus
@@ -178,26 +176,9 @@ already present in `main`. After an authorized public
 release exists, use its matching assets from the fork's GitHub Releases page instead. See the
 [fork release guide](../operations/fork-release.md) for the build and release process.
 
-Give the fork its own data directory and an unused port when launching it. On
-Linux, the desktop app also needs a separate `XDG_CONFIG_HOME`: Electron stores
-its browser profile and single-instance lock there, independently of
-`T3CODE_HOME`. The headless server does not need this extra setting.
-
-```bash
-T3CODE_HOME="$HOME/.local/share/t3code-fork" \
-XDG_CONFIG_HOME="$HOME/.config/t3code-fork" \
-T3CODE_PORT=43101 \
-  t3code-fork-desktop
-
-T3CODE_HOME="$HOME/.local/share/t3code-fork" \
-  t3code-fork serve --no-browser --port 43101
-```
-
-Choose one launch mode for that T3 home at a time; each server owns its data
-directory while running. Set these variables only for the fork command, leaving
-the original desktop app's profile unchanged. The desktop's child processes
-inherit `XDG_CONFIG_HOME` too, so configure any provider that uses it for config
-discovery in the fork's separate configuration directory.
+Launch the desktop app with `t3code-desktop` or run the server with `t3 serve`. The fork uses the
+same default T3 state directory and desktop profile as upstream; install it in place of upstream
+T3 Code rather than running both against the same data.
 
 Nix only installs the pinned application build. It does not configure aix,
 resolve profiles, or place endpoints or API keys in the store. To use aix

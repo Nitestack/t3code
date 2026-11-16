@@ -5,6 +5,10 @@ This runbook covers stable upstream syncs and version-matched Windows, Android, 
 Android APK, a Windows installer, source, or the pinned Nix flake, as the
 [fork guide](../user/nitestack-fork.md) explains.
 
+The Nix package is `t3code-<version>` and uses the upstream `t3` and `t3code-desktop` commands,
+T3 Code app name, and default state directory. Install it instead of upstream T3 Code; the Android
+APK is the exception and can coexist because its hidden package ID differs.
+
 ## Release checklist
 
 1. Start from a reviewed commit on fork `main`, and verify the remotes as in the
@@ -23,9 +27,8 @@ Android APK, a Windows installer, source, or the pinned Nix flake, as the
    This run creates no tag or release, including a draft release. If the selected source has no
    `.github/upstream-stable.json` marker, provide `upstream_base` as the full peeled commit SHA for
    the matching upstream `v<version>` tag. An invalid or mismatched marker always blocks the run.
-7. Download `t3-code-nitestack-installers-<version>-<12-char-source-sha>` from that Actions run.
-   It contains `t3-code-nitestack-<version>-windows-x64.exe`,
-   `t3-code-nitestack-<version>.apk`, their `.sha256` files, platform metadata, `nix-build.json`,
+7. Download `t3-code-installers-<version>-<12-char-source-sha>` from that Actions run.
+   It contains `T3-Code-<version>-x64.exe`, `T3-Code-<version>.apk`, their `.sha256` files, platform metadata, `nix-build.json`,
    and `BUILD-INFO.md`. All metadata names the fork integration commit as the built source and
    records the upstream stable tag and peeled base commit separately. The Windows runner records its Authenticode status; without fork Windows
    signing credentials it is expected to be unsigned. The Android APK is signed with the fork's
@@ -38,9 +41,9 @@ Android APK, a Windows installer, source, or the pinned Nix flake, as the
    exact artifact, and rechecks every file and source field before creating the upstream-matched
    `vX.Y.Z` tag and `T3 Code vX.Y.Z` release. It does not rebuild the tested installers. A manual
    publish without a tested artifact run is rejected unless ongoing automatic publication is
-   explicitly enabled. A manual `publish=true` dispatch with `artifact_run_id` is explicit
-   authorization; `FORK_AUTO_PUBLISH_STABLE_RELEASES=true` authorizes automatic publication only.
-   Do not move or force-push tags.
+   explicitly enabled. To publish manually, first run a build-only release, then dispatch again
+   with `publish=true` and that run's `artifact_run_id`. `FORK_AUTO_PUBLISH_STABLE_RELEASES=true`
+   authorizes automatic publication only. Do not move or force-push tags.
 9. Confirm release notes identify the actual fork commit, source branch, upstream base, and tested
    artifact run, and attach both installers, checksums, platform metadata, Nix build verification,
    and the pinned Nix install command. The Nix build is a required publication gate.
@@ -178,7 +181,6 @@ change:
 | Native agent and model pairs                                           | [Native agent compatibility report](../fork/t01-native-agent-spike.md) and `apps/server/src/aix/ModelRouting.test.ts`                                                                                                                   |
 | Profile and model switching, with no silent fallback                   | `apps/server/src/orchestration-v2/testkit/ProviderSwitch.integration.test.ts` (aix cases)                                                                                                                                               |
 | Work/Personal never touches server state                               | `packages/client-runtime/src/environment/scope.test.ts`, `apps/web/src/environmentScope.test.ts`, the Android scope tests, and a live two-environment web scenario                                                                      |
-| Original and fork installs coexist                                     | The Linux Nix coexistence smoke, with separate `T3CODE_HOME` and `XDG_CONFIG_HOME`                                                                                                                                                      |
 
 The Android APK and Windows installer still need manual install and acceptance checks on the user's
 devices. A successful hosted build does not count as an install smoke test. Record those checks

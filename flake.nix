@@ -1,5 +1,5 @@
 {
-  description = "Pinned Nix package for the T3 Code fork";
+  description = "Pinned Nix package for T3 Code";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/d4f25a3e562008648d45bcf2d70bcc7422cad84e";
 
@@ -10,19 +10,19 @@
       pkgs = import nixpkgs { inherit system; };
       revision = builtins.substring 0 7 (self.rev or "working-tree");
       version = (builtins.fromJSON (builtins.readFile ./apps/server/package.json)).version;
-      src = pkgs.runCommand "t3code-fork-source" { } ''
+      src = pkgs.runCommand "t3code-source" { } ''
         mkdir -p "$out"
         cp -R ${self.outPath}/. "$out/"
       '';
 
-      t3codeForkUnwrapped = pkgs.t3code.unwrapped.overrideAttrs (old: {
-        pname = "t3code-fork-unwrapped";
+      t3codeUnwrapped = pkgs.t3code.unwrapped.overrideAttrs (old: {
+        pname = "t3code-unwrapped";
         inherit version src;
         meta = old.meta // {
           changelog = "https://github.com/Nitestack/t3code/commit/${self.rev or revision}";
         };
         pnpmDeps = pkgs.fetchPnpmDeps {
-          pname = "t3code-fork-unwrapped";
+          pname = "t3code-unwrapped";
           inherit version src;
           pnpm = pkgs.pnpm_12;
           inherit (old) pnpmWorkspaces;
@@ -31,41 +31,21 @@
         };
       });
 
-      t3codeForkRuntime = pkgs.t3code.override {
-        t3code-unwrapped = t3codeForkUnwrapped;
-      };
-
-      t3codeFork = pkgs.symlinkJoin {
-        name = "t3code-fork-${version}";
-        paths = [
-          t3codeForkRuntime
-          (pkgs.makeDesktopItem {
-            name = "t3code-fork";
-            desktopName = "T3 Code (Fork)";
-            comment = "Minimal web GUI for coding agents";
-            exec = "t3code-fork-desktop %U";
-            terminal = false;
-            icon = "t3code";
-            startupWMClass = "t3code";
-            categories = [ "Development" ];
-          })
-        ];
-        nativeBuildInputs = [ pkgs.makeBinaryWrapper ];
-        postBuild = ''
-          rm -f "$out/bin/t3" "$out/bin/t3code-desktop"
-          rm -f "$out/share/applications/t3code.desktop"
-          makeWrapper "${t3codeForkRuntime}/bin/t3" "$out/bin/t3code-fork"
-          makeWrapper "${t3codeForkRuntime}/bin/t3code-desktop" "$out/bin/t3code-fork-desktop"
-        '';
-        meta = t3codeForkRuntime.meta // {
-          mainProgram = "t3code-fork-desktop";
+      t3code = (pkgs.t3code.override {
+        t3code-unwrapped = t3codeUnwrapped;
+      }).overrideAttrs (old: {
+        pname = "t3code";
+        inherit version;
+        name = "t3code-${version}";
+        meta = old.meta // {
+          mainProgram = "t3code-desktop";
         };
-      };
+      });
     in
     {
       packages.${system} = {
-        default = t3codeFork;
-        t3code-fork = t3codeFork;
+        default = t3code;
+        inherit t3code;
       };
     };
 }

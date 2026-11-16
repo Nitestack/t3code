@@ -9,6 +9,7 @@ import ForkCiChecks from "../.github/scripts/fork-ci-checks.cjs";
 
 import {
   classifyGitHubFailure,
+  describeSkippedStableTags,
   findUpstreamCommitsAlreadyInForkMain,
   findUpstreamCommitsMissingFromStableTag,
   getSyncDecision,
@@ -34,6 +35,7 @@ async function createSyncFixture({
   dryRun = false,
   upstreamMainAheadOfStable = false,
   forkMainIncludesUpstreamMain = false,
+  manifestVersionOverrides = {},
 } = {}) {
   const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t17-sync-boundary-"));
   const upstream = NodePath.join(root, "upstream.git");
@@ -72,7 +74,8 @@ async function createSyncFixture({
     await NodeFSP.writeFile(NodePath.join(upstreamWork, `upstream-${index}.txt`), `${tag}\n`);
     await NodeFSP.writeFile(
       NodePath.join(upstreamWork, "apps", "server", "package.json"),
-      JSON.stringify({ version: tag.replace(/^v/, "") }, null, 2) + "\n",
+      JSON.stringify({ version: manifestVersionOverrides[tag] ?? tag.replace(/^v/, "") }, null, 2) +
+        "\n",
     );
     git(upstreamWork, ["add", "."]);
     git(upstreamWork, ["commit", "-m", `upstream ${tag}`]);
@@ -464,7 +467,7 @@ NodeTest.test(
         kind: "incompatible-upstream-history",
         tags: ["v4.3.0"],
         upstreamCommits: [base, upstreamMainOnly],
-        missingUpstreamCommits: [upstreamMainOnly],
+        missingUpstreamCommitsByTag: { "v4.3.0": [upstreamMainOnly] },
       },
     );
     NodeAssert.deepEqual(
@@ -484,6 +487,25 @@ NodeTest.test(
       }),
       { kind: "update", release: stableReleases[0], skippedTags: ["v4.3.0"] },
     );
+  },
+);
+
+NodeTest.test(
+  "skipped-tag summaries report the newest candidate's own missing commits first",
+  () => {
+    const newestMissing = ["a".repeat(40), "b".repeat(40)];
+    const olderMissing = ["c".repeat(40)];
+    const summary = describeSkippedStableTags({
+      tags: ["v4.5.0", "v4.4.0"],
+      missingCommitsByTag: { "v4.5.0": newestMissing, "v4.4.0": olderMissing },
+      upstreamCommitCount: 4,
+    });
+    NodeAssert.match(
+      summary,
+      /^Skipped newest upstream stable candidate `v4\.5\.0`: its history omits 2 of the 4/,
+    );
+    NodeAssert.match(summary, /Other skipped tags: `v4\.4\.0`/);
+    NodeAssert.doesNotMatch(summary, /3 of 4/);
   },
 );
 
@@ -806,6 +828,39 @@ NodeTest.test("a compatible stable tag already in main gets a marker-only sync P
 });
 
 NodeTest.test(
+  "merged sync release validation rejects a marker/manifest version mismatch",
+  async () => {
+    const fixture = await createSyncFixture({
+      releases: ["v0.1.9", "v0.1.10"],
+      manifestVersionOverrides: { "v0.1.10": "0.1.9" },
+    });
+    try {
+      const result = fixture.runSync();
+      NodeAssert.equal(result.status, 0, result.output);
+      const state = await fixture.readState();
+      const branch = state.pullRequests[0].headRefName;
+      fixture.git(fixture.checkout, ["switch", "main"]);
+      fixture.git(fixture.checkout, ["fetch", "origin", "main"]);
+      fixture.git(fixture.checkout, ["merge", "--no-ff", "--no-edit", branch]);
+      const integrationSha = fixture.git(fixture.checkout, ["rev-parse", "HEAD"]);
+      fixture.git(fixture.checkout, ["push", "origin", "HEAD:refs/heads/main"]);
+      fixture.git(fixture.checkout, ["fetch", "origin", "main"]);
+      NodeAssert.throws(
+        () =>
+          validateMergedSyncReleaseSource({
+            sourceSha: integrationSha,
+            mainRef: "refs/remotes/origin/main",
+            cwd: fixture.checkout,
+          }),
+        /integration version does not match its upstream stable marker/,
+      );
+    } finally {
+      await NodeFSP.rm(fixture.root, { recursive: true, force: true });
+    }
+  },
+);
+
+NodeTest.test(
   "stable sync skips tags that omit upstream commits already merged into fork main",
   async () => {
     const fixture = await createSyncFixture({
@@ -816,7 +871,8 @@ NodeTest.test(
     try {
       const result = fixture.runSync();
       NodeAssert.equal(result.status, 0, result.output);
-      NodeAssert.match(result.output, /Skipped upstream stable tag\(s\) `v0\.1\.10`/);
+      NodeAssert.match(result.output, /Skipped newest upstream stable candidate `v0\.1\.10`/);
+      NodeAssert.match(result.output, /omits 1 of the 3 upstream commits already in fork main/);
       NodeAssert.match(result.output, /upstream commits already in fork main/);
       NodeAssert.match(
         result.output,

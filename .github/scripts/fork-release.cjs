@@ -12,8 +12,8 @@ const BUILD_ONLY_JOBS = Object.freeze([
 ]);
 
 function requiredReleaseAssets(version) {
-  const windows = `t3-code-nitestack-${version}-windows-x64.exe`;
-  const android = `t3-code-nitestack-${version}.apk`;
+  const windows = `T3-Code-${version}-x64.exe`;
+  const android = `T3-Code-${version}.apk`;
   return [
     windows,
     `${windows}.sha256`,
@@ -24,6 +24,20 @@ function requiredReleaseAssets(version) {
     "nix-build.json",
     "BUILD-INFO.md",
   ];
+}
+
+function assertForkReleaseTagTarget({ tag, expectedSha, actualSha }) {
+  if (
+    typeof tag !== "string" ||
+    !COMMIT_SHA.test(expectedSha ?? "") ||
+    !COMMIT_SHA.test(actualSha ?? "") ||
+    actualSha.toLowerCase() !== expectedSha.toLowerCase()
+  ) {
+    throw new Error(
+      `Existing tag ${tag} points to ${actualSha}, not release source ${expectedSha}.`,
+    );
+  }
+  return true;
 }
 
 function resolveForkUpstreamBase({
@@ -113,7 +127,7 @@ function buildForkBuildInfo({
   publicationMode = "build-only",
 }) {
   return [
-    "T3 Code Nitestack build artifacts",
+    "T3 Code build artifacts",
     "",
     `Version: ${version}`,
     `Fork commit (built source): ${markdownCode(sha)}`,
@@ -124,8 +138,8 @@ function buildForkBuildInfo({
     `These artifacts are built from the fork commit and include fork changes plus upstream through ${upstreamTag}.`,
     "",
     "The Windows x64 installer was built and its packaged native runtime was verified on the standard Windows 2025 runner. Windows signing status is recorded in windows-metadata.json.",
-    "The Android APK was signed with the Nitestack upload certificate and verified by the Android build job.",
-    `The matching ${markdownCode(`t3code-fork-${version}`)} Nix package was built successfully; its exact source and store path are in nix-build.json.`,
+    "The Android APK was signed with the release upload certificate and verified by the Android build job.",
+    `The matching ${markdownCode(`t3code-${version}`)} Nix package was built successfully; its exact source and store path are in nix-build.json.`,
     "",
     publicationMode === "authorized-auto-publish"
       ? "This build is part of an explicitly authorized stable release run."
@@ -133,13 +147,13 @@ function buildForkBuildInfo({
     "Build the matching Nix package from this source with:",
     "",
     "```sh",
-    `nix build 'github:Nitestack/t3code/${sha}#t3code-fork'`,
+    `nix build 'github:Nitestack/t3code/${sha}'`,
     "```",
     "",
     "After an authorized release publishes its matching tag, install it with:",
     "",
     "```sh",
-    `nix profile add 'github:Nitestack/t3code/${upstreamTag}#t3code-fork'`,
+    `nix profile add 'github:Nitestack/t3code/${upstreamTag}'`,
     "```",
     "",
   ].join("\n");
@@ -189,7 +203,7 @@ function buildForkReleaseNotes({
     "Install the matching Nix build from this release tag:",
     "",
     "```sh",
-    `nix profile add 'github:Nitestack/t3code/${releaseTag}#t3code-fork'`,
+    `nix profile add 'github:Nitestack/t3code/${releaseTag}'`,
     "```",
     "",
   ].join("\n");
@@ -219,7 +233,7 @@ function validateForkPublicationMode({ publish, artifactRunId = "", autoPublishA
 
 function validateForkBuildOnlyRun({ run, jobs, artifacts, expectedRunId, version, sha }) {
   const runId = Number(expectedRunId);
-  const artifactName = `t3-code-nitestack-installers-${version}-${sha.slice(0, 12)}`;
+  const artifactName = `t3-code-installers-${version}-${sha.slice(0, 12)}`;
   if (
     !STABLE_VERSION.test(version) ||
     !COMMIT_SHA.test(sha) ||
@@ -362,8 +376,8 @@ async function verifyForkBuildArtifactAssets({
       "Build artifact does not contain the complete expected installer and Nix asset set.",
     );
   }
-  const windows = `t3-code-nitestack-${version}-windows-x64.exe`;
-  const android = `t3-code-nitestack-${version}.apk`;
+  const windows = `T3-Code-${version}-x64.exe`;
+  const android = `T3-Code-${version}.apk`;
   const windowsHash = parseChecksum(directory, windows);
   const androidHash = parseChecksum(directory, android);
   if (
@@ -399,7 +413,7 @@ async function verifyForkBuildArtifactAssets({
     windowsMetadata.installer !== windows ||
     windowsMetadata.sha256 !== windowsHash ||
     !["signed", "unsigned"].includes(windowsMetadata.windowsSigning) ||
-    nixMetadata.package !== "t3code-fork" ||
+    nixMetadata.package !== "t3code" ||
     nixMetadata.version !== version ||
     nixMetadata.gitSha?.toLowerCase() !== sha.toLowerCase() ||
     [androidMetadata, windowsMetadata, nixMetadata].some((metadata) =>
@@ -408,7 +422,7 @@ async function verifyForkBuildArtifactAssets({
       ),
     ) ||
     !/^[a-z0-9]{32}$/.test(nixStoreHash) ||
-    nixStoreName.slice(33) !== `t3code-fork-${version}`
+    nixStoreName.slice(33) !== `t3code-${version}`
   ) {
     throw new Error(
       "Existing release metadata does not match the fork source, version, or installer contents.",
@@ -426,7 +440,7 @@ async function verifyForkBuildArtifactAssets({
     (sourceBranch !== "" && !buildInfo.includes(`Source branch: ${markdownCode(sourceBranch)}`)) ||
     (buildRunId !== "" && !buildInfo.includes(`Actions build run: ${markdownCode(buildRunId)}`)) ||
     (buildRunAttempt !== "" && !buildInfo.includes(`attempt: ${markdownCode(buildRunAttempt)}`)) ||
-    !buildInfo.includes(`nix build 'github:Nitestack/t3code/${sha}#t3code-fork'`)
+    !buildInfo.includes(`nix build 'github:Nitestack/t3code/${sha}'`)
   ) {
     throw new Error("Build information does not match its source identity.");
   }
@@ -542,9 +556,8 @@ function resolveForkRelease({
       );
     }
   }
-  if (existingTagSha && existingTagSha !== sha) {
-    throw new Error(`Existing tag ${tag} points to ${existingTagSha}, not release source ${sha}.`);
-  }
+  if (existingTagSha)
+    assertForkReleaseTagTarget({ tag, expectedSha: sha, actualSha: existingTagSha });
   const alreadyPublished = Boolean(
     existingRelease &&
     existingRelease.tag_name === tag &&
@@ -579,6 +592,7 @@ function resolveForkRelease({
 module.exports = {
   RELEASE_REPOSITORY,
   analyzeForkUpstreamHistory,
+  assertForkReleaseTagTarget,
   assertExistingForkReleaseMetadata,
   buildForkArtifactSourceMetadata,
   buildForkBuildInfo,

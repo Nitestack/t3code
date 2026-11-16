@@ -4,6 +4,11 @@ This fork keeps T3's provider, thread, and client behavior aligned with upstream
 upstream application version and uses the same `vX.Y.Z` tag and `T3 Code vX.Y.Z` release title for
 reviewed fork releases.
 
+The released Nix package is named `t3code-<version>` and keeps the upstream `t3` and
+`t3code-desktop` commands, T3 Code app name, and default state directory. Install it instead of
+upstream T3 Code; the Android APK is the exception and can coexist because its hidden package ID is
+different.
+
 ## Verified starting point
 
 GitHub identifies `Nitestack/t3code` as a public fork of `pingdotgg/t3code`, with `main` as its
@@ -82,7 +87,7 @@ authorization, a stable dispatch can publish the upstream-matched `vX.Y.Z` tag a
 release. The tag points to the fork integration merge commit on `main`: its tree includes fork changes
 and upstream through the matching stable tag. The upstream tag's peeled commit is recorded only as
 the stable base. Notes and artifact metadata show both full SHAs, and the Nix command pins to the fork
-release tag.
+release tag with `nix profile add 'github:Nitestack/t3code/<tag>'`.
 The old imported tag in this clone is not a fork release: the workflow refuses to move it or replace
 an existing release.
 

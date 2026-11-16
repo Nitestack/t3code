@@ -60,7 +60,7 @@ it.each([
   vi.stubEnv("T3CODE_MOBILE_VERSION", version);
   const config = await loadConfig("android-fork");
 
-  expect(config.name).toBe("T3 Code (Nitestack)");
+  expect(config.name).toBe("T3 Code");
   expect(config.scheme).toBe("t3code-aix");
   expect(config.android?.package).toBe("com.nitestack.t3code");
   expect(config.ios?.bundleIdentifier).toBe("com.t3tools.t3code");

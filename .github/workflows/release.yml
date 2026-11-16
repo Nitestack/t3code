@@ -47,12 +47,10 @@ on:
         default: false
         type: boolean
 
-# Serialize nightlies (scheduled and manual) so overlapping runs cannot build
-# the same commit twice or publish out of order. Stable tag releases get their
-# own group so a nightly never blocks them. Running publishers are never
-# canceled. Automatic nightlies recheck the release gap after leaving the queue.
+# Serialize upstream nightlies as before. Fork stable builds use their full
+# source SHA so different commits cannot replace one another's pending run.
 concurrency:
-  group: release-${{ (github.event_name == 'schedule' || inputs.channel == 'nightly' || inputs.channel == 'preview') && 'nightly' || 'stable' }}
+  group: release-${{ github.repository == 'Nitestack/t3code' && github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && format('fork-stable-{0}', inputs.source_commit || github.sha) || ((github.event_name == 'schedule' || inputs.channel == 'nightly' || inputs.channel == 'preview') && 'nightly' || 'stable') }}
   cancel-in-progress: false
 
 permissions:
@@ -319,7 +317,7 @@ jobs:
             release_name: result.releaseName,
             runner: result.runner,
             already_published: result.alreadyPublished ? "true" : "false",
-            artifact_name: `t3-code-nitestack-installers-${result.version}-${result.sha.slice(0, 12)}`,
+            artifact_name: `t3-code-installers-${result.version}-${result.sha.slice(0, 12)}`,
             upstream_base: process.env.UPSTREAM_BASE,
             upstream_tag: process.env.UPSTREAM_TAG,
             source_branch: process.env.SOURCE_BRANCH,
@@ -483,15 +481,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          expected_name="t3code-fork-${EXPECTED_VERSION}"
-          actual_name="$(nix eval --raw .#t3code-fork.name)"
+          expected_name="t3code-${EXPECTED_VERSION}"
+          actual_name="$(nix eval --raw .#t3code.name)"
           if [[ "$actual_name" != "$expected_name" ]]; then
             echo "::error::Nix package name $actual_name does not match $expected_name."
             exit 1
           fi
-          nix build .#t3code-fork --no-link --print-out-paths --print-build-logs > "$RUNNER_TEMP/nix-build-output"
+          nix build .#t3code --no-link --print-out-paths --print-build-logs > "$RUNNER_TEMP/nix-build-output"
           store_path="$(cat "$RUNNER_TEMP/nix-build-output")"
-          if [[ ! "$store_path" =~ ^/nix/store/[a-z0-9]{32}-t3code-fork-${EXPECTED_VERSION}$ ]]; then
+          if [[ ! "$store_path" =~ ^/nix/store/[a-z0-9]{32}-t3code-${EXPECTED_VERSION}$ ]]; then
             echo "::error::Nix did not return the expected versioned store path."
             exit 1
           fi
@@ -524,7 +522,7 @@ jobs:
       - name: Download signed Android build
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: t3-code-nitestack-android-${{ github.run_id }}
+          name: t3-code-android-${{ github.run_id }}
           path: incoming/android
 
       - name: Download Windows installer build
@@ -548,7 +546,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          apk="incoming/android/t3-code-nitestack-${EXPECTED_VERSION}.apk"
+          apk="incoming/android/T3-Code-${EXPECTED_VERSION}.apk"
           windows_meta="incoming/windows/windows-metadata.json"
           android_meta="incoming/android/metadata.json"
           installers=(incoming/windows/*.exe)
@@ -578,7 +576,7 @@ jobs:
           NODE
 
           mkdir -p release-assets
-          windows_name="t3-code-nitestack-${EXPECTED_VERSION}-windows-x64.exe"
+          windows_name="T3-Code-${EXPECTED_VERSION}-x64.exe"
           cp "${installers[0]}" "release-assets/$windows_name"
           (cd release-assets && sha256sum "$windows_name" > "$windows_name.sha256")
           cp "$apk" release-assets/
@@ -606,11 +604,11 @@ jobs:
           const fs = require("node:fs");
           const { buildForkArtifactSourceMetadata } = require("./.github/scripts/fork-release.cjs");
           const [storePath] = process.argv.slice(2);
-          if (!/^\/nix\/store\/[a-z0-9]{32}-t3code-fork-\d+\.\d+\.\d+$/.test(storePath)) {
+          if (!/^\/nix\/store\/[a-z0-9]{32}-t3code-\d+\.\d+\.\d+$/.test(storePath)) {
             throw new Error("Nix build output is not a verified versioned package path.");
           }
           fs.writeFileSync("release-assets/nix-build.json", `${JSON.stringify({
-            package: "t3code-fork",
+            package: "t3code",
             version: process.env.EXPECTED_VERSION,
             gitSha: process.env.EXPECTED_SHA,
             storePath,
@@ -740,7 +738,7 @@ jobs:
           process.stdout.write(`Verified ${result.artifactName} from build-only run ${result.runId}.\n`);
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `build_run_attempt=${result.runAttempt}\n`);
           NODE
-          artifact_name="t3-code-nitestack-installers-${EXPECTED_VERSION}-${EXPECTED_SHA:0:12}"
+          artifact_name="t3-code-installers-${EXPECTED_VERSION}-${EXPECTED_SHA:0:12}"
           printf 'artifact_name=%s\n' "$artifact_name" >> "$GITHUB_OUTPUT"
           printf 'The exact tested build-only artifact from run %s is ready for promotion.\n' "$ARTIFACT_RUN_ID" >> "$GITHUB_STEP_SUMMARY"
 
@@ -844,6 +842,31 @@ jobs:
             echo "::error::Could not confirm that release $RELEASE_TAG is absent." >&2
             exit 1
           fi
+          if [[ -z "$refs" ]]; then
+            if ! node - <<'NODE' | gh api --method POST "repos/$GH_REPO/git/refs" --input - >/dev/null 2>"$RUNNER_TEMP/tag-create.err"
+          const body = { ref: `refs/tags/${process.env.RELEASE_TAG}`, sha: process.env.RELEASE_SHA };
+          process.stdout.write(`${JSON.stringify(body)}\n`);
+          NODE
+            then
+              refs="$(git ls-remote "https://github.com/$GH_REPO.git" "refs/tags/$RELEASE_TAG" "refs/tags/$RELEASE_TAG^{}")"
+              if [[ -z "$refs" ]]; then
+                cat "$RUNNER_TEMP/tag-create.err" >&2
+                echo "::error::Could not atomically reserve release tag $RELEASE_TAG." >&2
+                exit 1
+              fi
+            fi
+          fi
+          refs="$(git ls-remote "https://github.com/$GH_REPO.git" "refs/tags/$RELEASE_TAG" "refs/tags/$RELEASE_TAG^{}")"
+          tag_sha="$(printf '%s\n' "$refs" | awk '$2 ~ /\^\{\}$/ { print $1; exit }')"
+          if [[ -z "$tag_sha" ]]; then tag_sha="$(printf '%s\n' "$refs" | awk 'NF { print $1; exit }')"; fi
+          ACTUAL_TAG_SHA="$tag_sha" EXPECTED_TAG_SHA="$RELEASE_SHA" RELEASE_TAG="$RELEASE_TAG" node - <<'NODE'
+          const { assertForkReleaseTagTarget } = require("../.github/scripts/fork-release.cjs");
+          assertForkReleaseTagTarget({
+            tag: process.env.RELEASE_TAG,
+            expectedSha: process.env.EXPECTED_TAG_SHA,
+            actualSha: process.env.ACTUAL_TAG_SHA,
+          });
+          NODE
           UPSTREAM_BASE="$UPSTREAM_BASE" UPSTREAM_TAG="$UPSTREAM_TAG" RELEASE_SHA="$RELEASE_SHA" SOURCE_BRANCH="$SOURCE_BRANCH" BUILD_ARTIFACT_RUN_ID="$BUILD_ARTIFACT_RUN_ID" BUILD_ARTIFACT_RUN_ATTEMPT="$BUILD_ARTIFACT_RUN_ATTEMPT" RELEASE_TAG="$RELEASE_TAG" node - <<'NODE' > ../release-notes.md
           const { buildForkReleaseNotes } = require("../.github/scripts/fork-release.cjs");
           process.stdout.write(buildForkReleaseNotes({

@@ -7,6 +7,7 @@ const test = require("node:test");
 const {
   analyzeForkUpstreamHistory,
   assertExistingForkReleaseMetadata,
+  assertForkReleaseTagTarget,
   buildForkArtifactSourceMetadata,
   buildForkBuildInfo,
   buildForkNixBuildSummary,
@@ -128,7 +129,7 @@ test("release notes and summaries preserve backticks and dollar signs", () => {
     /Upstream stable base: `v0\.1\.9` = `24e77473ecf41bc1f7142529c7911c1c1aae1d76`/,
   );
   assert.match(releaseNotes, /include fork changes plus upstream through v0\.1\.9/);
-  assert.match(releaseNotes, /nix profile add 'github:Nitestack\/t3code\/v0\.1\.9#t3code-fork'/);
+  assert.match(releaseNotes, /nix profile add 'github:Nitestack\/t3code\/v0\.1\.9'/);
   assert.doesNotThrow(() =>
     assertExistingForkReleaseMetadata({
       release,
@@ -143,6 +144,16 @@ test("release notes and summaries preserve backticks and dollar signs", () => {
     buildForkNixBuildSummary({ packageName: "pkg`$name", sourceSha: "sha`$value" }),
     "Built ``pkg`$name`` from ``sha`$value``.\n",
   );
+});
+
+test("release assets keep the upstream T3 Code installer names", () => {
+  assert.deepEqual(requiredReleaseAssets("0.1.9").slice(0, 5), [
+    "T3-Code-0.1.9-x64.exe",
+    "T3-Code-0.1.9-x64.exe.sha256",
+    "windows-metadata.json",
+    "T3-Code-0.1.9.apk",
+    "T3-Code-0.1.9.apk.sha256",
+  ]);
 });
 
 test("manual fork releases use the application version and upstream release identity", () => {
@@ -222,7 +233,7 @@ test("BUILD-INFO generation preserves literal backticks and dollar signs", () =>
   );
   assert.match(
     buildInfo,
-    /nix build 'github:Nitestack\/t3code\/466b0b0968b7b7ae2016d742a52f3407c629564a#t3code-fork'/,
+    /nix build 'github:Nitestack\/t3code\/466b0b0968b7b7ae2016d742a52f3407c629564a'/,
   );
   assert.match(
     buildForkBuildInfo({
@@ -270,6 +281,17 @@ test("release creation refuses a moved tag or an already published release", () 
   assert.equal(resolveForkRelease({ ...dispatch, existingTagSha: sha }).tag, "v0.1.9");
 });
 
+test("release tag reservation accepts only the exact immutable source commit", () => {
+  assert.equal(
+    assertForkReleaseTagTarget({ tag: "v0.1.9", expectedSha: sha, actualSha: sha }),
+    true,
+  );
+  assert.throws(
+    () => assertForkReleaseTagTarget({ tag: "v0.1.9", expectedSha: sha, actualSha: upstreamBase }),
+    /not release source/,
+  );
+});
+
 test("manual publication promotes only a selected tested build-only run", () => {
   assert.equal(validateForkPublicationMode({ publish: false }), "build-only");
   assert.equal(
@@ -295,7 +317,7 @@ test("manual publication promotes only a selected tested build-only run", () => 
 });
 
 test("publication accepts only a successful matching build-only run and artifact", () => {
-  const artifactName = `t3-code-nitestack-installers-0.1.9-${sha.slice(0, 12)}`;
+  const artifactName = `t3-code-installers-0.1.9-${sha.slice(0, 12)}`;
   const run = {
     id: 12345,
     path: ".github/workflows/release.yml",
@@ -502,8 +524,8 @@ test("existing release assets must have matching source metadata and file checks
     { cwd: __dirname, encoding: "utf8" },
   ).trim();
   const directory = fs.mkdtempSync(path.join(gitCommonDir, "fork-release-assets-"));
-  const windows = "t3-code-nitestack-0.1.9-windows-x64.exe";
-  const android = "t3-code-nitestack-0.1.9.apk";
+  const windows = "T3-Code-0.1.9-x64.exe";
+  const android = "T3-Code-0.1.9.apk";
   const digest = (contents) => crypto.createHash("sha256").update(contents).digest("hex");
   const baseMetadata = {
     tag_name: "v0.1.9",
@@ -574,10 +596,10 @@ test("existing release assets must have matching source metadata and file checks
     fs.writeFileSync(
       path.join(directory, "nix-build.json"),
       JSON.stringify({
-        package: "t3code-fork",
+        package: "t3code",
         version: "0.1.9",
         gitSha: sha,
-        storePath: `/nix/store/${"a".repeat(32)}-t3code-fork-0.1.9`,
+        storePath: `/nix/store/${"a".repeat(32)}-t3code-0.1.9`,
         ...buildForkArtifactSourceMetadata({
           sha,
           upstreamTag: "v0.1.9",

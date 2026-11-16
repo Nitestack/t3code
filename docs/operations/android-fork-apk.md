@@ -1,13 +1,16 @@
-# Nitestack Android APK
+# T3 Code Android APK
 
 The `Nitestack Android APK` workflow builds a signed, sideloadable Android APK on GitHub-hosted
-`ubuntu-latest`. Run it manually from `main` for a standalone workflow artifact. The existing
-upstream `Release` workflow reuses this Android build and also builds the Windows installer and
-matching Nix package. Its default is build-only: download
-`t3-code-nitestack-installers-<version>-<12-character-commit>-attempt-<run-attempt>` from the Actions run to test the APK
-and Windows installer without creating a tag, draft, or GitHub release. If the source has no
-upstream sync marker, supply the full 40-character SHA in `upstream_base`. An authorized stable
-release uses the same upstream `vX.Y.Z` tag and `T3 Code vX.Y.Z` title. The legacy
+`ubuntu-latest`, with the launcher label **T3 Code**. Its hidden package ID is
+`com.nitestack.t3code`, so it can be installed alongside the Play Store app. Run it manually from
+`main` for the standalone Actions artifact `t3-code-android-<run-id>`, containing
+`T3-Code-<version>.apk`, its checksum, and metadata. The existing upstream `Release` workflow
+reuses this Android build and also builds the Windows installer and matching Nix package. Its
+default is build-only: download `t3-code-installers-<version>-<12-character-commit>` from the
+Actions run to test `T3-Code-<version>.apk` and `T3-Code-<version>-x64.exe` without creating a tag,
+draft, or GitHub release. If the source has no upstream sync marker, supply the full 40-character
+SHA in `upstream_base`. An authorized stable release uses the same upstream `vX.Y.Z` tag and
+`T3 Code vX.Y.Z` title. The legacy
 `t3-android-v*` tag route remains available for compatibility; it does not set the canonical
 release version.
 
@@ -20,14 +23,15 @@ and code against the selected Expo configuration before uploading it.
 
 ## Configure the signing key
 
-Generate a dedicated upload key on a trusted machine. `keytool` prompts for the passwords; keep the keystore and password backup in the team's approved encrypted storage.
+Generate a dedicated upload key on a trusted machine. `keytool` prompts for the passwords; keep the
+keystore and password backup in the team's approved encrypted storage.
 
 ```sh
 keytool -genkeypair -v \
-  -keystore t3code-nitestack-upload.jks \
+  -keystore t3code-android-upload.jks \
   -alias t3code-nitestack \
   -storetype JKS -keyalg RSA -keysize 4096 -validity 10000
-base64 < t3code-nitestack-upload.jks | tr -d '\r\n'
+base64 < t3code-android-upload.jks | tr -d '\r\n'
 ```
 
 Add these repository Actions secrets in the Nitestack fork:
