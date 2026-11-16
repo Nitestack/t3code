@@ -77,7 +77,6 @@ import {
   settleCustomModelSave,
 } from "./customModelSaves.logic";
 import { getProviderRestartNotice } from "../ProviderUpdateLaunchNotification.logic";
-import { aixMetadataFromInstanceId } from "@t3tools/client-runtime/provider-picker-hierarchy";
 import { providerSettingsRowLabels } from "@t3tools/client-runtime/provider-settings-hierarchy";
 import {
   getProviderVersionAdvisoryPresentation,
@@ -826,7 +825,7 @@ export function ProviderInstanceCard({
   const displayName =
     instance.displayName?.trim() || driverOption?.label || String(instance.driver);
   const aixProfile =
-    liveProvider?.aixProfile ?? aixMetadataFromInstanceId(instanceId, instance.driver)?.aixProfile;
+    liveProvider?.aixProfile ?? readConfigString(instance.config, "aixProfile") ?? undefined;
   const accentColor = normalizeProviderAccentColor(instance.accentColor);
   const managedPolicy = useManagedPolicy(environmentId);
   const instanceLocks = managedInstanceLocks(managedPolicy, instance.driver);
@@ -1315,10 +1314,15 @@ export function ProviderInstanceCard({
 
   return (
     <>
-      <SettingsSection title={displayName} icon={titleIconNode} headerAction={editorHeaderAction}>
+      <SettingsSection
+        title={rowLabels.title}
+        icon={titleIconNode}
+        headerAction={editorHeaderAction}
+      >
         <SettingsRow title="Status" status={statusContent} />
         <SettingsRow
-          title="Display name"
+          // aix sync rewrites the display name, so only the accent stays editable.
+          title={aixProfile === undefined ? "Display name" : "Accent color"}
           control={
             <div
               inert={readOnly}
@@ -1334,15 +1338,17 @@ export function ProviderInstanceCard({
                 value={accentColor}
                 onCommit={updateAccentColor}
               />
-              <DraftInput
-                id={`provider-instance-${instanceId}-display-name`}
-                size="sm"
-                className="min-w-0 flex-1 @min-[32rem]/settings-row:w-56"
-                value={instance.displayName ?? ""}
-                onCommit={updateDisplayName}
-                placeholder={driverOption?.label ?? "Instance label"}
-                spellCheck={false}
-              />
+              {aixProfile === undefined ? (
+                <DraftInput
+                  id={`provider-instance-${instanceId}-display-name`}
+                  size="sm"
+                  className="min-w-0 flex-1 @min-[32rem]/settings-row:w-56"
+                  value={instance.displayName ?? ""}
+                  onCommit={updateDisplayName}
+                  placeholder={driverOption?.label ?? "Instance label"}
+                  spellCheck={false}
+                />
+              ) : null}
             </div>
           }
         />
