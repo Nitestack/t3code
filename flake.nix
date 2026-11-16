@@ -21,6 +21,10 @@
         meta = old.meta // {
           changelog = "https://github.com/Nitestack/t3code/commit/${self.rev or revision}";
         };
+        # T3 Connect's public identifiers are compiled into the client and CLI.
+        postPatch = (old.postPatch or "") + ''
+          cp .env.example .env
+        '';
         pnpmDeps = pkgs.fetchPnpmDeps {
           pname = "t3code-unwrapped";
           inherit version src;
@@ -40,9 +44,13 @@
         # The desktop registers itself as the t3code:// handler (T3 Connect sign-in callback);
         # without this it would register the shared bare Electron binary instead.
         # symlinkJoin bakes postBuild into buildCommand, so overriding postBuild is a no-op.
+        # aix profiles are on by default in this build; T3CODE_AIX=0 turns them off.
         buildCommand = old.buildCommand + ''
           wrapProgram "$out/bin/t3code-desktop" \
             --set-default T3CODE_DESKTOP_LAUNCHER_PATH "$out/bin/t3code-desktop"
+          for program in "$out/bin"/*; do
+            wrapProgram "$program" --set-default T3CODE_AIX 1
+          done
         '';
         meta = old.meta // {
           mainProgram = "t3code-desktop";
