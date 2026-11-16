@@ -17,6 +17,7 @@ import {
   resolveProviderInstanceDisplayName,
   shouldShowInstanceBadge,
 } from "@t3tools/client-runtime/state/provider-instance-display";
+import { aixMetadataFromInstanceId } from "@t3tools/client-runtime/provider-picker-hierarchy";
 
 export { normalizeProviderAccentColor, shouldShowInstanceBadge };
 
@@ -67,12 +68,21 @@ export function deriveProviderInstanceEntries(
     const driverKind = snapshot.driver;
     const defaultId = defaultInstanceIdForDriver(driverKind);
     const isDefault = instanceId === defaultId;
+    const aixMetadata = aixMetadataFromInstanceId(instanceId, driverKind);
     return {
       instanceId,
       driverKind,
       displayName: resolveProviderInstanceDisplayName(snapshot),
-      ...(snapshot.aixProfile ? { aixProfile: snapshot.aixProfile } : {}),
-      ...(snapshot.aixProfileLabel ? { aixProfileLabel: snapshot.aixProfileLabel } : {}),
+      ...(snapshot.aixProfile
+        ? { aixProfile: snapshot.aixProfile }
+        : aixMetadata
+          ? { aixProfile: aixMetadata.aixProfile }
+          : {}),
+      ...(snapshot.aixProfileLabel
+        ? { aixProfileLabel: snapshot.aixProfileLabel }
+        : aixMetadata
+          ? { aixProfileLabel: aixMetadata.aixProfileLabel }
+          : {}),
       accentColor: normalizeProviderAccentColor(snapshot.accentColor),
       ...(driverKind === "acpRegistry" && snapshot.iconUrl
         ? { acpRegistryIconUrl: snapshot.iconUrl }

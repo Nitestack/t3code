@@ -304,6 +304,7 @@ describe("pools", () => {
       provider({
         driver: ProviderDriverKind.make(driver),
         instanceId: ProviderInstanceId.make(instanceId),
+        aixProfileLabel: profileName === "work" ? "adCare" : "Persönlich",
         usageLimits: {
           checkedAt,
           profileName,
@@ -340,6 +341,11 @@ describe("pools", () => {
     const accounts = collectLimitAccounts(presentation(reports));
     expect(accounts).toHaveLength(3);
     expect(accounts.map((account) => account.profileName)).toEqual(["work", "home", "work"]);
+    expect(accounts.map((account) => account.profileLabel)).toEqual([
+      "adCare",
+      "Persönlich",
+      "adCare",
+    ]);
     expect(accounts.map((account) => account.limits.windows[0]?.usedPercent)).toEqual([55, 20, 80]);
     expect(accounts[0]?.limits.windows).toHaveLength(1);
     expect(accounts[0]?.redeem).toBeNull();
@@ -396,7 +402,7 @@ describe("pools", () => {
       survivingAccounts.find((account) => account.profileName === undefined)?.limits.windows[0],
     ).toMatchObject({ id: "native-session", usedPercent: 10 });
     expect(collectLimitNotices(withFailedProbe)).toEqual([
-      "Laptop · work: Gateway budget unavailable.",
+      "Laptop · adCare: Gateway budget unavailable.",
     ]);
 
     const oldFailure = {

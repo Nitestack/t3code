@@ -22,6 +22,12 @@ function provider(overrides: Partial<ServerProvider> = {}): ServerProvider {
 }
 
 describe("aix model picker metadata", () => {
+  it("shows catalog status for older snapshots classified by the instance id", () => {
+    expect(
+      aixCatalogStatus(provider({ aixProfile: undefined, aixProfileLabel: undefined }), "work"),
+    ).toMatchObject({ kind: "current" });
+  });
+
   it("marks stale and unavailable aix catalogs and leaves T3 providers unchanged", () => {
     expect(
       aixCatalogStatus(

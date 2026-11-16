@@ -207,6 +207,34 @@ const aixProfileFromConfig = (config: unknown): string | undefined => {
   return typeof profile === "string" && profile.trim() ? profile.trim() : undefined;
 };
 
+const withAixSnapshotMetadata = <T extends ServerProvider>(
+  snapshot: T,
+  metadata: { readonly aixProfile?: string; readonly aixProfileLabel?: string },
+): T =>
+  metadata.aixProfile
+    ? {
+        ...snapshot,
+        aixProfile: metadata.aixProfile,
+        aixProfileLabel: metadata.aixProfileLabel ?? metadata.aixProfile,
+      }
+    : snapshot;
+
+const buildUnavailableInstanceSnapshot = (input: {
+  readonly driverKind: ProviderDriverKind;
+  readonly instanceId: ProviderInstanceId;
+  readonly displayName?: string | undefined;
+  readonly accentColor?: string | undefined;
+  readonly metadata: { readonly aixProfile?: string; readonly aixProfileLabel?: string };
+  readonly reason: string;
+}) =>
+  buildUnavailableProviderSnapshot({
+    driverKind: input.driverKind,
+    instanceId: input.instanceId,
+    ...(input.displayName === undefined ? {} : { displayName: input.displayName }),
+    ...(input.accentColor === undefined ? {} : { accentColor: input.accentColor }),
+    reason: input.reason,
+  }).pipe(Effect.map((snapshot) => withAixSnapshotMetadata(snapshot, input.metadata)));
+
 const buildEntry = Effect.fn("ProviderInstanceRegistry.buildEntry")(function* <R>(input: {
   readonly driversById: ReadonlyMap<ProviderDriverKind, AnyProviderDriver<R>>;
   readonly blockedReason: BlockedReason;
@@ -235,7 +263,7 @@ const buildEntry = Effect.fn("ProviderInstanceRegistry.buildEntry")(function* <R
     deferSecrets,
     carriedSecrets,
   } = input;
-  const aixProfile = entry.aixProfile ?? aixProfileFromConfig(entry.config);
+  const aixProfile = aixProfileFromConfig(entry.config);
   const aixProfileLabel = entry.aixProfileLabel ?? aixProfile;
   const aixMetadata = {
     ...(aixProfile ? { aixProfile } : {}),
@@ -245,12 +273,12 @@ const buildEntry = Effect.fn("ProviderInstanceRegistry.buildEntry")(function* <R
   if (blocked !== undefined) {
     return {
       kind: "unavailable" as const,
-      snapshot: yield* buildUnavailableProviderSnapshot({
+      snapshot: yield* buildUnavailableInstanceSnapshot({
         driverKind: entry.driver,
         instanceId,
         displayName: entry.displayName,
         accentColor: entry.accentColor,
-        ...aixMetadata,
+        metadata: aixMetadata,
         reason: blocked,
       }),
     };
@@ -259,12 +287,12 @@ const buildEntry = Effect.fn("ProviderInstanceRegistry.buildEntry")(function* <R
   if (!driver) {
     return {
       kind: "unavailable" as const,
-      snapshot: yield* buildUnavailableProviderSnapshot({
+      snapshot: yield* buildUnavailableInstanceSnapshot({
         driverKind: entry.driver,
         instanceId,
         displayName: entry.displayName,
         accentColor: entry.accentColor,
-        ...aixMetadata,
+        metadata: aixMetadata,
         reason: `Driver '${entry.driver}' is not registered in this build.`,
       }),
     };
@@ -282,12 +310,12 @@ const buildEntry = Effect.fn("ProviderInstanceRegistry.buildEntry")(function* <R
     });
     return {
       kind: "unavailable" as const,
-      snapshot: yield* buildUnavailableProviderSnapshot({
+      snapshot: yield* buildUnavailableInstanceSnapshot({
         driverKind: entry.driver,
         instanceId,
         displayName: entry.displayName,
         accentColor: entry.accentColor,
-        ...aixMetadata,
+        metadata: aixMetadata,
         reason: `Invalid config for instance '${rawInstanceId}': ${detail}`,
       }),
     };
@@ -298,12 +326,12 @@ const buildEntry = Effect.fn("ProviderInstanceRegistry.buildEntry")(function* <R
   if (deferSecrets && enabled && secretReferencesOf(driversById, entry).length > 0) {
     return {
       kind: "unavailable" as const,
-      snapshot: yield* buildUnavailableProviderSnapshot({
+      snapshot: yield* buildUnavailableInstanceSnapshot({
         driverKind: entry.driver,
         instanceId,
         displayName: entry.displayName,
         accentColor: entry.accentColor,
-        ...aixMetadata,
+        metadata: aixMetadata,
         reason: "Reading secrets…",
       }),
     };
@@ -322,12 +350,12 @@ const buildEntry = Effect.fn("ProviderInstanceRegistry.buildEntry")(function* <R
     return {
       kind: "unavailable" as const,
       secretsUnreadable: true as const,
-      snapshot: yield* buildUnavailableProviderSnapshot({
+      snapshot: yield* buildUnavailableInstanceSnapshot({
         driverKind: entry.driver,
         instanceId,
         displayName: entry.displayName,
         accentColor: entry.accentColor,
-        ...aixMetadata,
+        metadata: aixMetadata,
         reason: `Could not read ${unreadable.join(", ")} from its secret provider. Unlock it, then refresh.`,
       }),
     };
@@ -357,12 +385,12 @@ const buildEntry = Effect.fn("ProviderInstanceRegistry.buildEntry")(function* <R
     yield* Scope.close(childScope, Exit.void).pipe(Effect.ignore);
     return {
       kind: "unavailable" as const,
-      snapshot: yield* buildUnavailableProviderSnapshot({
+      snapshot: yield* buildUnavailableInstanceSnapshot({
         driverKind: entry.driver,
         instanceId,
         displayName: entry.displayName,
         accentColor: entry.accentColor,
-        ...aixMetadata,
+        metadata: aixMetadata,
         reason: `Driver '${entry.driver}' failed to create instance: ${createResult.failure.detail}`,
       }),
     };
@@ -371,7 +399,23 @@ const buildEntry = Effect.fn("ProviderInstanceRegistry.buildEntry")(function* <R
   return {
     kind: "live" as const,
     live: {
-      instance: { ...createResult.success, ...aixMetadata },
+      instance: aixProfile
+        ? {
+            ...createResult.success,
+            snapshot: {
+              ...createResult.success.snapshot,
+              getSnapshot: createResult.success.snapshot.getSnapshot.pipe(
+                Effect.map((snapshot) => withAixSnapshotMetadata(snapshot, aixMetadata)),
+              ),
+              refresh: createResult.success.snapshot.refresh.pipe(
+                Effect.map((snapshot) => withAixSnapshotMetadata(snapshot, aixMetadata)),
+              ),
+              streamChanges: createResult.success.snapshot.streamChanges.pipe(
+                Stream.map((snapshot) => withAixSnapshotMetadata(snapshot, aixMetadata)),
+              ),
+            },
+          }
+        : createResult.success,
       scope: childScope,
       entry,
       secrets,

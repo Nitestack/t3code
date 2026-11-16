@@ -22,6 +22,7 @@ import {
   getProviderOptionDescriptors,
 } from "@t3tools/shared/model";
 import { resolveModelShortName } from "@t3tools/client-runtime/provider-clients";
+import { aixMetadataFromInstanceId } from "@t3tools/client-runtime/provider-picker-hierarchy";
 import { resolveProvidersForCwd } from "@t3tools/client-runtime/providerSkills";
 
 export type ModelOption = {
@@ -398,6 +399,7 @@ export function buildModelOptions(
     if (order.size > 0)
       models.sort((a, b) => (order.get(a.slug) ?? Infinity) - (order.get(b.slug) ?? Infinity));
     for (const model of models) {
+      const aixMetadata = aixMetadataFromInstanceId(provider.instanceId, provider.driver);
       const key = `${provider.instanceId}:${model.slug}`;
       const shortName = resolveModelShortName(model, provider.driver);
       options.set(key, {
@@ -408,8 +410,16 @@ export function buildModelOptions(
         providerKey: provider.instanceId,
         providerLabel,
         providerDriver: provider.driver,
-        ...(provider.aixProfile ? { aixProfile: provider.aixProfile } : {}),
-        ...(provider.aixProfileLabel ? { aixProfileLabel: provider.aixProfileLabel } : {}),
+        ...(provider.aixProfile
+          ? { aixProfile: provider.aixProfile }
+          : aixMetadata
+            ? { aixProfile: aixMetadata.aixProfile }
+            : {}),
+        ...(provider.aixProfileLabel
+          ? { aixProfileLabel: provider.aixProfileLabel }
+          : aixMetadata
+            ? { aixProfileLabel: aixMetadata.aixProfileLabel }
+            : {}),
         providerBadge,
         ...(provider.supportedRuntimeModes === undefined
           ? {}

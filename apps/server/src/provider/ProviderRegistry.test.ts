@@ -1052,6 +1052,33 @@ it.layer(
   });
 
   describe("ProviderRegistry.layer", () => {
+    it.effect.each([
+      { availability: "available", label: "adCare" },
+      { availability: "unavailable", label: "ac" },
+    ] as const)(
+      "emits aix metadata unchanged for $availability snapshots",
+      ({ availability, label }) =>
+        Effect.gen(function* () {
+          const snapshot = yield* Ref.make<ServerProvider>({
+            ...codexUpdateSnapshot("current"),
+            aixProfile: "ac",
+            aixProfileLabel: label,
+            ...(availability === "unavailable"
+              ? { availability, unavailableReason: "blocked" }
+              : {}),
+          });
+          const runtimeServices = yield* buildRegistryOverSnapshot(snapshot);
+          yield* Effect.gen(function* () {
+            const [provider] = yield* (yield* ProviderRegistry.ProviderRegistry).getProviders;
+            expect(provider).toMatchObject({
+              aixProfile: "ac",
+              aixProfileLabel: label,
+              ...(availability === "unavailable" ? { availability } : {}),
+            });
+          }).pipe(Effect.provide(runtimeServices));
+        }),
+    );
+
     it("marks folder catalogs pending when a machine refresh changes the machine models", () => {
       const machineModel = {
         slug: "opencode/big-pickle",

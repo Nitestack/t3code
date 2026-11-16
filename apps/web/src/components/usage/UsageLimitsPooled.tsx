@@ -595,7 +595,7 @@ function PoolSection({ pool, now }: { readonly pool: LimitPool; readonly now: nu
     <section className="flex flex-col gap-3">
       <h2 className="flex items-center gap-2 text-sm font-medium text-foreground">
         {pool.profileName ? (
-          <span>{pool.profileName}</span>
+          <span>{pool.profileLabel ?? pool.profileName}</span>
         ) : (
           <>
             <ProviderInstanceIcon

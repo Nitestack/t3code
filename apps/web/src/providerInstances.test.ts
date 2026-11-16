@@ -73,6 +73,19 @@ describe("isProviderInstancePickerReady", () => {
   });
 });
 
+describe("legacy aix provider snapshots", () => {
+  it("classifies the profile from the instance id when snapshot metadata is absent", () => {
+    const [entry] = deriveProviderInstanceEntries([
+      provider({
+        provider: ProviderDriverKind.make("claudeAgent"),
+        instanceId: "aix-claudeAgent-engineering",
+      }),
+    ]);
+
+    expect(entry).toMatchObject({ aixProfile: "engineering", aixProfileLabel: "engineering" });
+  });
+});
+
 describe("applyProviderInstanceSettings", () => {
   it("uses settings when a streamed snapshot still reports a disabled default as enabled", () => {
     const entries = deriveProviderInstanceEntries([

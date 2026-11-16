@@ -68,11 +68,8 @@ import {
 } from "../../providerInstances";
 import { providerModelKey, sortProviderModelItems } from "../../modelOrdering";
 import { aixCatalogStatus } from "./aixModelMetadata";
-import {
-  groupAixProviderProfiles,
-  providerInstanceForPickerSelection,
-  providerInstancesForPickerLevel,
-} from "./providerInstancePickerHierarchy";
+import { providerInstancesForPickerLevel } from "@t3tools/client-runtime/provider-picker-hierarchy";
+import { useModelPickerHierarchy } from "./ModelPickerHierarchyContext";
 
 type ModelPickerItem = {
   slug: string;
@@ -272,7 +269,7 @@ function AixCatalogControls(props: {
   const canRefresh = useAtomValue(
     serverEnvironment.refreshProviders.permissionAtom(props.environmentId),
   );
-  const status = aixCatalogStatus(props.entry.snapshot);
+  const status = aixCatalogStatus(props.entry.snapshot, props.entry.aixProfile);
   if (!status) return null;
   const unavailable = status.kind !== "current";
 
@@ -431,6 +428,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   const [searchQuery, setSearchQuery] = useState("");
   const modelListRef = useRef<LegendListRef | null>(null);
   const pickerContentRef = useRef<HTMLDivElement>(null);
+  const pickerHierarchy = useModelPickerHierarchy();
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- publishes this picker's mount to global keydown handlers
   useLayoutEffect(() => registerModelPickerContent(), []);
   const highlightedModelKeyRef = useRef<string | null>(null);
@@ -683,13 +681,14 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     for (const instanceId of tabsWithLegacyRow) addRow(instanceId);
     return Math.max(0, ...unitsByTab.values());
   })();
-  const aixProfiles = groupAixProviderProfiles(instanceEntries);
+  const aixProfiles = pickerHierarchy?.profiles ?? [];
   const hierarchyEntry =
     selectedInstanceId === "favorites"
       ? (activeEntry ?? undefined)
       : entryByInstanceId.get(selectedInstanceId);
-  const hierarchyScope = hierarchyEntry?.aixProfile ? "aix" : "subscriptions";
-  const selectedAixProfile = hierarchyEntry?.aixProfile ?? aixProfiles[0]?.id;
+  const hierarchyScope = pickerHierarchy?.scope ?? "subscriptions";
+  const selectedAixProfile =
+    pickerHierarchy?.profileId ?? hierarchyEntry?.aixProfile ?? aixProfiles[0]?.id;
   const lockedDisabledInstanceIds = (() => {
     if (!isLocked) {
       return undefined;
@@ -924,27 +923,6 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     )?.name;
     announce(`Model: ${name ?? selectedSlug}`, "model-picker");
   };
-  const selectHierarchyTarget = (scope: "subscriptions" | "aix", profile: string | undefined) => {
-    const eligibleEntries = providerInstancesForPickerLevel({
-      entries: instanceEntries,
-      scope,
-      ...(profile ? { aixProfile: profile } : {}),
-    }).filter(
-      (entry) =>
-        entry.enabled &&
-        !lockedDisabledInstanceIds?.has(entry.instanceId) &&
-        (isProviderInstancePickerReady(entry) ||
-          selectableUnavailableInstanceIds?.has(entry.instanceId)),
-    );
-    const target = providerInstanceForPickerSelection({
-      entries: eligibleEntries,
-      scope,
-      ...(profile ? { aixProfile: profile } : {}),
-      ...(hierarchyEntry ? { preferredDriver: hierarchyEntry.driverKind } : {}),
-    });
-    if (target) handleSelectInstance(target.instanceId);
-  };
-
   return (
     <TooltipProvider delay={0}>
       <WindowKeyDownListener onKeyDown={onWindowKeyDown} />
@@ -972,23 +950,6 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
             onSelectInstance={handleSelectInstance}
             onFocusSearch={focusSearchInput}
             instanceEntries={sidebarInstanceEntries}
-            {...(aixProfiles.length > 0
-              ? {
-                  hierarchy: {
-                    profiles: aixProfiles,
-                    scope: hierarchyScope,
-                    selectedProfile: selectedAixProfile,
-                    onSelectScope: (scope: "subscriptions" | "aix") => {
-                      const profile =
-                        scope === "aix" ? (selectedAixProfile ?? aixProfiles[0]?.id) : undefined;
-                      selectHierarchyTarget(scope, profile);
-                    },
-                    onSelectProfile: (profile: string) => {
-                      selectHierarchyTarget("aix", profile);
-                    },
-                  },
-                }
-              : {})}
             showFavorites
             {...(selectableUnavailableInstanceIds ? { selectableUnavailableInstanceIds } : {})}
             {...(lockedDisabledInstanceIds
@@ -1074,10 +1035,18 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                   const sidebar = e.currentTarget
                     .closest("[data-model-picker-content]")
                     ?.querySelector("[data-model-picker-sidebar]");
+                  const selectedHarnessId =
+                    selectedInstanceId === "favorites"
+                      ? activeEntry?.instanceId
+                      : selectedInstanceId;
+                  const selectedHarness = sidebar
+                    ? Array.from(
+                        sidebar.querySelectorAll<HTMLElement>("[data-model-picker-provider]"),
+                      ).find((item) => item.dataset.modelPickerProvider === selectedHarnessId)
+                    : undefined;
                   const button =
-                    sidebar?.querySelector<HTMLButtonElement>(
-                      'button[aria-pressed="true"]:not(:disabled)',
-                    ) ?? sidebar?.querySelector<HTMLButtonElement>("button:not(:disabled)");
+                    selectedHarness?.querySelector<HTMLButtonElement>("button:not(:disabled)") ??
+                    sidebar?.querySelector<HTMLButtonElement>("button:not(:disabled)");
                   if (button) {
                     e.preventDefault();
                     e.stopPropagation();

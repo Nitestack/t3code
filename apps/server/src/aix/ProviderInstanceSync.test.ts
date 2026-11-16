@@ -200,7 +200,6 @@ describe("aixDesiredInstances", () => {
     expect(codex).toMatchObject({
       driver: CODEX,
       displayName: "Work · Codex",
-      aixProfile: "work",
       aixProfileLabel: "Work",
       enabled: true,
       environment: [{ name: "T3_AIX_PROFILE", value: "work", sensitive: false }],
@@ -258,7 +257,10 @@ describe("aixDesiredInstances", () => {
         instanceId,
         driver: instance.driver,
         displayName: instance.displayName,
-        aixProfile: instance.aixProfile,
+        aixProfile:
+          typeof instance.config === "object" && instance.config !== null
+            ? (instance.config as { readonly aixProfile?: string }).aixProfile
+            : undefined,
         aixProfileLabel: instance.aixProfileLabel,
         enabled: true,
         installed: true,
@@ -374,10 +376,10 @@ describe("planAixInstanceSync", () => {
     );
   });
 
-  it("adds typed profile metadata to existing managed instances", () => {
+  it("adds the profile label to existing managed instances", () => {
     const current = Object.fromEntries(
       [...work].map(([instanceId, instance]) => {
-        const { aixProfile: _profile, aixProfileLabel: _label, ...legacyInstance } = instance;
+        const { aixProfileLabel: _label, ...legacyInstance } = instance;
         return [instanceId, legacyInstance];
       }),
     ) as ProviderInstanceConfigMap;
@@ -387,13 +389,12 @@ describe("planAixInstanceSync", () => {
         (mutation) => [
           mutation.operation,
           mutation.instanceId,
-          "instance" in mutation ? mutation.instance.aixProfile : undefined,
           "instance" in mutation ? mutation.instance.aixProfileLabel : undefined,
         ],
       ),
     ).toEqual([
-      ["upsert", "aix-codex-work", "work", "Work"],
-      ["upsert", "aix-opencode-work", "work", "Work"],
+      ["upsert", "aix-codex-work", "Work"],
+      ["upsert", "aix-opencode-work", "Work"],
     ]);
   });
 

@@ -570,6 +570,10 @@
     "./provider-instance-ids": {
       "types": "./src/providerInstanceIds.ts",
       "default": "./src/providerInstanceIds.ts"
+    },
+    "./provider-picker-hierarchy": {
+      "types": "./src/providerPickerHierarchy.ts",
+      "default": "./src/providerPickerHierarchy.ts"
     }
   },
   "scripts": {
