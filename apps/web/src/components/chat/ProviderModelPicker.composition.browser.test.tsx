@@ -159,7 +159,9 @@ it("keeps composition keys out of model selection and dismissal", async () => {
   await using screen = await render(<Picker />);
   await page.getByRole("button", { name: "Choose model" }).click();
   const search = page.getByPlaceholder("Search models...");
-  await expect.element(page.getByRole("button", { name: "Work", exact: true })).toBeVisible();
+  await expect
+    .element(page.getByRole("button", { name: "Work", exact: true }))
+    .not.toBeInTheDocument();
   await search.fill("Target");
   await expect.element(page.getByRole("option", { name: /Target model/ })).toBeVisible();
 
@@ -227,6 +229,12 @@ it("switches the listed models with the picker scope", async () => {
   await expect.element(page.getByRole("button", { name: /^Work profile/ })).toBeVisible();
 
   await page.getByRole("button", { name: "Personal", exact: true }).click();
+  await expect.element(page.getByRole("option", { name: /Target model/ })).toBeVisible();
+  await expect.element(page.getByRole("option", { name: /AIX model/ })).not.toBeInTheDocument();
+
+  await page.getByRole("button", { name: "Work", exact: true }).click();
+  await userEvent.keyboard("{Escape}");
+  await page.getByRole("button", { name: "Choose model" }).click();
   await expect.element(page.getByRole("option", { name: /Target model/ })).toBeVisible();
   await expect.element(page.getByRole("option", { name: /AIX model/ })).not.toBeInTheDocument();
 });

@@ -1437,18 +1437,20 @@ function ThreadSettingsModelsScreen() {
         }}
         hideBottomBorder
       />
-      <View className="px-4 py-2">
-        <SegmentedControl
-          size="compact"
-          className="w-full"
-          options={[
-            { value: "personal", label: "Personal" },
-            { value: "work", label: "Work" },
-          ]}
-          selected={session.projectScope}
-          onSelect={session.setProjectScope}
-        />
-      </View>
+      {aixProfiles.length > 0 ? (
+        <View className="px-4 py-2">
+          <SegmentedControl
+            size="compact"
+            className="w-full"
+            options={[
+              { value: "personal", label: "Personal" },
+              { value: "work", label: "Work" },
+            ]}
+            selected={session.projectScope}
+            onSelect={session.setProjectScope}
+          />
+        </View>
+      ) : null}
       <ScreenContent>
         <ThreadSettingsMainContent
           bottomInset={searchToolbarInset}

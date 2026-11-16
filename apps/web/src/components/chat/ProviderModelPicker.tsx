@@ -238,6 +238,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   });
   const resetHierarchyProfile = () => {
     setHierarchyProfileId(resetProfileId);
+    setHierarchyScopeState({ baseScope: baseHierarchyScope, scope: baseHierarchyScope });
   };
   const [wasOpen, setWasOpen] = useState(props.open === true);
   if (props.open === true && !wasOpen) {
@@ -581,13 +582,15 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                 {props.footer}
               </div>
             </DockedPickerContext>
-          ) : (
+          ) : aixProfiles.length > 0 ? (
             <div className="flex flex-col">
               {picker}
               <div className="flex shrink-0 items-center gap-2 border-t border-border/70 bg-muted/40 px-3 py-2">
                 <ModelPickerHierarchyFooterControls />
               </div>
             </div>
+          ) : (
+            picker
           )}
           {props.selectedModels === undefined && !docked ? (
             <ChatGptSharingControl provider={activeEntry?.snapshot ?? null} />
