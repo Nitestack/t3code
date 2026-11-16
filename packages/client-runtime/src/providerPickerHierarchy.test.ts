@@ -5,6 +5,8 @@ import {
   aixProfileLabel,
   aixProfileLabels,
   groupAixProviderProfiles,
+  isModelSelectionInProjectScope,
+  resolveDraftModelSelectionAfterUsageLimitFallback,
   isPickerModelVisibleForProjectScope,
   pickerFilterIsFavorites,
   pickerFilterProfileId,
@@ -98,6 +100,23 @@ describe("provider picker hierarchy", () => {
     expect(resolveModelPickerProjectScope("personal", true)).toBe("personal");
     expect(resolveModelPickerProjectScope("work", false)).toBe("personal");
     expect(resolveModelPickerProjectScope("unknown", true)).toBe("personal");
+  });
+
+  it("classifies selections by aix metadata or instance id while config is loading", () => {
+    expect(
+      isModelSelectionInProjectScope({
+        scope: "personal",
+        selection: { instanceId: ProviderInstanceId.make("aix-codex-team"), model: "gpt" },
+        providers: [],
+      }),
+    ).toBe(false);
+    expect(
+      isModelSelectionInProjectScope({
+        scope: "work",
+        selection: { instanceId: ProviderInstanceId.make("codex-work"), model: "gpt" },
+        providers: [{ instanceId: ProviderInstanceId.make("codex-work"), aixProfile: "team" }],
+      }),
+    ).toBe(true);
   });
 
   it("filters models by project scope while retaining a selected model from the other scope", () => {
@@ -208,6 +227,64 @@ describe("provider picker hierarchy", () => {
         providers,
       }),
     ).toEqual({ instanceId: ProviderInstanceId.make("codex"), model: "gpt-default" });
+  });
+
+  it("keeps usage-limit fallbacks in scope and never restores the exhausted selection", () => {
+    const personal = {
+      instanceId: ProviderInstanceId.make("codex"),
+      driver: ProviderDriverKind.make("codex"),
+      enabled: true,
+      installed: true,
+      status: "ready",
+      models: [{ slug: "gpt-default", isDefault: true }],
+    };
+    const aix = {
+      instanceId: ProviderInstanceId.make("aix-codex-team"),
+      driver: ProviderDriverKind.make("codex"),
+      enabled: true,
+      installed: true,
+      status: "ready",
+      aixProfile: "team",
+      models: [{ slug: "work-default", isDefault: true }],
+    };
+    const alternatePersonal = {
+      instanceId: ProviderInstanceId.make("claudeAgent"),
+      driver: ProviderDriverKind.make("claudeAgent"),
+      enabled: true,
+      installed: true,
+      status: "ready",
+      models: [{ slug: "claude-default", isDefault: true }],
+    };
+    const exhausted = { instanceId: personal.instanceId, model: "gpt-default" };
+
+    expect(
+      resolveDraftModelSelectionAfterUsageLimitFallback({
+        scope: "personal",
+        exhaustedSelection: exhausted,
+        fallbackSelection: { instanceId: aix.instanceId, model: "work-default" },
+        normalDefault: exhausted,
+        providers: [personal, aix],
+      }),
+    ).toBeNull();
+
+    expect(
+      resolveDraftModelSelectionAfterUsageLimitFallback({
+        scope: "personal",
+        exhaustedSelection: exhausted,
+        fallbackSelection: { instanceId: aix.instanceId, model: "work-default" },
+        normalDefault: exhausted,
+        providers: [personal, aix, alternatePersonal],
+      }),
+    ).toEqual({ instanceId: alternatePersonal.instanceId, model: "claude-default" });
+
+    expect(
+      resolveDraftModelSelectionAfterUsageLimitFallback({
+        scope: "work",
+        exhaustedSelection: exhausted,
+        fallbackSelection: { instanceId: aix.instanceId, model: "work-default" },
+        providers: [personal, aix],
+      }),
+    ).toEqual({ instanceId: aix.instanceId, model: "work-default" });
   });
 
   it("uses a sticky selection only when it belongs to the draft scope", () => {
@@ -383,17 +460,16 @@ describe("provider picker hierarchy", () => {
         scope: "personal",
         providers: [
           {
-            instanceId: ProviderInstanceId.make("authenticated"),
+            instanceId: ProviderInstanceId.make("warning"),
             driver: ProviderDriverKind.make("codex"),
             enabled: true,
             installed: true,
             status: "warning",
-            auth: { status: "authenticated" },
-            models: [{ slug: "authenticated-default", isDefault: true }],
+            models: [{ slug: "warning-default", isDefault: true }],
           },
         ],
       }),
-    ).toEqual(selection("authenticated", "authenticated-default"));
+    ).toBeNull();
 
     expect(
       resolveDraftModelSelectionForScope({

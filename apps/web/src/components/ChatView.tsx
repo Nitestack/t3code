@@ -3,6 +3,7 @@ import { workspaceAreaProps } from "../lib/workspaceFocus";
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
 import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
 import {
+  resolveDraftModelSelectionAfterUsageLimitFallback,
   resolveDraftModelSelectionForScope,
   resolveModelPickerProjectScope,
 } from "@t3tools/client-runtime/provider-picker-hierarchy";
@@ -855,11 +856,13 @@ export default function ChatView(props: ChatViewProps) {
         })
       : null;
   const scopedDraftFallbackSelection = draftModelResolution?.fallback
-    ? resolveDraftModelSelectionForScope({
+    ? resolveDraftModelSelectionAfterUsageLimitFallback({
         scope: draftProjectScope,
-        explicitSelection: draftExplicitModelSelection,
+        exhaustedSelection: draftScopedDefault,
+        fallbackSelection: draftModelResolution.selection,
+        normalDefault: draftNormalDefault,
         stickySelection: draftStickySelection,
-        normalDefault: draftModelResolution.selection,
+        orderedDefault: draftOrderedDefault,
         providers: draftProviders,
       })
     : null;
@@ -867,15 +870,17 @@ export default function ChatView(props: ChatViewProps) {
     draftModelResolution?.fallback && scopedDraftFallbackSelection
       ? { ...draftModelResolution, selection: scopedDraftFallbackSelection }
       : null;
+  const draftResolvedSelection = draftModelResolution?.fallback
+    ? scopedDraftFallbackSelection
+    : draftScopedDefault;
   const localDraftThread = draftThread
     ? buildLocalDraftThread(
         threadId,
         draftThread,
-        (draftFallback ? draftFallback.selection : draftScopedDefault) ??
-          NO_PROVIDER_MODEL_SELECTION,
+        draftResolvedSelection ?? NO_PROVIDER_MODEL_SELECTION,
       )
     : undefined;
-  const draftComposerSelection = draftFallback?.selection ?? draftScopedDefault;
+  const draftComposerSelection = draftResolvedSelection;
   const isServerThread = serverThread !== null;
   const activeThread = isServerThread ? serverThread : localDraftThread;
   const serverLatestRun =
@@ -1412,6 +1417,7 @@ export default function ChatView(props: ChatViewProps) {
     ],
     lockedProvider,
     lockedInstanceId: activeRuntime?.providerInstanceId ?? activeThreadModelInstanceId,
+    ...(draftThread && !composerModelSelectionExplicit ? { draftScope: draftProjectScope } : {}),
   });
   const selectedProvider = selectedProviderEntry?.driverKind ?? requestedDriverKind;
   const activeProviderInstanceId = selectedProviderEntry?.instanceId ?? null;
@@ -3781,6 +3787,11 @@ export default function ChatView(props: ChatViewProps) {
                                         serverConfig?.environment.capabilities.projectScope ===
                                           true,
                                       )
+                                }
+                                nonExplicitDraftScope={
+                                  draftThread && !composerModelSelectionExplicit
+                                    ? draftProjectScope
+                                    : undefined
                                 }
                                 projectName={activeProject?.title}
                                 compactThreadUnavailable={compactThreadUnavailable}

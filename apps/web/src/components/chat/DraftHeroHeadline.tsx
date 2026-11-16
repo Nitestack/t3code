@@ -55,6 +55,7 @@ import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { resolveProjectDefaultProviderModelSelection } from "../../providerInstances";
 import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
 import {
+  resolveDraftModelSelectionAfterUsageLimitFallback,
   resolveDraftModelSelectionForScope,
   resolveModelPickerProjectScope,
 } from "@t3tools/client-runtime/provider-picker-hierarchy";
@@ -224,27 +225,32 @@ export function DraftHeroHeadline({
       const stickySelectionForScope = stickyProviderForScope
         ? (stickyState.stickyModelSelectionByProvider[stickyProviderForScope] ?? null)
         : null;
+      const initialDefaultSelection = resolveDraftModelSelectionForScope({
+        scope,
+        normalDefault,
+        orderedDefault,
+        stickySelection: stickySelectionForScope,
+        providers,
+      });
       const fallbackResolution = resolveNewThreadModelSelection({
-        defaultSelection: resolveDraftModelSelectionForScope({
-          scope,
-          normalDefault,
-          orderedDefault,
-          stickySelection: stickySelectionForScope,
-          providers,
-        }),
+        defaultSelection: initialDefaultSelection,
         fallbackSelection: environmentSettings?.fallbackModelSelection ?? null,
         providers,
         ...(environmentSettings ? { settings: environmentSettings } : {}),
         projectId: project.id,
         now: Date.now(),
       });
-      const defaultModelSelection = resolveDraftModelSelectionForScope({
-        scope,
-        normalDefault: fallbackResolution.fallback ? fallbackResolution.selection : normalDefault,
-        orderedDefault,
-        stickySelection: stickySelectionForScope,
-        providers,
-      });
+      const defaultModelSelection = fallbackResolution.fallback
+        ? resolveDraftModelSelectionAfterUsageLimitFallback({
+            scope,
+            exhaustedSelection: initialDefaultSelection,
+            fallbackSelection: fallbackResolution.selection,
+            normalDefault,
+            orderedDefault,
+            stickySelection: stickySelectionForScope,
+            providers,
+          })
+        : initialDefaultSelection;
       if (defaultModelSelection) {
         setModelSelection(draftId, defaultModelSelection, {
           replaceOptions: true,

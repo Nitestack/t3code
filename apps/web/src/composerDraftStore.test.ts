@@ -1835,6 +1835,28 @@ describe("composerDraftStore modelSelection", () => {
     );
   });
 
+  it("persists a no-instance sticky pointer in the scope of the active instance", () => {
+    const store = useComposerDraftStore.getState();
+    const aixInstance = ProviderInstanceId.make("aix-codex-team");
+    store.setModelSelection(
+      threadRef,
+      { instanceId: aixInstance, model: "gpt-work" },
+      { explicit: true },
+    );
+
+    store.setProviderModelOptions(
+      threadRef,
+      CODEX_DRIVER,
+      toSelections({ reasoningEffort: "high" }),
+      { persistSticky: true },
+    );
+
+    expect(useComposerDraftStore.getState().stickyActiveProviderByScope.work).toBe(aixInstance);
+    expect(useComposerDraftStore.getState().stickyActiveProviderByScope.personal).not.toBe(
+      aixInstance,
+    );
+  });
+
   // regression: #6011 new threads ignored project default models unless edits are marked explicit
   it("marks trait edits as explicit model intent", () => {
     const store = useComposerDraftStore.getState();

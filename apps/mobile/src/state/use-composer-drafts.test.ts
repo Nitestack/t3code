@@ -374,6 +374,22 @@ describe("mobile composer drafts", () => {
     });
   });
 
+  it("drops malformed per-scope sticky values without discarding valid values", () => {
+    expect(
+      decodePersistedComposerState({
+        schemaVersion: 1,
+        drafts: {},
+        stickyModelSelectionByScope: {
+          personal: { instanceId: 42, model: null },
+          work: { instanceId: "aix-codex-team", model: "gpt-work" },
+        },
+      }).stickyModelSelectionByScope,
+    ).toEqual({
+      personal: null,
+      work: { instanceId: "aix-codex-team", model: "gpt-work" },
+    });
+  });
+
   it.each([false, true])(
     "restores visible file chips from legacy drafts (archived: %s)",
     async (archived) => {

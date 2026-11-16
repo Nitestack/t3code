@@ -1,6 +1,8 @@
 import { ActiveNewTaskContext } from "../../state/active-new-task";
 import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
 import {
+  isModelSelectionInProjectScope,
+  resolveDraftModelSelectionAfterUsageLimitFallback,
   resolveDraftModelSelectionForScope,
   resolveModelPickerProjectScope,
 } from "@t3tools/client-runtime/provider-picker-hierarchy";
@@ -534,7 +536,11 @@ export function NewTaskFlowProvider(
         normalDefault: projectDefaultModelSelection,
         providers: selectedEnvironmentServerConfig.providers,
       })
-    : (draftModelSelection ?? projectDefaultModelSelection ?? stickyModelSelection);
+    : (draftModelSelection ??
+      [projectDefaultModelSelection, stickyModelSelection].find((selection) =>
+        isModelSelectionInProjectScope({ scope: projectScope, selection, providers: [] }),
+      ) ??
+      null);
   const usageResolution = resolveNewThreadModelSelection({
     defaultSelection: scopedDefaultModel,
     explicitSelection: draftModelSelection,
@@ -548,13 +554,14 @@ export function NewTaskFlowProvider(
   });
   const selectedModel =
     usageResolution.fallback && selectedEnvironmentServerConfig
-      ? (resolveDraftModelSelectionForScope({
+      ? resolveDraftModelSelectionAfterUsageLimitFallback({
           scope: projectScope,
-          explicitSelection: draftModelSelection,
+          exhaustedSelection: scopedDefaultModel,
+          fallbackSelection: usageResolution.selection,
+          normalDefault: projectDefaultModelSelection,
           stickySelection: stickyModelSelection,
-          normalDefault: usageResolution.selection,
           providers: selectedEnvironmentServerConfig.providers,
-        }) ?? scopedDefaultModel)
+        })
       : usageResolution.selection;
   const selectedModelKey = selectedModel
     ? `${selectedModel.instanceId}:${selectedModel.model}`

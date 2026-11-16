@@ -173,13 +173,12 @@ export function resolvePickerHierarchy<T extends PickerProviderInstance>(input: 
   return { profiles, profileId, visibleEntries };
 }
 
-type DraftDefaultProvider = {
+export type DraftDefaultProvider = {
   readonly instanceId: ProviderInstanceId;
   readonly driver: ProviderDriverKind;
   readonly enabled: boolean;
   readonly installed: boolean;
   readonly status: string;
-  readonly auth?: { readonly status?: string | undefined } | undefined;
   readonly availability?: string | undefined;
   readonly aixProfile?: string | undefined;
   readonly models: ReadonlyArray<{
@@ -187,6 +186,20 @@ type DraftDefaultProvider = {
     readonly isDefault?: boolean | undefined;
   }>;
 };
+
+export function isModelSelectionInProjectScope(input: {
+  readonly scope: ProjectScope;
+  readonly selection: ModelSelection | null | undefined;
+  readonly providers: ReadonlyArray<Pick<DraftDefaultProvider, "instanceId" | "aixProfile">>;
+}): boolean {
+  if (!input.selection) return false;
+  const provider = input.providers.find(
+    (candidate) => candidate.instanceId === input.selection?.instanceId,
+  );
+  const isWork =
+    provider?.aixProfile !== undefined || input.selection.instanceId.startsWith("aix-");
+  return input.scope === "work" ? isWork : !isWork;
+}
 
 export function resolveDraftModelSelectionForScope(input: {
   readonly scope: ProjectScope;
@@ -209,13 +222,7 @@ export function resolveDraftModelSelectionForScope(input: {
     input.scope === "work"
       ? provider.aixProfile !== undefined || provider.instanceId.startsWith("aix-")
       : provider.aixProfile === undefined && !provider.instanceId.startsWith("aix-");
-  const ready = (provider: DraftDefaultProvider) =>
-    provider.enabled &&
-    provider.installed &&
-    provider.availability !== "unavailable" &&
-    (provider.status === "ready" ||
-      (provider.status !== "error" &&
-        (provider.status === "authenticated" || provider.auth?.status === "authenticated")));
+  const ready = isDraftDefaultProviderReady;
   const selectable = (selection: ModelSelection | null | undefined) => {
     if (!selection) return null;
     const provider = providers.find((candidate) => candidate.instanceId === selection.instanceId);
@@ -229,6 +236,60 @@ export function resolveDraftModelSelectionForScope(input: {
   if (ordered) return ordered;
   const firstReady = providers.find((provider) => inScope(provider) && ready(provider));
   return firstReady ? defaultSelectionForProvider(firstReady) : null;
+}
+
+export function resolveDraftModelSelectionAfterUsageLimitFallback(input: {
+  readonly scope: ProjectScope;
+  readonly exhaustedSelection: ModelSelection | null | undefined;
+  readonly fallbackSelection: ModelSelection | null | undefined;
+  readonly normalDefault?: ModelSelection | null | undefined;
+  readonly stickySelection?: ModelSelection | null | undefined;
+  readonly orderedDefault?: ModelSelection | null | undefined;
+  readonly providers: ReadonlyArray<DraftDefaultProvider>;
+}): ModelSelection | null {
+  const isExhausted = (selection: ModelSelection | null | undefined) =>
+    selection !== null &&
+    selection !== undefined &&
+    input.exhaustedSelection !== null &&
+    input.exhaustedSelection !== undefined &&
+    selection.instanceId === input.exhaustedSelection.instanceId &&
+    selection.model === input.exhaustedSelection.model;
+  const fallback = input.fallbackSelection;
+  const fallbackProvider = fallback
+    ? input.providers.find((provider) => provider.instanceId === fallback.instanceId)
+    : undefined;
+  if (
+    fallback &&
+    !isExhausted(fallback) &&
+    fallbackProvider &&
+    isModelSelectionInProjectScope({
+      scope: input.scope,
+      selection: fallback,
+      providers: input.providers,
+    }) &&
+    isDraftDefaultProviderReady(fallbackProvider)
+  ) {
+    return fallback;
+  }
+  const providers = input.providers.filter(
+    (provider) => provider.instanceId !== input.exhaustedSelection?.instanceId,
+  );
+  return resolveDraftModelSelectionForScope({
+    scope: input.scope,
+    normalDefault: isExhausted(input.normalDefault) ? null : input.normalDefault,
+    stickySelection: isExhausted(input.stickySelection) ? null : input.stickySelection,
+    orderedDefault: isExhausted(input.orderedDefault) ? null : input.orderedDefault,
+    providers,
+  });
+}
+
+function isDraftDefaultProviderReady(provider: DraftDefaultProvider): boolean {
+  return (
+    provider.enabled &&
+    provider.installed &&
+    provider.availability !== "unavailable" &&
+    provider.status === "ready"
+  );
 }
 
 function defaultSelectionForProvider(provider: DraftDefaultProvider): ModelSelection | null {

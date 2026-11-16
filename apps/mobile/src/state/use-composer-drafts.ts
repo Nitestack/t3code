@@ -527,12 +527,7 @@ const PersistedComposerDraftsSchema = Schema.Struct({
   schemaVersion: Schema.Literal(COMPOSER_DRAFTS_SCHEMA_VERSION),
   drafts: Schema.Record(Schema.String, ComposerDraftSchema),
   stickyModelSelection: Schema.optional(ModelSelectionSchema),
-  stickyModelSelectionByScope: Schema.optional(
-    Schema.Struct({
-      personal: Schema.NullOr(ModelSelectionSchema),
-      work: Schema.NullOr(ModelSelectionSchema),
-    }),
-  ),
+  stickyModelSelectionByScope: Schema.optional(Schema.Unknown),
   modelOptionMemory: Schema.optional(
     Schema.Record(
       Schema.String,
@@ -554,6 +549,20 @@ const PersistedComposerDraftsSchema = Schema.Struct({
 const decodePersistedComposerDraftsDocument = Schema.decodeUnknownSync(
   PersistedComposerDraftsSchema,
 );
+const decodeStickyModelSelection = Schema.decodeUnknownOption(ModelSelectionSchema);
+
+function persistedStickyModelSelectionsByScope(
+  value: unknown,
+): StickyComposerModelSelectionByScope {
+  const record =
+    value !== null && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  return {
+    personal: Option.getOrNull(decodeStickyModelSelection(record.personal)),
+    work: Option.getOrNull(decodeStickyModelSelection(record.work)),
+  };
+}
 
 const EMPTY_DRAFT: ComposerDraft = {
   text: "",
@@ -764,8 +773,7 @@ export function decodePersistedComposerState(value: unknown): {
   const parsed = decodePersistedComposerDraftsDocument(value);
   const now = new Date().toISOString();
   const stickyModelSelectionByScope: StickyComposerModelSelectionByScope = {
-    personal: parsed.stickyModelSelectionByScope?.personal ?? null,
-    work: parsed.stickyModelSelectionByScope?.work ?? null,
+    ...persistedStickyModelSelectionsByScope(parsed.stickyModelSelectionByScope),
   };
   if (parsed.stickyModelSelection) {
     const scope = parsed.stickyModelSelection.instanceId.startsWith("aix-") ? "work" : "personal";

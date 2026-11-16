@@ -50,6 +50,7 @@ export function useComposerProviderModel(
     lockedProvider,
     lockedInstanceId,
     threadStarted,
+    draftScope,
   } = input;
   const draftModelState = useComposerDraftModelState(threadRef);
   const providerInstanceEntries: ReadonlyArray<ProviderInstanceEntry> = providerInstanceEntriesFor(
@@ -66,6 +67,7 @@ export function useComposerProviderModel(
     ],
     lockedProvider,
     lockedInstanceId,
+    draftScope,
   });
   const selectedInstanceId =
     selection.selectedProviderEntry?.instanceId ?? NO_PROVIDER_MODEL_SELECTION.instanceId;

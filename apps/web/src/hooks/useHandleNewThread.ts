@@ -30,8 +30,11 @@ import {
   useQuietThreadShell,
 } from "../state/entities";
 import {
+  draftModelSelectionApplies,
   hasExplicitComposerModelSelection,
   resolveNewDraftStartFromOrigin,
+  resolveNewThreadModelSelectionOverride,
+  threadHasStarted,
 } from "../lib/chatThreadActions";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { readT3ProjectFile } from "../lib/t3ProjectFileDefaults";
@@ -50,6 +53,7 @@ import { readUnloadedThreadCount } from "../state/olderSettledShelf";
 import { resolveProjectDefaultProviderModelSelection } from "../providerInstances";
 import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
 import {
+  resolveDraftModelSelectionAfterUsageLimitFallback,
   resolveDraftModelSelectionForScope,
   resolveModelPickerProjectScope,
 } from "@t3tools/client-runtime/provider-picker-hierarchy";
@@ -144,6 +148,16 @@ export function createNewThreadHandler(router: AnyRouter) {
             : currentRouteTarget.draftId,
         )
       : null;
+    const composerActiveProvider = draftModelSelectionApplies(
+      carrySourceComposer,
+      threadHasStarted(carrySourceShell),
+    )
+      ? (carrySourceComposer?.activeProvider ?? null)
+      : null;
+    const composerModelSelection = composerActiveProvider
+      ? (carrySourceComposer?.modelSelectionByProvider[composerActiveProvider] ?? null)
+      : null;
+    const carryModelSelection = composerModelSelection ?? carrySourceShell?.modelSelection ?? null;
     const carryInteractionMode =
       carrySourceComposer?.interactionMode ??
       carrySourceShell?.interactionMode ??
@@ -178,11 +192,19 @@ export function createNewThreadHandler(router: AnyRouter) {
     const stickySelectionForScope = stickyProviderForScope
       ? (stickyState.stickyModelSelectionByProvider[stickyProviderForScope] ?? null)
       : null;
+    const carrySelectionForScope = resolveNewThreadModelSelectionOverride({
+      projectDefaultSelection: null,
+      carrySelection: carryModelSelection,
+      carrySourceDraftId: currentRouteTarget?.kind === "draft" ? currentRouteTarget.draftId : null,
+      destinationDraftId: "new-thread-selection",
+      scope: projectScope,
+      providers,
+    });
     const defaultModelSelection = resolveDraftModelSelectionForScope({
       scope: projectScope,
       normalDefault: configuredDefaultModelSelection,
       orderedDefault: orderedDefaultModelSelection,
-      stickySelection: stickySelectionForScope,
+      stickySelection: carrySelectionForScope ?? stickySelectionForScope,
       providers,
     });
     const fallbackResolution = resolveNewThreadModelSelection({
@@ -193,14 +215,39 @@ export function createNewThreadHandler(router: AnyRouter) {
       projectId: projectRef.projectId,
       now: Date.now(),
     });
-    const projectDefaultModelSelection = resolveDraftModelSelectionForScope({
-      scope: projectScope,
-      normalDefault: fallbackResolution.fallback
-        ? fallbackResolution.selection
-        : defaultModelSelection,
-      stickySelection: stickySelectionForScope,
-      providers,
-    });
+    const projectDefaultModelSelection = fallbackResolution.fallback
+      ? resolveDraftModelSelectionAfterUsageLimitFallback({
+          scope: projectScope,
+          exhaustedSelection: defaultModelSelection,
+          fallbackSelection: fallbackResolution.selection,
+          normalDefault: configuredDefaultModelSelection,
+          stickySelection: carrySelectionForScope ?? stickySelectionForScope,
+          orderedDefault: orderedDefaultModelSelection,
+          providers,
+        })
+      : defaultModelSelection;
+    const resolveModelSelectionOverride = (destinationDraftId: DraftId) => {
+      const carrySelection = resolveNewThreadModelSelectionOverride({
+        projectDefaultSelection: null,
+        carrySelection: carryModelSelection,
+        carrySourceDraftId:
+          currentRouteTarget?.kind === "draft" ? currentRouteTarget.draftId : null,
+        destinationDraftId,
+        scope: projectScope,
+        providers,
+      });
+      if (hasExplicitComposerModelSelection(carrySourceComposer) && carrySelection) {
+        return carrySelection;
+      }
+      if (fallbackResolution.fallback) return projectDefaultModelSelection;
+      return resolveDraftModelSelectionForScope({
+        scope: projectScope,
+        normalDefault: projectDefaultModelSelection,
+        stickySelection: carrySelection ?? stickySelectionForScope,
+        orderedDefault: orderedDefaultModelSelection,
+        providers,
+      });
+    };
     const defaultRuntimeMode = projectSettings.settings.defaultRuntimeMode;
     const resolveDefaultEnvMode = async (): Promise<DraftThreadEnvMode> => {
       // Environment queries wait for a connection, so reading the project file on an
@@ -318,7 +365,9 @@ export function createNewThreadHandler(router: AnyRouter) {
         const storedDraftHasExplicitModelPick = hasExplicitComposerModelSelection(storedDraft);
         if (!storedDraftHasExplicitModelPick) {
           applyStickyState(emptyStoredDraftThread.draftId, projectScope);
-          const modelSelectionOverride = projectDefaultModelSelection;
+          const modelSelectionOverride = resolveModelSelectionOverride(
+            emptyStoredDraftThread.draftId,
+          );
           if (modelSelectionOverride) {
             setModelSelection(emptyStoredDraftThread.draftId, modelSelectionOverride, {
               replaceOptions: true,
@@ -433,7 +482,7 @@ export function createNewThreadHandler(router: AnyRouter) {
         ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
       });
       applyStickyState(draftId, projectScope);
-      const modelSelectionOverride = projectDefaultModelSelection;
+      const modelSelectionOverride = resolveModelSelectionOverride(draftId);
       if (modelSelectionOverride) {
         setModelSelection(draftId, modelSelectionOverride, { replaceOptions: true });
       }

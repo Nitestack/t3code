@@ -736,6 +736,19 @@ describe("resolveComposerProviderSelection", () => {
     ).toBe("Sign in to Antigravity in provider settings before sending.");
   });
 
+  it("does not select an aix provider as an implicit personal draft fallback", () => {
+    const aix = entry("codex", "aix-codex-team", { aixProfile: "team" });
+    const selection = resolveComposerProviderSelection({
+      entries: [aix],
+      candidateInstanceIds: [],
+      lockedProvider: null,
+      lockedInstanceId: null,
+      draftScope: "personal",
+    });
+
+    expect(selection.selectedProviderEntry).toBeUndefined();
+  });
+
   it("blocks a saved model that a ready catalog no longer lists", () => {
     const provider = entry("antigravity", "google_work", {
       status: "ready",

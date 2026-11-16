@@ -27,6 +27,13 @@ const testState = vi.hoisted(() => {
     readonly threadId: string;
   } | null = null;
   let openDraftRoute: { readonly kind: "draft"; readonly draftId: string } | null = null;
+  let sourceThreadRoute: { readonly kind: "server"; readonly threadRef: object } | null = null;
+  let sourceThread: {
+    readonly modelSelection: { readonly instanceId: string; readonly model: string };
+    readonly latestRun: null;
+    readonly itemCount: 0;
+    readonly runtime: null;
+  } | null = null;
   let draftsWithUserText = new Set<string>();
   const router = {
     state: {
@@ -88,6 +95,16 @@ const testState = vi.hoisted(() => {
     get openDraftRoute() {
       return openDraftRoute;
     },
+    get routeTarget() {
+      return sourceThreadRoute ?? openDraftRoute;
+    },
+    get sourceThread() {
+      return sourceThread;
+    },
+    openServerThread(modelSelection: { readonly instanceId: string; readonly model: string }) {
+      sourceThreadRoute = { kind: "server", threadRef: {} };
+      sourceThread = { modelSelection, latestRun: null, itemCount: 0, runtime: null };
+    },
     openEmptyDraft(draftId: string) {
       openDraftRoute = { kind: "draft", draftId };
     },
@@ -109,6 +126,8 @@ const testState = vi.hoisted(() => {
     ) {
       storedDraft = nextStoredDraft;
       openDraftRoute = null;
+      sourceThreadRoute = null;
+      sourceThread = null;
       draftsWithUserText = new Set();
       projectRemoved = false;
       connectedEnvironmentIds = ["environment-primary", "environment-ssh"];
@@ -273,7 +292,7 @@ vi.mock("../state/entities", () => {
   return {
     readProject: () => (testState.projectRemoved ? null : project),
     readProjects: () => (testState.projectRemoved ? [] : [project]),
-    readThreadShell: () => null,
+    readThreadShell: () => testState.sourceThread,
     readThreadShells: () => [],
     useProjects: () => [],
     useThread: () => null,
@@ -289,7 +308,7 @@ vi.mock("../state/server", () => ({
   primaryServerSettingsAtom: "primary-settings",
 }));
 vi.mock("../threadRoutes", () => ({
-  resolveThreadRouteTarget: () => testState.openDraftRoute,
+  resolveThreadRouteTarget: () => testState.routeTarget,
 }));
 vi.mock("../uiStateStore", () => ({
   legacyProjectCwdPreferenceKey: () => "remote-project",
@@ -364,6 +383,42 @@ describe.each([
 });
 
 describe("useNewThreadHandler", () => {
+  it("carries the current route model into a new draft when its scope matches", async () => {
+    testState.reset(null);
+    testState.providers = [
+      {
+        instanceId: "codex",
+        driver: "codex",
+        enabled: true,
+        installed: true,
+        status: "ready",
+        models: [{ slug: "provider-default", isDefault: true }],
+      },
+      {
+        instanceId: "claudeAgent",
+        driver: "claudeAgent",
+        enabled: true,
+        installed: true,
+        status: "ready",
+        models: [{ slug: "carried-model" }],
+      },
+    ];
+    testState.openServerThread({ instanceId: "claudeAgent", model: "carried-model" });
+
+    const pending = useNewThreadHandler()({
+      environmentId: "environment-ssh",
+      projectId: "project-remote",
+    } as never);
+    testState.completeProjectFileRead(null);
+    await pending;
+
+    expect(testState.draftStore.setModelSelection).toHaveBeenCalledWith(
+      "draft-delayed",
+      { instanceId: "claudeAgent", model: "carried-model" },
+      { replaceOptions: true },
+    );
+  });
+
   it("starts a personal draft on its ready subscription default when the global sticky is aix", async () => {
     testState.reset(null);
     testState.providers = [

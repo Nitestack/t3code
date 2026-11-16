@@ -272,13 +272,7 @@ export function resolveDefaultableModelSelection(
   selection: ModelSelection | null,
   projectId: ProjectId | null,
 ): ModelSelection | null {
-  const usable = resolveSelectableModelSelection(config, selection, projectId);
-  if (!usable || !config) {
-    return usable;
-  }
-  const provider = config.providers.find((candidate) => candidate.instanceId === usable.instanceId);
-  const model = provider?.models.find((candidate) => candidate.slug === usable.model);
-  return provider?.driver !== "antigravity" && model?.isLegacy === true ? null : usable;
+  return resolveSelectableModelSelection(config, selection, projectId);
 }
 
 export function resolveNewTaskModelSelection(input: {

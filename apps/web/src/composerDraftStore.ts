@@ -3479,7 +3479,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               const activeProvider = options.instanceId
                 ? instanceKey
                 : (base.activeProvider ?? instanceKey);
-              const stickyScope = instanceKey.startsWith("aix-") ? "work" : "personal";
+              const stickyScope = activeProvider.startsWith("aix-") ? "work" : "personal";
               nextStickyActiveProviderByScope = {
                 ...state.stickyActiveProviderByScope,
                 [stickyScope]: activeProvider,

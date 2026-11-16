@@ -415,6 +415,7 @@ export interface ChatComposerProps {
   reportedModelSelection?: ModelSelection | null;
   activeProjectId: ProjectId | null;
   projectScope: ProjectScope | null;
+  nonExplicitDraftScope?: ProjectScope | undefined;
   projectName?: string | undefined;
 
   compactThreadUnavailable: boolean;
@@ -532,6 +533,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     reportedModelSelection,
     activeProjectId,
     projectScope,
+    nonExplicitDraftScope,
     projectName,
     compactThreadUnavailable,
     compactDisabled,
@@ -891,6 +893,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     projectModelSelection: activeProjectDefaultModelSelection,
     promptInjectionState: getComposerPromptInjectionState(prompt),
     threadStarted: threadHasStarted(activeThread),
+    draftScope: nonExplicitDraftScope,
     candidateInstanceIds: [
       activeThread?.runtime?.providerInstanceId,
       activeThreadModelSelection?.instanceId,
