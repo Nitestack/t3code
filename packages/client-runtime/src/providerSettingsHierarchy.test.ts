@@ -11,15 +11,12 @@ const entry = (
   driver: string,
   profile?: string,
   profileLabel?: string,
-  displayName?: string,
+  enabled = true,
 ): ProviderSettingsEntry => ({
   instanceId: ProviderInstanceId.make(instanceId),
   driverKind: ProviderDriverKind.make(driver),
-  driverLabel: driver,
-  enabled: true,
-  status: "Available",
+  enabled,
   ...(profile ? { aixProfile: profile, aixProfileLabel: profileLabel } : {}),
-  ...(displayName ? { displayName } : {}),
 });
 
 describe("provider settings hierarchy", () => {
@@ -58,6 +55,13 @@ describe("provider settings hierarchy", () => {
       "aix-codex-adcare",
       "aix-opencode-adcare",
     ]);
+  });
+
+  it("keeps disabled aix instances reachable", () => {
+    const disabled = [entry("codex", "codex"), entry("aix-codex-ae", "codex", "ae", "AE", false)];
+    const work = resolveProviderSettingsHierarchy({ entries: disabled, scope: "work" });
+    expect(work.hasAixProfiles).toBe(true);
+    expect(work.visibleEntries.map((item) => item.instanceId)).toEqual(["aix-codex-ae"]);
   });
 
   it("hides the scope switch when no aix profiles exist", () => {

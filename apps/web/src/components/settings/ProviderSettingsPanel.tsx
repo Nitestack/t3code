@@ -4,8 +4,8 @@ import {
   AuthSettingsWriteScope,
   AuthProvidersManageScope,
   AuthOrchestrationReadScope,
+  type ProjectScope,
 } from "@t3tools/contracts";
-import type { ProjectScope } from "@t3tools/contracts";
 import { useEnvironmentScope, readEnvironmentScope } from "../../state/session";
 import { useAtomValue } from "@effect/atom-react";
 import { connectionStatusTitle } from "@t3tools/client-runtime/connection";
@@ -812,7 +812,6 @@ export function EnvironmentProviderSettings({
         instanceId: row.instanceId,
         driverKind: row.driver,
         enabled: resolveProviderInstanceEnabled(row.explicitInstance ?? { driver: row.driver }),
-        displayName: row.explicitInstance?.displayName,
         aixProfile: liveProvider?.aixProfile,
         aixProfileLabel: liveProvider?.aixProfileLabel ?? row.explicitInstance?.aixProfileLabel,
       };
@@ -820,9 +819,8 @@ export function EnvironmentProviderSettings({
     scope: providerViewScope,
     profileId: providerProfileId,
   });
-  const visibleRows = settingsHierarchy.visibleEntries.map((entry) =>
-    rows.find((row) => row.instanceId === entry.instanceId)!,
-  );
+  const visibleIds = new Set(settingsHierarchy.visibleEntries.map((entry) => entry.instanceId));
+  const visibleRows = rows.filter((row) => visibleIds.has(row.instanceId));
 
   const targetInstanceMissing =
     targetInstanceId !== undefined &&

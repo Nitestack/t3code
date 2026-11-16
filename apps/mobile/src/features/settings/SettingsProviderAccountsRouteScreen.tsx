@@ -108,11 +108,8 @@ function EnvironmentProviders({
       enabled: provider.enabled,
       aixProfile: provider.aixProfile,
       aixProfileLabel: provider.aixProfileLabel,
-      displayName: provider.displayName,
-      version: provider.version,
     })),
-    scope:
-      scope === "work" && !providers.some((provider) => provider.aixProfile) ? "personal" : scope,
+    scope,
     profileId,
   });
   const visibleIds = new Set(hierarchy.visibleEntries.map((provider) => provider.instanceId));
@@ -159,7 +156,7 @@ function EnvironmentProviders({
       ))}
       {visibleAccounts.length === 0 && visibleClaudeAccounts.length === 0 ? (
         <Text className="p-4 text-foreground-muted">
-          {scope === "work"
+          {hierarchy.scope === "work"
             ? "No providers in this profile."
             : "Configure a provider with in-app sign-in in web or desktop Settings."}
         </Text>
@@ -167,7 +164,9 @@ function EnvironmentProviders({
       {visibleClaudeAccounts.map((provider) => (
         <ClaudeAccount key={provider.instanceId} environment={environment} provider={provider} />
       ))}
-      {canAddClaude ? <AddClaudeAccount environment={environment} /> : null}
+      {canAddClaude && hierarchy.scope === "personal" ? (
+        <AddClaudeAccount environment={environment} />
+      ) : null}
     </>
   );
 }

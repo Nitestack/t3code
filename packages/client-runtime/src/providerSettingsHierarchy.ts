@@ -5,13 +5,7 @@ import {
   type PickerProviderInstance,
 } from "./providerPickerHierarchy.ts";
 
-export type ProviderSettingsEntry = PickerProviderInstance & {
-  readonly displayName?: string | undefined;
-  readonly driverLabel?: string | undefined;
-  readonly version?: string | null | undefined;
-  readonly status?: string | undefined;
-  readonly accountSource?: string | undefined;
-};
+export type ProviderSettingsEntry = PickerProviderInstance;
 
 export function providerSettingsEntryProfile<
   T extends Pick<PickerProviderInstance, "instanceId" | "driverKind"> & {
@@ -37,7 +31,11 @@ export function resolveProviderSettingsHierarchy<T extends ProviderSettingsEntry
     ...entry,
     ...providerSettingsEntryProfile(entry),
   }));
-  const hierarchy = resolvePickerHierarchy({ entries, scope: "work" });
+  // Settings must reach disabled instances, so every profile counts here.
+  const hierarchy = resolvePickerHierarchy({
+    entries: entries.map((entry) => ({ ...entry, enabled: true })),
+    scope: "work",
+  });
   const scope = hierarchy.profiles.length === 0 ? "personal" : input.scope;
   const profileId =
     scope === "work"
