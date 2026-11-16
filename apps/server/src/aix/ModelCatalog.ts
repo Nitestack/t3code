@@ -164,19 +164,16 @@ const concreteWildcardId = (name: string): string | undefined => {
     return undefined;
   }
   const id = name.slice(0, -1);
-  return id.length > 0 ? id : undefined;
+  // A versioned id only: `claude-*` or `gpt-image*` name a family, not a selectable model.
+  return /[a-z0-9]$/i.test(id) && /\d/.test(modelName(id)) ? id : undefined;
 };
 
 function unresolvedWildcard({ name, params }: Deployment): boolean {
   if (!name.includes("*")) return false;
   const concreteId = concreteWildcardId(name);
   const model = stringAt(params, "model");
-  const upstreamName = model?.split("/").at(-1);
-  return (
-    concreteId === undefined ||
-    model === undefined ||
-    (model.includes("*") && upstreamName !== name)
-  );
+  // Only a passthrough route may be listed: anything else substitutes another model.
+  return concreteId === undefined || model === undefined || modelName(model) !== modelName(name);
 }
 
 const asEffort = (value: string | undefined): value is ReasoningEffort =>

@@ -56,7 +56,7 @@ it("normalizes known names and collapses wildcard routes to concrete selectable 
   ]);
 });
 
-it("filters non-chat and generic wildcard routes but keeps named wildcard aliases", () => {
+it("keeps only versioned passthrough wildcard routes", () => {
   const models = ModelCatalog.normalizeModelInfo(
     [
       deployment("text-embedding-3-large", { mode: "embedding" }),
@@ -67,6 +67,12 @@ it("filters non-chat and generic wildcard routes but keeps named wildcard aliase
       deployment("claude-opus-5-5*", { mode: "chat" }, "anthropic/claude-opus-5-5*"),
       deployment("claude-sonnet-5-5*", { mode: "chat" }, "anthropic/another-model*"),
       deployment("claude*opus*", { mode: "chat" }, "anthropic/claude*opus*"),
+      deployment("claude-*", { mode: "chat" }, "anthropic/claude-*"),
+      deployment("gpt-*", { mode: "chat" }, "openai/gpt-*"),
+      deployment("claude-opus-5-*", { mode: "chat" }, "anthropic/claude-opus-5-*"),
+      deployment("claude-haiku-5-5*", { mode: "chat" }, "anthropic/claude-opus-4-6"),
+      deployment("text-embedding*", { mode: "chat" }, "openai/text-embedding*"),
+      deployment("gpt-image*", { mode: "chat" }, "openai/gpt-image*"),
     ],
     undefined,
     [
@@ -78,6 +84,12 @@ it("filters non-chat and generic wildcard routes but keeps named wildcard aliase
       "claude-opus-5-5*",
       "claude-sonnet-5-5*",
       "claude*opus*",
+      "claude-*",
+      "gpt-*",
+      "claude-opus-5-*",
+      "claude-haiku-5-5*",
+      "text-embedding*",
+      "gpt-image*",
     ],
   );
 
