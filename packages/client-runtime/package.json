@@ -574,6 +574,10 @@
     "./provider-picker-hierarchy": {
       "types": "./src/providerPickerHierarchy.ts",
       "default": "./src/providerPickerHierarchy.ts"
+    },
+    "./provider-settings-hierarchy": {
+      "types": "./src/providerSettingsHierarchy.ts",
+      "default": "./src/providerSettingsHierarchy.ts"
     }
   },
   "scripts": {

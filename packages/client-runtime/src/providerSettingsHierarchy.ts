@@ -1,0 +1,83 @@
+import type { ProjectScope } from "@t3tools/contracts";
+import {
+  aixMetadataFromInstanceId,
+  resolvePickerHierarchy,
+  type PickerProviderInstance,
+} from "./providerPickerHierarchy.ts";
+
+export type ProviderSettingsEntry = PickerProviderInstance & {
+  readonly displayName?: string | undefined;
+  readonly driverLabel?: string | undefined;
+  readonly version?: string | null | undefined;
+  readonly status?: string | undefined;
+  readonly accountSource?: string | undefined;
+};
+
+export function providerSettingsEntryProfile<
+  T extends Pick<PickerProviderInstance, "instanceId" | "driverKind"> & {
+    readonly aixProfile?: string | undefined;
+    readonly aixProfileLabel?: string | undefined;
+  },
+>(entry: T) {
+  if (entry.aixProfile) {
+    return { aixProfile: entry.aixProfile, aixProfileLabel: entry.aixProfileLabel };
+  }
+  const metadata = aixMetadataFromInstanceId(entry.instanceId, entry.driverKind);
+  return metadata
+    ? { ...metadata, aixProfileLabel: entry.aixProfileLabel ?? metadata.aixProfileLabel }
+    : undefined;
+}
+
+export function resolveProviderSettingsHierarchy<T extends ProviderSettingsEntry>(input: {
+  readonly entries: ReadonlyArray<T>;
+  readonly scope: ProjectScope;
+  readonly profileId?: string | undefined;
+  readonly selectedInstanceId?: T["instanceId"] | undefined;
+}) {
+  const entries = input.entries.map((entry) => ({
+    ...entry,
+    ...providerSettingsEntryProfile(entry),
+  }));
+  const selected = entries.find((entry) => entry.instanceId === input.selectedInstanceId);
+  const hierarchy = resolvePickerHierarchy({ entries, scope: "work" });
+  const scope = hierarchy.profiles.length === 0 ? "personal" : input.scope;
+  const selectedProfileId = scope === "work" ? selected?.aixProfile : undefined;
+  const profileId =
+    scope === "work"
+      ? (selectedProfileId ??
+        (hierarchy.profiles.some((profile) => profile.id === input.profileId)
+          ? input.profileId
+          : hierarchy.profileId))
+      : undefined;
+  const visibleEntries = entries.filter((entry) =>
+    scope === "work"
+      ? entry.aixProfile !== undefined &&
+        (profileId === undefined || entry.aixProfile === profileId)
+      : entry.aixProfile === undefined,
+  );
+  return {
+    scope,
+    profiles: hierarchy.profiles,
+    profileId,
+    visibleEntries:
+      selected && !visibleEntries.some((entry) => entry.instanceId === selected.instanceId)
+        ? [...visibleEntries, selected]
+        : visibleEntries,
+    hasAixProfiles: hierarchy.profiles.length > 0,
+  };
+}
+
+export function providerSettingsRowLabels(input: {
+  readonly driverLabel: string;
+  readonly displayName?: string | undefined;
+  readonly version?: string | null | undefined;
+  readonly status: string;
+  readonly accountSource?: string | undefined;
+}) {
+  const accountSource = input.accountSource?.trim();
+  return {
+    title: input.displayName?.trim() || input.driverLabel,
+    version: input.version ?? null,
+    detail: [input.status, accountSource].filter(Boolean).join(" · "),
+  };
+}
