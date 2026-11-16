@@ -983,6 +983,10 @@ function ThreadDetailBody(
   if (usageLimitsPanel !== null && usageLimitsPanel.key !== usageLimitsKey) {
     setUsageLimitsPanel(null);
   }
+  const selectedUsageProvider = props.serverConfig?.providers.find(
+    (provider) => provider.instanceId === props.selectedThread.modelSelection.instanceId,
+  );
+  const selectedUsageScope = selectedUsageProvider?.aixProfile ? "work" : "personal";
   const usageLimitsReport =
     usageLimitsPanel !== null && usageLimitsPanel.key === usageLimitsKey
       ? collectProviderUsageLimits(
@@ -1729,6 +1733,7 @@ function ThreadDetailBody(
                           report={usageLimitsReport}
                           environmentId={props.environmentId}
                           maxHeight={usageLimitsMaxHeight}
+                          selectedScope={selectedUsageScope}
                           onClose={dismissUsageLimits}
                         />
                       </Animated.View>

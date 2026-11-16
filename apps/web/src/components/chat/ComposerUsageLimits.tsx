@@ -1,7 +1,8 @@
-import type { EnvironmentId, UsageLimitsReport } from "@t3tools/contracts";
+import type { EnvironmentId, UsageLimitsReport, UsageScope } from "@t3tools/contracts";
 import type { TimestampFormat } from "@t3tools/contracts/settings";
-import { limitsNotice } from "@t3tools/shared/usageLimits";
+import { limitsNotice, resolveUsageLimitAccountsScope } from "@t3tools/shared/usageLimits";
 import { GaugeIcon } from "lucide-react";
+import { useState } from "react";
 
 import { ensureLocalApi } from "../../localApi";
 import { formatUpcomingTimestamp } from "../../timestampFormat";
@@ -9,6 +10,7 @@ import { Button } from "../ui/button";
 import { providerClients } from "../settings/providerDriverMeta";
 import { RedactedSensitiveText } from "../settings/RedactedSensitiveText";
 import { LimitWindows, ResetCredits } from "../usage/UsageLimits";
+import { UsageScopeControl } from "../usage/UsageScopeControl";
 import { ComposerBanner } from "./ComposerBanner";
 import type { ComposerBannerStackItem } from "./ComposerBannerStack";
 
@@ -51,15 +53,13 @@ export function usageLimitsBannerItem(
   id: string,
   report: UsageLimitsReport,
   environmentId: EnvironmentId,
+  selectedScope: UsageScope,
   onDismiss: () => void,
 ): ComposerBannerStackItem {
-  const [first] = report.accounts;
-  const single = report.accounts.length === 1 && first ? first : null;
-  const summary = single ? (
-    <AccountSummary account={single} />
-  ) : (
-    `${report.accounts.length} accounts`
-  );
+  const { accounts } = resolveUsageLimitAccountsScope(report.accounts, null, selectedScope);
+  const [first] = accounts;
+  const single = accounts.length === 1 && first ? first : null;
+  const summary = single ? <AccountSummary account={single} /> : `${accounts.length} accounts`;
   return {
     id,
     variant: "info",
@@ -68,7 +68,13 @@ export function usageLimitsBannerItem(
     description: summary,
     dismissLabel: "Dismiss usage limits",
     onDismiss,
-    children: <UsageLimitsBannerBody report={report} environmentId={environmentId} />,
+    children: (
+      <UsageLimitsBannerBody
+        report={report}
+        environmentId={environmentId}
+        selectedScope={selectedScope}
+      />
+    ),
   };
 }
 
@@ -108,15 +114,24 @@ export function modelFallbackBannerItem({
 function UsageLimitsBannerBody({
   report,
   environmentId,
+  selectedScope,
 }: {
   readonly report: UsageLimitsReport;
   readonly environmentId: EnvironmentId;
+  readonly selectedScope: UsageScope;
 }) {
+  const [requestedScope, setRequestedScope] = useState<UsageScope | null>(null);
+  const { accounts, groups, scope } = resolveUsageLimitAccountsScope(
+    report.accounts,
+    requestedScope,
+    selectedScope,
+  );
   const now = Date.parse(report.createdAt);
   return (
     <ComposerBanner.Scroll>
       <ComposerBanner.Body className="flex flex-col gap-2 pt-1 pb-1.5 pe-2">
-        {report.accounts.map((account) => {
+        <UsageScopeControl groups={groups} scope={scope} onChange={setRequestedScope} />
+        {accounts.map((account) => {
           const resetCreditInput =
             account.resetCreditInput ??
             (account.instanceId ? { instanceId: account.instanceId } : undefined);
@@ -124,7 +139,7 @@ function UsageLimitsBannerBody({
           const externalUsage = account.limits.externalUsage;
           return (
             <div key={account.id} className="flex min-w-0 flex-col gap-1">
-              {report.accounts.length > 1 ? (
+              {accounts.length > 1 ? (
                 <span className="truncate text-xs text-muted-foreground">
                   <AccountSummary account={account} />
                 </span>

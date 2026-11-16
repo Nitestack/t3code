@@ -5,6 +5,7 @@ import {
   type ProjectId,
   resolveProjectProviderInstanceEnabled,
   type UsageLimitsReport,
+  type UsageScope,
   type ProviderInstanceId,
   type ProviderConsumeResetCreditInput,
   type ServerProviderSlashCommand,
@@ -172,9 +173,9 @@ function providersWithLimits(providers: readonly ServerProvider[]): readonly Ser
   return providers.filter(
     (provider) =>
       provider.enabled &&
-      provider.installed &&
-      isProviderAvailable(provider) &&
-      provider.usageLimits !== undefined,
+      provider.usageLimits !== undefined &&
+      (aixProfileName(provider.usageLimits) !== undefined ||
+        (provider.installed && isProviderAvailable(provider))),
   );
 }
 
@@ -232,6 +233,36 @@ interface AccountReport {
   readonly email?: string | undefined;
   readonly workspaceId?: string | undefined;
   readonly usageLimits?: ServerProviderUsageLimits | undefined;
+}
+
+export function usageLimitsForProviderInstance(
+  report: UsageLimitsReport | null,
+  selected: ServerProvider,
+): ServerProviderUsageLimits | undefined {
+  const accounts = report?.accounts ?? [];
+  const exact = accounts.find((account) => account.instanceId === selected.instanceId);
+  if (exact) return exact.limits;
+  if (!selected.aixProfile) return undefined;
+  return accounts.find((account) => aixProfileName(account.limits) === selected.aixProfile)?.limits;
+}
+
+export function resolveUsageLimitAccountsScope<
+  Account extends { readonly limits: ServerProviderUsageLimits },
+>(accounts: readonly Account[], requestedScope: UsageScope | null, selectedScope: UsageScope) {
+  const groups = new Set<UsageScope>(
+    accounts.map((account) => (aixProfileName(account.limits) ? "work" : "personal")),
+  );
+  const scope =
+    (requestedScope && groups.has(requestedScope) ? requestedScope : undefined) ??
+    (groups.has(selectedScope) ? selectedScope : undefined) ??
+    (groups.has("personal") ? "personal" : "work");
+  return {
+    groups,
+    scope,
+    accounts: accounts.filter(
+      (account) => (aixProfileName(account.limits) ? "work" : "personal") === scope,
+    ),
+  };
 }
 
 export function aixProfileNameFromWindowId(id: string): string | undefined {

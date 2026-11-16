@@ -27,6 +27,8 @@ import {
   usesChatGptSharing,
   resolveNewThreadModelSelection,
   aixProfileNameFromWindowId,
+  usageLimitsForProviderInstance,
+  resolveUsageLimitAccountsScope,
 } from "./usageLimits.ts";
 
 const now = Date.parse("2026-09-03T12:00:00.000Z");
@@ -237,6 +239,38 @@ describe("new thread model fallback", () => {
       ).toEqual(usesFallback ? fallback : defaultSelection);
     },
   );
+});
+
+describe("usage limit account scopes", () => {
+  const personal = {
+    id: "native",
+    driver: ProviderDriverKind.make("claudeAgent"),
+    label: "Claude",
+    instanceId: ProviderInstanceId.make("claude"),
+    limits: { checkedAt: window.resetsAt, windows: [window] },
+  } as const;
+  const work = {
+    id: "aix-claude-work",
+    driver: ProviderDriverKind.make("claudeAgent"),
+    label: "Work",
+    instanceId: ProviderInstanceId.make("aix-claude-work"),
+    limits: { checkedAt: window.resetsAt, profileName: "work", windows: [window] },
+  } as const;
+
+  it("shows the selected scope and switches only to available accounts", () => {
+    expect(resolveUsageLimitAccountsScope([personal, work], null, "work")).toEqual({
+      accounts: [work],
+      groups: new Set(["personal", "work"]),
+      scope: "work",
+    });
+    expect(resolveUsageLimitAccountsScope([personal, work], "personal", "work").accounts).toEqual([
+      personal,
+    ]);
+    expect(resolveUsageLimitAccountsScope([work], null, "personal")).toMatchObject({
+      accounts: [work],
+      scope: "work",
+    });
+  });
 });
 
 describe("pace", () => {
@@ -1722,11 +1756,19 @@ describe("/usage-limits", () => {
       },
     });
 
+    const offlineBudgetOwner = {
+      ...latestBudget,
+      installed: false,
+      availability: "unavailable" as const,
+    };
     const budgetReport = collectProviderUsageLimits(
       selected.instanceId,
-      [selected, latestBudget, nativeCodex],
+      [selected, offlineBudgetOwner, nativeCodex],
       [],
       now,
+    );
+    expect(usageLimitsForProviderInstance(budgetReport, selected)?.windows[0]?.id).toBe(
+      `aix-budget:work#credential:${"a".repeat(64)}`,
     );
     expect(
       budgetReport?.accounts.find((account) => account.id === "claude-work")?.limits.windows[0],

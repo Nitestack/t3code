@@ -570,7 +570,7 @@ function PoolWindowCard({
       <div className="flex flex-col gap-1">
         {label !== null ? (
           <span className="text-sm font-medium text-foreground">
-            {profileName ? (label ?? "Gateway budget") : (label ?? pool.label)}
+            {profileName ? (label ?? "Budget") : (label ?? pool.label)}
           </span>
         ) : null}
         {amounts && leftUsd !== undefined ? (

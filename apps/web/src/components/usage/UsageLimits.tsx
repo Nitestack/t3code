@@ -59,7 +59,7 @@ const PACE: Record<LimitPace, { readonly label: string; readonly icon: typeof Ga
 };
 
 const windowLabel = (window: ServerProviderUsageWindow) =>
-  aixProfileNameFromWindowId(window.id) === undefined ? window.label : "Gateway budget";
+  aixProfileNameFromWindowId(window.id) === undefined ? window.label : "Budget";
 
 export function usageLimitPresentationsForSelection(
   presentations: LimitPresentations,

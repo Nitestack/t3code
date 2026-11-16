@@ -41,11 +41,17 @@ export function useUsageLimitsPanel(input: {
     panel !== null && panelKey !== null && panel.key === panelKey && providerInstanceId !== null
       ? collectProviderUsageLimits(providerInstanceId, providers, sources, panel.now)
       : null;
+  const selectedProvider = providers.find((provider) => provider.instanceId === providerInstanceId);
+  const selectedScope = selectedProvider?.aixProfile ? "work" : "personal";
   const banner =
     report !== null && panel !== null
       ? // A fresh id per opening: the stack keeps the last dismissed id as "exiting".
-        usageLimitsBannerItem(`usage-limits:${panel.key}:${panel.now}`, report, environmentId, () =>
-          setPanel(null),
+        usageLimitsBannerItem(
+          `usage-limits:${panel.key}:${panel.now}`,
+          report,
+          environmentId,
+          selectedScope,
+          () => setPanel(null),
         )
       : null;
   // Intercept /usage-limits only when Limits has selected-provider data.
