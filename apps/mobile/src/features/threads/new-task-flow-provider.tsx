@@ -307,7 +307,7 @@ export function NewTaskFlowProvider(
     : undefined;
   const routeScope = routeEnvironmentScope({
     enabled: props.routeDraftId !== undefined && mobileScope.enabled,
-    projectScope: routeProject?.scope,
+    projectScope: routeProject === undefined ? null : routeProject.scope,
   });
   const syncEnvironmentScopeToDraft = useEffectEvent(
     (scope: ReturnType<typeof routeEnvironmentScope>) => {

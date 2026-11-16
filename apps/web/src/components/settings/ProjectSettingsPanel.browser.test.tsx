@@ -132,7 +132,7 @@ vi.mock(import("../files/projectFilesQueryState"), async (original) => ({
   getProjectFileQueryAtom: () => missingProjectFile,
 }));
 
-import { scopeProjectRef } from "@t3tools/client-runtime/environment";
+import { filterProjectsByScope, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { DraftId, useComposerDraftStore } from "../../composerDraftStore";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { assetEnvironment } from "../../state/assets";
@@ -662,6 +662,13 @@ describe("project settings scope", () => {
         input: { projectId: project.id, scope: "work" },
       }),
     );
+    const workGroups = buildSidebarProjectSnapshots({
+      projects: filterProjectsByScope(state.projects, "work"),
+      settings: DEFAULT_CLIENT_SETTINGS,
+      primaryEnvironmentId: primaryId,
+      resolveEnvironmentLabel: (id) => id,
+    });
+    expect(workGroups.map((group) => [group.id, group.scope])).toEqual([[project.id, "work"]]);
   });
 
   it("offers every environment while no project is selected", async () => {

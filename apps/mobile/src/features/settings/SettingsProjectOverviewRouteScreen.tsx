@@ -44,6 +44,7 @@ import { leaveSettingsPage } from "./settings-navigation";
 import { workspaceHasColumns } from "../layout/workspace/workspace-selection-store";
 import { DEFAULT_SETTINGS_PAGE } from "../layout/workspace/workspace-tab-navigation";
 import { readUnloadedThreadCount } from "../../state/olderSettledShelf";
+import { useMobileEnvironmentScope } from "../environment-scope/useMobileEnvironmentScope";
 
 export function SettingsProjectOverviewRouteScreen() {
   const environmentMenu = useSettingsEnvironmentMenu();
@@ -137,6 +138,7 @@ function ProjectOverviewContent(props: {
   readonly onProjectRemoved: (projectKey: string | null) => void;
 }) {
   const { isRemoving, setIsRemoving, startRemoval, finishRemoval } = props;
+  const { enabled: environmentScopeEnabled } = useMobileEnvironmentScope();
   const representative = props.members[0]!;
   const displayName = deriveProjectGroupLabel({
     groupKey: props.group.key,
@@ -350,7 +352,7 @@ function ProjectOverviewContent(props: {
             ) : null}
           </View>
         </View>
-        {canOrganize ? (
+        {canOrganize && environmentScopeEnabled ? (
           <SettingsActionRow
             icon="arrow.left.arrow.right"
             label={representative.scope === "work" ? "Move to Personal" : "Move to Work"}

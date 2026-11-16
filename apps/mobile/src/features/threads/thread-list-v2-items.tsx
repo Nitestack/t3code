@@ -35,6 +35,7 @@ import type { SnoozePresetSetting } from "@t3tools/contracts/settings";
 import { canSnooze } from "@t3tools/client-runtime/state/thread-settled";
 import { threadChipCopyTarget } from "@t3tools/client-runtime/thread-reference";
 import type { MenuAction } from "@react-native-menu/menu";
+import Constants from "expo-constants";
 import { memo, useCallback, useMemo, useState, type ComponentProps } from "react";
 import { Platform, Pressable, Text as RNText, useWindowDimensions, View } from "react-native";
 import type { SwipeableMethods } from "react-native-gesture-handler/ReanimatedSwipeable";
@@ -72,6 +73,7 @@ import { useSwipeRowDormant } from "../home/swipe-row-activation";
 import { ThreadSwipeable } from "../home/thread-swipe-actions";
 import { buildThreadTitleRegenerationMenuItems } from "./thread-title-regeneration-menu";
 import { canTurnThreadIntoProject, turnThreadIntoProject } from "./turnThreadIntoProject";
+import { isAndroidForkEnvironmentScopeEnabled } from "../environment-scope/mobile-environment-scope";
 import { threadCanArchive } from "../home/threadArchive";
 import {
   THREAD_LIST_V2_SETTLED_PAGE_COUNT,
@@ -1061,7 +1063,15 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       if (nativeEvent.event === "rename") handleRename();
       if (nativeEvent.event === "regenerate-title") handleRegenerateTitle();
       if (nativeEvent.event === "turn-into-project")
-        void turnThreadIntoProject(thread, activeScope);
+        void turnThreadIntoProject(
+          thread,
+          isAndroidForkEnvironmentScopeEnabled({
+            platformOS: Platform.OS,
+            appVariant: Constants.expoConfig?.extra?.appVariant,
+          })
+            ? activeScope
+            : "personal",
+        );
       if (nativeEvent.event === "copy-thread") {
         const target = threadChipCopyTarget(
           { environmentId: thread.environmentId, threadId: thread.id },

@@ -36,6 +36,7 @@ import * as ServerSettings from "../serverSettings.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import * as ProjectEnrichmentService from "./ProjectEnrichmentService.ts";
 import * as ProjectFaviconResolver from "./ProjectFaviconResolver.ts";
+import { projectMutationOperation } from "./ProjectMutation.ts";
 import * as ProjectService from "./ProjectService.ts";
 import * as RepositoryIdentityResolver from "./RepositoryIdentityResolver.ts";
 import * as T3ProjectFileLoader from "./T3ProjectFileLoader.ts";
@@ -230,6 +231,37 @@ const waitForProject = Effect.fn("ProjectServiceTest.waitForProject")(function* 
 });
 
 it.layer(layerTest)("ProjectService", (it) => {
+  it.effect("reflects a scope update dispatched through the project mutation adapter", () =>
+    Effect.gen(function* () {
+      const service = yield* ProjectService.ProjectService;
+      const projectId = ProjectId.make("project:scope-update");
+      yield* service.create({
+        commandId: CommandId.make("command:scope-update:create"),
+        projectId,
+        title: "Scope update",
+        workspaceRoot: "/work/scope-update",
+      });
+
+      yield* projectMutationOperation(service, {
+        type: "project.update",
+        commandId: CommandId.make("command:scope-update:work"),
+        projectId,
+        scope: "work",
+      });
+
+      const updated = Option.getOrThrow(yield* service.getById(projectId));
+      assert.equal(updated.scope, "work");
+      assert.equal(
+        (yield* service.snapshot).projects.find((project) => project.id === projectId)?.scope,
+        "work",
+      );
+      yield* service.delete({
+        commandId: CommandId.make("command:scope-update:delete"),
+        projectId,
+      });
+    }),
+  );
+
   it.effect("creates, updates, resolves, snapshots, and soft-deletes projects", () =>
     Effect.gen(function* () {
       const service = yield* ProjectService.ProjectService;

@@ -251,6 +251,17 @@ function setup() {
       });
       holdStatus = true;
     },
+    enableScope(activeScope: "personal" | "work") {
+      const setActiveScope = vi.fn();
+      mocks.scope.mockReturnValue({
+        enabled: true,
+        activeScope,
+        setActiveScope,
+        filter: (values: ReadonlyArray<{ readonly environmentId: string }>) => values,
+        filterThreads: (values: ReadonlyArray<{ readonly environmentId: string }>) => values,
+      });
+      return setActiveScope;
+    },
     snapshot,
     clearWorkspace(key: string) {
       act(() => write(key, { workspaceSelection: undefined }));
@@ -258,11 +269,24 @@ function setup() {
     get current() {
       return current;
     },
-    async render(active: boolean) {
+    async render(active: boolean, routeDraftId?: string, stampedProject?: EnvironmentProject) {
+      if (routeDraftId !== undefined && stampedProject !== undefined) {
+        write(routeDraftId, {
+          project: {
+            environmentId: stampedProject.environmentId,
+            projectId: stampedProject.id,
+            createdAt: "2026-10-26T00:00:00Z",
+          },
+        });
+      }
       await act(async () =>
         root.render(
           <RegistryContext.Provider value={registry}>
-            <NewTaskFlowProvider active={active} flowKey="test-flow">
+            <NewTaskFlowProvider
+              active={active}
+              flowKey="test-flow"
+              {...(routeDraftId === undefined ? {} : { routeDraftId })}
+            >
               <Probe />
             </NewTaskFlowProvider>
           </RegistryContext.Provider>,
@@ -342,6 +366,25 @@ it("owns a status stream only while the draft is active, retaining draft choices
   expect.soft(screen.current.currentCheckoutBranchName).toBe("updated-checkout");
   expect(screen.current.prompt).toBe("keep this draft");
   expect(screen.snapshot(draftKey).workspaceSelection).toEqual(chosenWorkspace);
+});
+
+it("keeps the selected scope when an enabled route draft has no stamped project", async () => {
+  using screen = setup();
+  const setActiveScope = screen.enableScope("work");
+
+  await screen.render(true, "empty-route-draft");
+
+  expect(setActiveScope).not.toHaveBeenCalled();
+});
+
+it("selects the stamped project's scope when scope support is enabled", async () => {
+  using screen = setup();
+  const setActiveScope = screen.enableScope("personal");
+  screen.projects[0] = { ...screen.projects[0]!, scope: "work" };
+
+  await screen.render(true, "work-route-draft", screen.projects[0]);
+
+  expect(setActiveScope).toHaveBeenCalledWith("work");
 });
 
 it("does not persist a provisional workspace default after releasing inactive status", async () => {

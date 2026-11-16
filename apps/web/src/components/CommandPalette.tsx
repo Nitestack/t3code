@@ -646,6 +646,12 @@ function OpenCommandPaletteDialog(props: {
   const canCreateProject = useEnvironmentScope(browseEnvironmentId, AuthOrchestrationOperateScope);
   const browseEnvironment =
     environments.find((environment) => environment.environmentId === browseEnvironmentId) ?? null;
+  const projectScopeEnvironmentId =
+    addProjectCloneFlow?.environmentId ?? newProjectFlow?.environmentId ?? browseEnvironmentId;
+  const canSetProjectScope =
+    environments.find((environment) => environment.environmentId === projectScopeEnvironmentId)
+      ?.serverConfig?.environment.capabilities.projectOrganization === true;
+  const effectiveProjectCreateScope = canSetProjectScope ? projectCreateScope : "personal";
   const browseEnvironmentIsDesktopLocal =
     browseEnvironment !== null && isDesktopLocalConnectionTarget(browseEnvironment.entry.target);
   // pickFolder routes desktop-local environments by pool id, not catalog environmentId.
@@ -1999,7 +2005,7 @@ function OpenCommandPaletteDialog(props: {
         workspaceRoot: cwd,
         createWorkspaceRootIfMissing: true,
         defaultModelSelection: null,
-        scope: projectCreateScope,
+        scope: effectiveProjectCreateScope,
       },
     });
     if (createResult._tag === "Failure") {
@@ -2071,7 +2077,7 @@ function OpenCommandPaletteDialog(props: {
       createNewProject({
         environmentId: newProjectFlow.environmentId,
         name: newProjectName,
-        scope: projectCreateScope,
+        scope: effectiveProjectCreateScope,
         publishTo: newProjectPublishes ? newProjectPublishTarget : null,
       }),
     );
@@ -2254,7 +2260,7 @@ function OpenCommandPaletteDialog(props: {
         createdAt: new Date().toISOString(),
         remoteUrl: addProjectCloneFlow.remoteUrl,
         destinationPath,
-        scope: projectCreateScope,
+        scope: effectiveProjectCreateScope,
       },
     });
     setIsRemoteProjectCloning(false);
@@ -3053,9 +3059,10 @@ function OpenCommandPaletteDialog(props: {
           environmentLabel={newProjectEnvironmentLabel}
         />
       ) : null}
-      {addProjectEnvironmentId !== null ||
-      addProjectCloneFlow !== null ||
-      newProjectFlow !== null ? (
+      {canSetProjectScope &&
+      (addProjectEnvironmentId !== null ||
+        addProjectCloneFlow !== null ||
+        newProjectFlow !== null) ? (
         <div className="flex items-center justify-between gap-3 border-b px-4 py-2">
           <span className="text-sm text-muted-foreground">Project scope</span>
           <ToggleGroup
