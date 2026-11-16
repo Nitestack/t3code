@@ -103,9 +103,12 @@ const isNonNegative = (value: number) => value >= 0;
 const CHAT_MODES = new Set(["chat", "responses"]);
 const NON_MODEL_PROVIDERS = new Set(["a2a"]);
 
+/** A model id without its provider prefix, lowercased: `Anthropic/Claude-X` is `claude-x`. */
+export const modelName = (id: string): string => id.toLowerCase().split("/").at(-1) ?? "";
+
 export function knownNonChatId(id: string): boolean {
   const lower = id.toLowerCase();
-  const name = lower.split("/").at(-1) ?? lower;
+  const name = modelName(id);
   return (
     genericWildcard(lower) ||
     lower.startsWith("a2a/") ||
@@ -113,6 +116,12 @@ export function knownNonChatId(id: string): boolean {
     name.startsWith("text-embedding-") ||
     name.startsWith("embedding-") ||
     name.startsWith("gpt-image-") ||
+    name.startsWith("gpt-realtime") ||
+    name.startsWith("gpt-audio") ||
+    name.startsWith("whisper-") ||
+    name.startsWith("tts-") ||
+    name.includes("-transcribe") ||
+    name.includes("-tts") ||
     name.startsWith("dall-e-") ||
     name.startsWith("imagen-") ||
     name.startsWith("stable-diffusion-")

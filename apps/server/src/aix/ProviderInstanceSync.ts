@@ -35,6 +35,7 @@ import {
   type FetchLiteLlmModelCatalogInput,
   fetchLiteLlmModelCatalog,
   ModelCatalogFetchError,
+  modelName,
   normalizeModelInfo,
 } from "./ModelCatalog.ts";
 import { type AixModelRoute, routeCatalogModel } from "./ModelRouting.ts";
@@ -65,9 +66,10 @@ export type AixRouteSource = "anthropic" | "litellm";
 
 const routeFor = (source: AixRouteSource, modelId: string): AixModelRoute => {
   if (source === "anthropic") return "anthropic-direct-messages";
-  if (modelId.startsWith("claude-")) return "litellm-anthropic-messages";
+  const name = modelName(modelId);
+  if (name.startsWith("claude-")) return "litellm-anthropic-messages";
   // gpt-oss is an open-weight chat model served from the chat route, not the Responses API.
-  if (modelId.startsWith("gpt-") && !modelId.startsWith("gpt-oss")) {
+  if (name.startsWith("gpt-") && !name.startsWith("gpt-oss")) {
     return "litellm-openai-responses";
   }
   return "litellm-openai-chat";

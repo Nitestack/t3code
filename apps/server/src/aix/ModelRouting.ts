@@ -1,6 +1,6 @@
 import { ProviderDriverKind } from "@t3tools/contracts";
 
-import { type CatalogModel, knownNonChatId } from "./ModelCatalog.ts";
+import { type CatalogModel, knownNonChatId, modelName } from "./ModelCatalog.ts";
 
 /** Routes the caller has established from the profile endpoint and its configured API. */
 export type AixModelRoute =
@@ -40,8 +40,9 @@ type AgentChoice =
   | { readonly reason: AixUnroutableReason };
 
 function agentFor(id: string, routeKind: AixModelRoute): AgentChoice {
+  const name = modelName(id);
   const concrete = !id.includes("*");
-  const claude = concrete && id.startsWith("claude-");
+  const claude = concrete && name.startsWith("claude-");
   switch (routeKind) {
     case "anthropic-direct-messages":
       return claude ? { driverKind: CLAUDE_CODE } : { reason: "claude-direct-only" };
@@ -49,7 +50,7 @@ function agentFor(id: string, routeKind: AixModelRoute): AgentChoice {
       return claude ? { driverKind: CLAUDE_CODE } : { reason: "no-native-agent" };
     case "litellm-openai-responses":
       // gpt-oss is an open-weight chat model, not a Responses API model.
-      return concrete && id.startsWith("gpt-") && !id.startsWith("gpt-oss")
+      return concrete && name.startsWith("gpt-") && !name.startsWith("gpt-oss")
         ? { driverKind: CODEX }
         : { reason: "no-native-agent" };
     case "litellm-openai-chat":

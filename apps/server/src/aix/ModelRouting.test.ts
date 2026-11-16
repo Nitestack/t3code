@@ -26,14 +26,11 @@ it("routes every catalog Claude model to Claude Code and every GPT Responses mod
     ].map(outcome),
   ).toEqual(Array(4).fill("claudeAgent"));
   expect(
-    ["gpt-6.1-sol", "gpt-6-luna", "gpt-6.1-sol-2026"].map((id) =>
+    ["gpt-6.1-sol", "gpt-6-luna", "gpt-6.1-sol-2026", "openai/GPT-6.1-sol"].map((id) =>
       outcome(route(id, "litellm-openai-responses")),
     ),
-  ).toEqual(Array(3).fill("codex"));
+  ).toEqual(Array(4).fill("codex"));
   expect(outcome(route("claude-opus-5-5*", "litellm-anthropic-messages"))).toBe(
-    "unroutable:no-native-agent",
-  );
-  expect(outcome(route("openai/gpt-6.1-sol", "litellm-openai-responses"))).toBe(
     "unroutable:no-native-agent",
   );
 });
@@ -55,10 +52,10 @@ it("sends other chat models to OpenCode", () => {
 
 it("keeps the native Anthropic profile Claude-only with no OpenCode or Codex fallback", () => {
   expect(
-    ["gpt-6.1-sol", "google/gemma-4-31b-it", "anthropic/claude-opus-5-5", "claude-opus-5-5*"].map(
-      (id) => outcome(route(id, "anthropic-direct-messages")),
+    ["gpt-6.1-sol", "google/gemma-4-31b-it", "claude-opus-5-5*"].map((id) =>
+      outcome(route(id, "anthropic-direct-messages")),
     ),
-  ).toEqual(Array(4).fill("unroutable:claude-direct-only"));
+  ).toEqual(Array(3).fill("unroutable:claude-direct-only"));
 });
 
 it("never maps GPT-OSS to Codex because of its gpt- prefix", () => {
@@ -112,7 +109,16 @@ it("passes the display name and catalog metadata through unchanged", () => {
 });
 
 it("rejects non-chat, generic wildcard, and empty IDs on every route", () => {
-  const nonChatIds = ["text-embedding-3-large", "gpt-image-1.5", "a2a/assistant", "openai/*", "*"];
+  const nonChatIds = [
+    "text-embedding-3-large",
+    "gpt-image-1.5",
+    "gpt-realtime",
+    "gpt-4o-mini-tts",
+    "gpt-4o-transcribe",
+    "a2a/assistant",
+    "openai/*",
+    "*",
+  ];
   expect(
     new Set(
       CHAT_ROUTES.flatMap((routeKind) => nonChatIds.map((id) => outcome(route(id, routeKind)))),

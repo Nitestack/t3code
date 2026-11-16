@@ -105,6 +105,22 @@ describe("routeAixModels", () => {
     expect(routes.has(CLAUDE_CODE)).toBe(false);
   });
 
+  it("routes gateway Claude and GPT models to their native agent, prefixed or not", () => {
+    const routes = routeAixModels("litellm", [
+      { id: "claude-sonnet-5-5", displayName: "Claude Sonnet 5.5" },
+      { id: "anthropic/claude-haiku-5-5", displayName: "Claude Haiku 5.5" },
+      { id: "openai/gpt-6-luna", displayName: "GPT-6 Luna" },
+      { id: "openai/gpt-oss-120b", displayName: "GPT-OSS 120B" },
+    ]);
+
+    expect(routes.get(CLAUDE_CODE)?.map((model) => model.id)).toEqual([
+      "claude-sonnet-5-5",
+      "anthropic/claude-haiku-5-5",
+    ]);
+    expect(routes.get(CODEX)?.map((model) => model.id)).toEqual(["openai/gpt-6-luna"]);
+    expect(routes.get(OPENCODE)?.map((model) => model.id)).toEqual(["openai/gpt-oss-120b"]);
+  });
+
   it("never routes non-chat models to OpenCode", () => {
     const routes = routeAixModels("litellm", [
       { id: "text-embedding-3-large", displayName: "Text Embedding 3 Large" },
