@@ -28,9 +28,8 @@ gateway does not report show as Unknown. The model ID sent to the gateway is the
 Only models that can run are offered:
 
 - A direct Anthropic API profile offers Claude models only.
-- Native Codex and Claude Code are used only for model and endpoint combinations that were verified
-  with a real tool-using turn. Today that is `gpt-6.1-sol` on a LiteLLM Responses route for Codex and
-  `claude-opus-5-5` on the Anthropic API for Claude Code.
+- Claude models run in Claude Code, from a LiteLLM gateway or the Anthropic API.
+- GPT models from a LiteLLM gateway run in Codex. Open-weight `gpt-oss` models run in OpenCode.
 - Other chat models from a LiteLLM gateway run in OpenCode, which T3 configures for that profile. You
   do not need to install a provider login or write an OpenCode config for it.
 - Embedding, image, and generic wildcard routes are not listed.

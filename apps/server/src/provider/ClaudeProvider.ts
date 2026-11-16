@@ -96,7 +96,7 @@ function claudeProviderModels(
     model.isCustom ? { ...model, capabilities: withUltracodeToggle(model.capabilities) } : model,
   );
   if (!aixManaged) return models;
-  // An aix instance routes only through verified pairs, so built-ins it never verified are hidden.
+  // An aix instance offers only what its gateway catalog lists, so built-ins are hidden.
   const synced = new Set(readCustomModelEntries(customModels).map((entry) => entry.slug));
   return models.filter((model) => synced.has(model.slug));
 }

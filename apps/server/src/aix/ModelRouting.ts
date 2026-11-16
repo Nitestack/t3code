@@ -9,16 +9,12 @@ export type AixModelRoute =
   | "litellm-openai-responses"
   | "litellm-openai-chat";
 
-/** `exact-live` and `limited-live` come from recorded T01 turns; everything else is unvalidated. */
-export type AixRouteEvidence = "exact-live" | "limited-live" | "unvalidated";
-
 export type AixUnroutableReason =
   | "invalid-model-id"
   | "non-chat-model"
   | "route-unknown"
   | "claude-direct-only"
-  | "no-verified-agent"
-  | "reasoning-override-unverified";
+  | "no-native-agent";
 
 export type AixModelRouting =
   | {
@@ -27,7 +23,6 @@ export type AixModelRouting =
       readonly modelId: string;
       readonly displayName: string;
       readonly metadata: Omit<CatalogModel, "id" | "displayName">;
-      readonly evidence: AixRouteEvidence;
     }
   | {
       readonly kind: "unroutable";
@@ -40,36 +35,23 @@ const CODEX = ProviderDriverKind.make("codex");
 const CLAUDE_CODE = ProviderDriverKind.make("claudeAgent");
 const OPENCODE = ProviderDriverKind.make("opencode");
 
-const LIVE_EVIDENCE: ReadonlyArray<{
-  readonly id: string;
-  readonly route: AixModelRoute;
-  readonly evidence: AixRouteEvidence;
-}> = [
-  { id: "gpt-6.1-sol", route: "litellm-openai-responses", evidence: "exact-live" },
-  { id: "claude-opus-5-5", route: "anthropic-direct-messages", evidence: "exact-live" },
-  { id: "gpt-oss-120b", route: "litellm-openai-chat", evidence: "limited-live" },
-  { id: "google/gemma-4-31b-it", route: "litellm-openai-chat", evidence: "limited-live" },
-];
-
 type AgentChoice =
   | { readonly driverKind: ProviderDriverKind }
   | { readonly reason: AixUnroutableReason };
 
-function agentFor(id: string, routeKind: AixModelRoute, reasoningOverride: boolean): AgentChoice {
-  const claudeFamily = id.startsWith("claude-");
+function agentFor(id: string, routeKind: AixModelRoute): AgentChoice {
+  const concrete = !id.includes("*");
+  const claude = concrete && id.startsWith("claude-");
   switch (routeKind) {
     case "anthropic-direct-messages":
-      if (!claudeFamily || id.includes("*")) return { reason: "claude-direct-only" };
-      return id === "claude-opus-5-5"
-        ? { driverKind: CLAUDE_CODE }
-        : { reason: "no-verified-agent" };
+      return claude ? { driverKind: CLAUDE_CODE } : { reason: "claude-direct-only" };
     case "litellm-anthropic-messages":
-      return { reason: "no-verified-agent" };
+      return claude ? { driverKind: CLAUDE_CODE } : { reason: "no-native-agent" };
     case "litellm-openai-responses":
-      if (id !== "gpt-6.1-sol") return { reason: "no-verified-agent" };
-      return reasoningOverride
-        ? { reason: "reasoning-override-unverified" }
-        : { driverKind: CODEX };
+      // gpt-oss is an open-weight chat model, not a Responses API model.
+      return concrete && id.startsWith("gpt-") && !id.startsWith("gpt-oss")
+        ? { driverKind: CODEX }
+        : { reason: "no-native-agent" };
     case "litellm-openai-chat":
       return { driverKind: OPENCODE };
     default:
@@ -77,10 +59,10 @@ function agentFor(id: string, routeKind: AixModelRoute, reasoningOverride: boole
   }
 }
 
-/** Chooses a native agent only for a verified model/route pair; never retries or substitutes a model. */
+/** Chooses the native agent for a model's route; never retries or substitutes a model. */
 export function routeCatalogModel(
   model: CatalogModel,
-  input: { readonly route: AixModelRoute | undefined; readonly reasoningOverride?: boolean },
+  input: { readonly route: AixModelRoute | undefined },
 ): AixModelRouting {
   const { id, displayName, ...metadata } = model;
   const unroutable = (reason: AixUnroutableReason): AixModelRouting => ({
@@ -94,18 +76,14 @@ export function routeCatalogModel(
   if (knownNonChatId(id)) return unroutable("non-chat-model");
   if (input.route === undefined) return unroutable("route-unknown");
 
-  const agent = agentFor(id, input.route, input.reasoningOverride === true);
+  const agent = agentFor(id, input.route);
   if ("reason" in agent) return unroutable(agent.reason);
 
-  const evidence =
-    LIVE_EVIDENCE.find((entry) => entry.id === id && entry.route === input.route)?.evidence ??
-    "unvalidated";
   return {
     kind: "routed",
     driverKind: agent.driverKind,
     modelId: id,
     displayName,
     metadata,
-    evidence,
   };
 }

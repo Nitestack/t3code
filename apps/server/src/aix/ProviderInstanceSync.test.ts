@@ -86,7 +86,7 @@ const manualCodex = (): ProviderInstanceConfig => ({
 });
 
 describe("routeAixModels", () => {
-  it("routes verified GPT to Codex and every other chat model, gpt-oss included, to OpenCode", () => {
+  it("routes GPT to Codex and every other chat model, gpt-oss included, to OpenCode", () => {
     const routes = routeAixModels("litellm", [
       ...LITELLM_MODELS,
       { id: "qwen3-235b", displayName: "Qwen 3 235B" },
@@ -114,7 +114,7 @@ describe("routeAixModels", () => {
     expect(routes.has(CODEX)).toBe(false);
   });
 
-  it("allows only the verified native Claude model on a direct Anthropic endpoint", () => {
+  it("offers only Claude models, all in Claude Code, on a direct Anthropic endpoint", () => {
     const routes = routeAixModels("anthropic", [
       { id: "claude-opus-5-5", displayName: "Claude Opus 5.5" },
       { id: "claude-sonnet-5-5", displayName: "Claude Sonnet 5.5" },
@@ -122,7 +122,10 @@ describe("routeAixModels", () => {
     ]);
 
     expect([...routes.keys()]).toEqual([CLAUDE_CODE]);
-    expect(routes.get(CLAUDE_CODE)?.map((model) => model.id)).toEqual(["claude-opus-5-5"]);
+    expect(routes.get(CLAUDE_CODE)?.map((model) => model.id)).toEqual([
+      "claude-opus-5-5",
+      "claude-sonnet-5-5",
+    ]);
   });
 });
 

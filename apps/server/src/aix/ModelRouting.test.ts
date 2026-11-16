@@ -10,44 +10,35 @@ const CHAT_ROUTES = [
   "litellm-openai-chat",
 ] as const satisfies ReadonlyArray<ModelRouting.AixModelRoute>;
 
-const route = (
-  id: string,
-  routeKind: ModelRouting.AixModelRoute | undefined,
-  options: { readonly reasoningOverride?: boolean } = {},
-) => ModelRouting.routeCatalogModel({ id, displayName: id }, { route: routeKind, ...options });
+const route = (id: string, routeKind: ModelRouting.AixModelRoute | undefined) =>
+  ModelRouting.routeCatalogModel({ id, displayName: id }, { route: routeKind });
 
 const outcome = (result: ModelRouting.AixModelRouting) =>
-  result.kind === "routed"
-    ? `${result.driverKind}:${result.evidence}`
-    : `unroutable:${result.reason}`;
+  result.kind === "routed" ? result.driverKind : `unroutable:${result.reason}`;
 
-it("routes only the exact live-probed model and route pairs to their native agent", () => {
-  expect(outcome(route("gpt-6.1-sol", "litellm-openai-responses"))).toBe("codex:exact-live");
-  expect(outcome(route("claude-opus-5-5", "anthropic-direct-messages"))).toBe(
-    "claudeAgent:exact-live",
+it("routes every catalog Claude model to Claude Code and every GPT Responses model to Codex", () => {
+  expect(
+    [
+      route("claude-opus-5-5", "anthropic-direct-messages"),
+      route("claude-sonnet-5-5", "anthropic-direct-messages"),
+      route("claude-opus-5-5", "litellm-anthropic-messages"),
+      route("claude-haiku-5-5", "litellm-anthropic-messages"),
+    ].map(outcome),
+  ).toEqual(Array(4).fill("claudeAgent"));
+  expect(
+    ["gpt-6.1-sol", "gpt-6-luna", "gpt-6.1-sol-2026"].map((id) =>
+      outcome(route(id, "litellm-openai-responses")),
+    ),
+  ).toEqual(Array(3).fill("codex"));
+  expect(outcome(route("claude-opus-5-5*", "litellm-anthropic-messages"))).toBe(
+    "unroutable:no-native-agent",
   );
-  expect(outcome(route("gpt-oss-120b", "litellm-openai-chat"))).toBe("opencode:limited-live");
-  expect(outcome(route("google/gemma-4-31b-it", "litellm-openai-chat"))).toBe(
-    "opencode:limited-live",
+  expect(outcome(route("openai/gpt-6.1-sol", "litellm-openai-responses"))).toBe(
+    "unroutable:no-native-agent",
   );
 });
 
-it("rejects native Claude combinations outside the exact live-probed pair", () => {
-  expect(outcome(route("claude-sonnet-5-5", "anthropic-direct-messages"))).toBe(
-    "unroutable:no-verified-agent",
-  );
-  expect(outcome(route("claude-opus-5-5", "litellm-anthropic-messages"))).toBe(
-    "unroutable:no-verified-agent",
-  );
-  expect(outcome(route("claude-sonnet-5-5", "litellm-anthropic-messages"))).toBe(
-    "unroutable:no-verified-agent",
-  );
-  expect(outcome(route("claude-unknown", "anthropic-direct-messages"))).toBe(
-    "unroutable:no-verified-agent",
-  );
-});
-
-it("sends other chat models to OpenCode without claiming live validation", () => {
+it("sends other chat models to OpenCode", () => {
   const ids = [
     "tenant/Custom_Chat_Model",
     "gemini-3-pro",
@@ -58,7 +49,7 @@ it("sends other chat models to OpenCode without claiming live validation", () =>
     "claude-opus-5-5",
   ];
   expect(new Set(ids.map((id) => outcome(route(id, "litellm-openai-chat"))))).toEqual(
-    new Set(["opencode:unvalidated"]),
+    new Set(["opencode"]),
   );
 });
 
@@ -70,31 +61,12 @@ it("keeps the native Anthropic profile Claude-only with no OpenCode or Codex fal
   ).toEqual(Array(4).fill("unroutable:claude-direct-only"));
 });
 
-it("allows Codex only for the exact GPT-6.1 Sol Responses route without a reasoning override", () => {
-  expect(
-    outcome(route("gpt-6.1-sol", "litellm-openai-responses", { reasoningOverride: true })),
-  ).toBe("unroutable:reasoning-override-unverified");
-  expect(outcome(route("gpt-6.1-sol-2026", "litellm-openai-responses"))).toBe(
-    "unroutable:no-verified-agent",
-  );
-  expect(outcome(route("openai/gpt-6.1-sol", "litellm-openai-responses"))).toBe(
-    "unroutable:no-verified-agent",
-  );
-  expect(outcome(route("gpt-5", "litellm-openai-responses"))).toBe("unroutable:no-verified-agent");
-  expect(outcome(route("gpt-6.1-sol", "litellm-anthropic-messages"))).toBe(
-    "unroutable:no-verified-agent",
-  );
-  expect(outcome(route("gpt-6.1-sol", "litellm-openai-chat", { reasoningOverride: true }))).toBe(
-    "opencode:unvalidated",
-  );
-});
-
 it("never maps GPT-OSS to Codex because of its gpt- prefix", () => {
   expect(outcome(route("gpt-oss-120b", "litellm-openai-responses"))).toBe(
-    "unroutable:no-verified-agent",
+    "unroutable:no-native-agent",
   );
   expect(outcome(route("gpt-oss-120b", "litellm-anthropic-messages"))).toBe(
-    "unroutable:no-verified-agent",
+    "unroutable:no-native-agent",
   );
   expect(outcome(route("gpt-oss-120b", "anthropic-direct-messages"))).toBe(
     "unroutable:claude-direct-only",
@@ -111,7 +83,7 @@ it("ignores display and family metadata when choosing a driver", () => {
     { route: "anthropic-direct-messages" },
   );
 
-  expect(outcome(mislabeledGptOss)).toBe("unroutable:no-verified-agent");
+  expect(outcome(mislabeledGptOss)).toBe("unroutable:no-native-agent");
   expect(outcome(gptOnDirectAnthropic)).toBe("unroutable:claude-direct-only");
 });
 
@@ -136,7 +108,6 @@ it("passes the display name and catalog metadata through unchanged", () => {
       contextTokens: 128_000,
       pricing: { inputPerMillionTokens: 2 },
     },
-    evidence: "exact-live",
   });
 });
 

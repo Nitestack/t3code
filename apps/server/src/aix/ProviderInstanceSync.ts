@@ -73,7 +73,7 @@ const routeFor = (source: AixRouteSource, modelId: string): AixModelRoute => {
   return "litellm-openai-chat";
 };
 
-/** Routes each model only through a verified pair; an unverified pair is dropped, never substituted. */
+/** Routes each model to its native agent; a model without one is dropped, never substituted. */
 export function routeAixModels(
   source: AixRouteSource,
   models: ReadonlyArray<CatalogModel>,
