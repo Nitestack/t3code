@@ -18,6 +18,7 @@ import {
   limitsNotice,
   paceOf,
   paceRemainingPercent,
+  remainingLabel,
   remainingPercent,
 } from "@t3tools/shared/usageLimits";
 import { type ReactNode, useContext, useRef, useState } from "react";
@@ -92,7 +93,7 @@ function WindowRow(props: {
       <View className="flex-row items-baseline justify-between gap-3">
         <Text className="text-sm text-foreground">{label}</Text>
         <Text className="text-sm font-t3-medium tabular-nums text-foreground">
-          {remaining}% left
+          {remainingLabel(window)}
         </Text>
       </View>
       <View

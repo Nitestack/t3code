@@ -11,11 +11,14 @@ import {
   type LimitPace,
   limitsNotice,
   paceOf,
+  budgetLeftUsd,
   remainingPercent,
+  remainingLabel,
 } from "@t3tools/shared/usageLimits";
 import type { ReactNode } from "react";
 
 import { usePrimarySettings } from "../../hooks/useSettings";
+import { formatUsd } from "@t3tools/shared/usageFormat";
 import { useNowMinute } from "../../hooks/useNowMinute";
 import type { ContextWindowSnapshot } from "@t3tools/client-runtime/state/context-window";
 import { formatContextWindowTokens } from "../../lib/contextWindow";
@@ -148,6 +151,7 @@ function LimitRow({
 }) {
   const timestampFormat = usePrimarySettings((settings) => settings.timestampFormat);
   const left = remainingPercent(window);
+  const leftUsd = budgetLeftUsd(window);
   const pace = paceOf(window, now);
   const resetsAt = window.resetsAt ? Date.parse(window.resetsAt) : Number.NaN;
   const profileName = aixProfileNameFromWindowId(window.id);
@@ -157,12 +161,12 @@ function LimitRow({
       label={label}
       fill={left}
       tone={left <= 10 ? "error" : left <= 20 ? "warning" : null}
-      value={`${left}%`}
-      ariaValue={`${left}% left`}
+      value={leftUsd === undefined ? `${left}%` : formatUsd(leftUsd)}
+      ariaValue={remainingLabel(window)}
       tooltip={
         <>
           <span className="text-foreground">
-            {label}: {left}% left
+            {label}: {remainingLabel(window)}
           </span>
           {window.resetsAt && resetsAt > now ? (
             <span className="text-muted-foreground">

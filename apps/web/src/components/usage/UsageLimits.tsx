@@ -23,6 +23,7 @@ import {
   paceOf,
   paceRemainingPercent,
   remainingPercent,
+  remainingLabel,
   type ResetCreditChoice,
   resetCreditChoices,
 } from "@t3tools/shared/usageLimits";
@@ -259,7 +260,7 @@ export function LimitWindows({
             <span className="flex min-w-0 items-center gap-2 text-xs">
               <span className="truncate text-muted-foreground">{window.label}</span>
               <span className="ms-auto shrink-0 font-medium text-foreground tabular-nums">
-                {remainingPercent(window)}% left
+                {remainingLabel(window)}
               </span>
             </span>
             <WindowBar color={color} window={window} now={now} />

@@ -15,10 +15,13 @@ import {
   remainingPercent,
   type ResetCreditChoice,
   resetCreditChoices,
+  budgetLeftUsd,
+  profilesOnSeveralEnvironments,
 } from "@t3tools/shared/usageLimits";
 import type { Popover as PopoverPrimitive } from "@base-ui/react/popover";
 import { normalizeProviderAccentColor } from "@t3tools/client-runtime/state/provider-instance-display";
 import { aixProfileLabel } from "@t3tools/client-runtime/provider-picker-hierarchy";
+import { formatUsd } from "@t3tools/shared/usageFormat";
 import { AlertTriangleIcon, ExternalLinkIcon, TicketIcon } from "lucide-react";
 import {
   createContext,
@@ -558,21 +561,38 @@ function PoolWindowCard({
   readonly description?: string | undefined;
 }) {
   const nextRefill = pool.resets.find((reset) => reset.restoresPercent > 0);
+  const budgetWindow = pool.members.length === 1 ? pool.members[0]?.window : undefined;
+  const amounts = budgetWindow?.amounts;
+  const leftUsd = budgetWindow ? budgetLeftUsd(budgetWindow) : undefined;
   return (
     <div className="grid items-center gap-x-6 gap-y-3 rounded-lg border border-border/60 p-4 md:grid-cols-[11rem_minmax(0,1fr)]">
       <div className="flex flex-col gap-1">
         {label !== null ? (
           <span className="text-sm font-medium text-foreground">{label ?? pool.label}</span>
         ) : null}
-        <span className="flex items-baseline gap-2">
-          <span className="text-3xl font-semibold text-foreground tabular-nums">
-            {pool.remainingPercent}%
+        {amounts && leftUsd !== undefined ? (
+          <>
+            <span className="flex items-baseline gap-2">
+              <span className="text-3xl font-semibold text-foreground tabular-nums">
+                {formatUsd(leftUsd)}
+              </span>
+              <span className="text-sm text-muted-foreground">left</span>
+            </span>
+            <span className="text-xs text-muted-foreground tabular-nums">
+              {formatUsd(amounts.spent)} of {formatUsd(amounts.total)} spent
+            </span>
+          </>
+        ) : (
+          <span className="flex items-baseline gap-2">
+            <span className="text-3xl font-semibold text-foreground tabular-nums">
+              {pool.remainingPercent}%
+            </span>
+            <span className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+              <span>left</span>
+              {pool.pace ? <PaceIcon pace={pool.pace} /> : null}
+            </span>
           </span>
-          <span className="inline-flex items-center gap-2 text-sm text-muted-foreground">
-            <span>left</span>
-            {pool.pace ? <PaceIcon pace={pool.pace} /> : null}
-          </span>
-        </span>
+        )}
         {nextRefill && pool.columns.length > 1 ? (
           <span className="text-xs font-medium text-foreground tabular-nums">
             ↻ +{nextRefill.restoresPercent}%
@@ -591,10 +611,12 @@ function PoolSection({
   pool,
   now,
   aixProfileLabels,
+  showEnvironment,
 }: {
   readonly pool: LimitPool;
   readonly now: number;
   readonly aixProfileLabels: ReadonlyMap<string, string>;
+  readonly showEnvironment: boolean;
 }) {
   const color = pool.profileName ? "var(--foreground)" : barColor(pool.driver);
   const label = providerClients.get(pool.driver)?.label ?? String(pool.driver);
@@ -618,10 +640,8 @@ function PoolSection({
           </>
         )}
       </h2>
-      {pool.profileName ? (
-        <p className="-mt-2 text-xs text-muted-foreground">
-          Work profile{profileEnvironment ? ` · ${profileEnvironment}` : ""}
-        </p>
+      {pool.profileName && showEnvironment && profileEnvironment ? (
+        <p className="-mt-2 text-xs text-muted-foreground">{profileEnvironment}</p>
       ) : null}
       {windows.map((window) => {
         const details =
@@ -655,6 +675,7 @@ export function UsageLimitsPooled({
   const [segmentPopover] = useState(() => PopoverCreateHandle<SegmentPayload>());
   const segmentPopoverActions = useRef<PopoverPrimitive.Root.Actions | null>(null);
   const pools = collectLimitPools(collectLimitAccounts(presentations), now);
+  const repeatedProfiles = profilesOnSeveralEnvironments(pools);
   const notices = collectLimitNotices(presentations);
   const externalLinks = collectExternalUsageLinks(presentations);
   return (
@@ -667,7 +688,14 @@ export function UsageLimitsPooled({
           <Fragment
             key={pool.profileName ? (pool.accounts[0]?.key ?? pool.profileName) : pool.driver}
           >
-            <PoolSection pool={pool} now={now} aixProfileLabels={aixProfileLabels} />
+            <PoolSection
+              pool={pool}
+              now={now}
+              aixProfileLabels={aixProfileLabels}
+              showEnvironment={
+                pool.profileName !== undefined && repeatedProfiles.has(pool.profileName)
+              }
+            />
           </Fragment>
         ))}
       </SegmentPopoverContext>

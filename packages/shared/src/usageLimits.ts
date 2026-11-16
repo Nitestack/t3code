@@ -21,6 +21,7 @@ import {
 import * as DateTime from "effect/DateTime";
 
 import { isLocalLoopbackHost, isWildcardHost } from "./hostClassification.ts";
+import { formatUsd } from "./usageFormat.ts";
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -231,6 +232,11 @@ export function aixProfileNameFromWindowId(id: string): string | undefined {
   const credentialSpecific = /^aix-budget:(.*)#credential:[a-f0-9]{64}$/u.exec(id);
   if (credentialSpecific) return credentialSpecific[1];
   return /^aix-budget:(.+)$/u.exec(id)?.[1];
+}
+
+/** Dollars left in a budget window; undefined when the server reported only a percent. */
+export function budgetLeftUsd(window: ServerProviderUsageWindow): number | undefined {
+  return window.amounts ? Math.max(0, window.amounts.total - window.amounts.spent) : undefined;
 }
 
 function aixProfileName(limits: ServerProviderUsageLimits | undefined): string | undefined {
@@ -557,6 +563,17 @@ export interface LimitPool {
   readonly windows: readonly LimitPoolWindow[];
 }
 
+/** Profiles pooled on more than one environment, whose cards must name their environment. */
+export function profilesOnSeveralEnvironments(pools: readonly LimitPool[]): ReadonlySet<string> {
+  const seen = new Set<string>();
+  const repeated = new Set<string>();
+  for (const { profileName } of pools) {
+    if (profileName === undefined) continue;
+    (seen.has(profileName) ? repeated : seen).add(profileName);
+  }
+  return repeated;
+}
+
 function hasDuplicateCursorTotal(pool: LimitPool): boolean {
   if (pool.windows.length !== 2) return false;
   const total = pool.windows.find((window) => window.id === "totalPercentUsed");
@@ -816,6 +833,12 @@ export function limitsNotice(limits: ServerProviderUsageLimits): string | null {
 
 export function remainingPercent(window: ServerProviderUsageWindow): number {
   return Math.round(100 - Math.max(0, Math.min(100, window.usedPercent)));
+}
+
+/** "$26.10 left" for a budget the server priced, otherwise "17% left". */
+export function remainingLabel(window: ServerProviderUsageWindow): string {
+  const usd = budgetLeftUsd(window);
+  return usd === undefined ? `${remainingPercent(window)}% left` : `${formatUsd(usd)} left`;
 }
 
 function resetMillis(window: ServerProviderUsageWindow): number | null {
