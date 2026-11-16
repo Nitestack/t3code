@@ -999,13 +999,11 @@ export function ProviderInstanceCard({
   const rowLabels = providerSettingsRowLabels({
     driverLabel: driverOption?.label ?? String(instance.driver),
     displayName: instance.displayName,
+    isAix: aixProfile !== undefined,
     version: versionLabel,
     status: updateProgress
       ? `Updating · ${updateProgress}`
       : `${summary.headline}${needsAttention && inlineStatusDetail ? ` · ${inlineStatusDetail}` : ""}`,
-    accountSource: aixProfile
-      ? `aix ${liveProvider?.aixProfileLabel ?? instance.aixProfileLabel ?? aixProfile}`
-      : undefined,
   });
   const editorStatusNode =
     isAuthenticated && authEmail ? (

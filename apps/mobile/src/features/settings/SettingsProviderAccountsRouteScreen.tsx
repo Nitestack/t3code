@@ -319,13 +319,10 @@ function ProviderAccount({
   const rowLabels = providerSettingsRowLabels({
     driverLabel: PROVIDER_DISPLAY_NAMES[provider.driver] ?? String(provider.driver),
     displayName: provider.displayName,
+    isAix: provider.aixProfile !== undefined,
     version: provider.version,
     status: status ?? "Checking provider status",
-    accountSource: provider.aixProfile
-      ? `aix ${provider.aixProfileLabel ?? provider.aixProfile}`
-      : signedIn
-        ? (provider.auth.label ?? provider.auth.type)
-        : undefined,
+    accountSource: signedIn ? (provider.auth.label ?? provider.auth.type) : undefined,
   });
   const name = `${rowLabels.title}${rowLabels.version ? ` ${rowLabels.version}` : ""}`;
   // A provider with several sign-in methods picks one from a menu on the same control.

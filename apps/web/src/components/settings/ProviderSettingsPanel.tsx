@@ -819,7 +819,6 @@ export function EnvironmentProviderSettings({
     }),
     scope: providerViewScope,
     profileId: providerProfileId,
-    selectedInstanceId: selectedInstanceId ?? undefined,
   });
   const visibleRows = settingsHierarchy.visibleEntries.map((entry) =>
     rows.find((row) => row.instanceId === entry.instanceId)!,
@@ -830,8 +829,8 @@ export function EnvironmentProviderSettings({
     selectedInstanceId === targetInstanceId &&
     !rows.some((row) => row.instanceId === targetInstanceId);
   const selectedRow =
-    rows.find((row) => row.instanceId === selectedInstanceId) ??
-    (targetInstanceMissing ? null : (rows[0] ?? null));
+    visibleRows.find((row) => row.instanceId === selectedInstanceId) ??
+    (targetInstanceMissing ? null : (visibleRows[0] ?? null));
 
   const persistInstance = async (
     instanceId: ProviderInstanceId,
@@ -1283,7 +1282,11 @@ export function EnvironmentProviderSettings({
           environmentId={environmentId}
           environmentLabel={environmentLabel}
           onOpenChange={setIsAddInstanceDialogOpen}
-          onCreated={setSelectedInstanceId}
+          onCreated={(instanceId) => {
+            // Added instances are never aix-managed, so they live in the Personal view.
+            setSelectedInstanceId(instanceId);
+            setProviderViewScope("personal");
+          }}
         />
       ) : null}
     </>

@@ -51,38 +51,12 @@ describe("provider settings hierarchy", () => {
     ]);
   });
 
-  it("keeps a selected instance visible when it is outside the current scope or profile", () => {
-    const selectedWork = resolveProviderSettingsHierarchy({
-      entries,
-      scope: "personal",
-      selectedInstanceId: ProviderInstanceId.make("aix-codex-nimbl"),
-    });
-    expect(selectedWork.scope).toBe("personal");
-    expect(selectedWork.visibleEntries.map((item) => item.instanceId)).toEqual([
-      "codex",
-      "aix-codex-nimbl",
-    ]);
-    const selectedPersonal = resolveProviderSettingsHierarchy({
-      entries,
-      scope: "work",
-      profileId: "adcare",
-      selectedInstanceId: ProviderInstanceId.make("codex"),
-    });
-    expect(selectedPersonal.scope).toBe("work");
-    expect(selectedPersonal.visibleEntries.map((item) => item.instanceId)).toEqual([
+  it("falls back to the first profile when the requested one is gone", () => {
+    const work = resolveProviderSettingsHierarchy({ entries, scope: "work", profileId: "ae" });
+    expect(work.profileId).toBe("adcare");
+    expect(work.visibleEntries.map((item) => item.instanceId)).toEqual([
       "aix-codex-adcare",
       "aix-opencode-adcare",
-      "codex",
-    ]);
-    const selectedOtherProfile = resolveProviderSettingsHierarchy({
-      entries,
-      scope: "work",
-      profileId: "adcare",
-      selectedInstanceId: ProviderInstanceId.make("aix-codex-nimbl"),
-    });
-    expect(selectedOtherProfile.profileId).toBe("nimbl");
-    expect(selectedOtherProfile.visibleEntries.map((item) => item.instanceId)).toEqual([
-      "aix-codex-nimbl",
     ]);
   });
 
@@ -99,9 +73,17 @@ describe("provider settings hierarchy", () => {
         displayName: "  My Codex  ",
         version: "0.2.1",
         status: "Available",
-        accountSource: "aix adCare",
+        accountSource: "API key",
       }),
-    ).toEqual({ title: "My Codex", version: "0.2.1", detail: "Available · aix adCare" });
+    ).toEqual({ title: "My Codex", version: "0.2.1", detail: "Available · API key" });
+    expect(
+      providerSettingsRowLabels({
+        driverLabel: "Codex",
+        displayName: "adCare · Codex",
+        isAix: true,
+        status: "Available",
+      }).title,
+    ).toBe("Codex");
     expect(
       providerSettingsRowLabels({
         driverLabel: "Claude Code",
