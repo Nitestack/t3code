@@ -75,6 +75,9 @@ export type ResolvedProviderInstanceEnvironment = ReadonlyArray<
 export const ProviderInstanceConfig = Schema.Struct({
   driver: ProviderDriverKind,
   displayName: Schema.optional(TrimmedNonEmptyString),
+  /** Typed ownership metadata for provider instances managed from aix profiles. */
+  aixProfile: Schema.optional(TrimmedNonEmptyString),
+  aixProfileLabel: Schema.optional(TrimmedNonEmptyString),
   accentColor: Schema.optional(TrimmedNonEmptyString),
   environment: Schema.optionalKey(ProviderInstanceEnvironment),
   enabled: Schema.optionalKey(Schema.Boolean),

@@ -30,6 +30,8 @@ export interface ProviderInstanceEntry {
   readonly instanceId: ProviderInstanceId;
   readonly driverKind: ProviderDriverKind;
   readonly displayName: string;
+  readonly aixProfile?: string | undefined;
+  readonly aixProfileLabel?: string | undefined;
   readonly accentColor?: string | undefined;
   readonly acpRegistryAgentId?: string | undefined;
   readonly acpRegistryIconUrl?: string | undefined;
@@ -69,6 +71,8 @@ export function deriveProviderInstanceEntries(
       instanceId,
       driverKind,
       displayName: resolveProviderInstanceDisplayName(snapshot),
+      ...(snapshot.aixProfile ? { aixProfile: snapshot.aixProfile } : {}),
+      ...(snapshot.aixProfileLabel ? { aixProfileLabel: snapshot.aixProfileLabel } : {}),
       accentColor: normalizeProviderAccentColor(snapshot.accentColor),
       ...(driverKind === "acpRegistry" && snapshot.iconUrl
         ? { acpRegistryIconUrl: snapshot.iconUrl }

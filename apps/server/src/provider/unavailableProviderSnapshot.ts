@@ -13,6 +13,8 @@ export interface UnavailableProviderSnapshotInput {
   readonly instanceId: ProviderInstanceId;
   readonly displayName?: string | undefined;
   readonly accentColor?: string | undefined;
+  readonly aixProfile?: string | undefined;
+  readonly aixProfileLabel?: string | undefined;
   readonly reason: string;
   readonly checkedAt?: string;
 }
@@ -45,6 +47,8 @@ export const buildUnavailableProviderSnapshot = Effect.fn(
     ...base,
     instanceId: input.instanceId,
     ...(input.accentColor ? { accentColor: input.accentColor } : {}),
+    ...(input.aixProfile ? { aixProfile: input.aixProfile } : {}),
+    ...(input.aixProfileLabel ? { aixProfileLabel: input.aixProfileLabel } : {}),
     driver:
       typeof input.driverKind === "string"
         ? ProviderDriverKind.make(input.driverKind)

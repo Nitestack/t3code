@@ -23,6 +23,78 @@ import {
 } from "./modelOptions";
 
 describe("mobile model options", () => {
+  it("keeps aix profile metadata and model selections bound to their provider instances", () => {
+    const providers = [
+      { instanceId: "codex", driver: "codex", slug: "gpt-personal" },
+      {
+        instanceId: "aix-codex-ac",
+        driver: "codex",
+        slug: "gpt-work",
+        aixProfile: "ac",
+        aixProfileLabel: "adCare",
+      },
+      {
+        instanceId: "aix-opencode-ac",
+        driver: "opencode",
+        slug: "google/gemma-work",
+        aixProfile: "ac",
+        aixProfileLabel: "adCare",
+      },
+      {
+        instanceId: "aix-codex-personal",
+        driver: "codex",
+        slug: "gpt-aix-personal",
+        aixProfile: "personal",
+        aixProfileLabel: "Persönlich",
+      },
+    ].map((provider) => ({
+      ...provider,
+      enabled: true,
+      installed: true,
+      auth: { status: "authenticated" as const },
+      models: [{ slug: provider.slug, name: provider.slug, isCustom: true, capabilities: null }],
+    }));
+    const options = buildModelOptions(
+      { providers } as unknown as ServerConfig,
+      null,
+      undefined,
+      null,
+    );
+
+    expect(
+      options.map(({ providerLabel, aixProfile, aixProfileLabel, selection }) => ({
+        providerLabel,
+        aixProfile,
+        aixProfileLabel,
+        instanceId: selection.instanceId,
+        model: selection.model,
+      })),
+    ).toEqual([
+      { providerLabel: "Codex", instanceId: "codex", model: "gpt-personal" },
+      {
+        providerLabel: "Codex",
+        aixProfile: "ac",
+        aixProfileLabel: "adCare",
+        instanceId: "aix-codex-ac",
+        model: "gpt-work",
+      },
+      {
+        providerLabel: "OpenCode",
+        aixProfile: "ac",
+        aixProfileLabel: "adCare",
+        instanceId: "aix-opencode-ac",
+        model: "google/gemma-work",
+      },
+      {
+        providerLabel: "Codex",
+        aixProfile: "personal",
+        aixProfileLabel: "Persönlich",
+        instanceId: "aix-codex-personal",
+        model: "gpt-aix-personal",
+      },
+    ]);
+  });
+
   it("offers custom model ids from multiple standard-driver instances without rewriting them", () => {
     const providers = [
       {

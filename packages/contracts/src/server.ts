@@ -224,6 +224,9 @@ export const ServerProvider = Schema.Struct({
   // Only instanceId is stable enough for provider routing.
   instanceId: ProviderInstanceId,
   driver: ProviderDriverKind,
+  /** Set for provider instances synchronized from an aix profile. */
+  aixProfile: Schema.optional(TrimmedNonEmptyString),
+  aixProfileLabel: Schema.optional(TrimmedNonEmptyString),
   displayName: Schema.optional(TrimmedNonEmptyString),
   accentColor: Schema.optional(TrimmedNonEmptyString),
   // Validate driver-supplied remote icons against the driver's trusted origin.

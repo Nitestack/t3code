@@ -201,6 +201,12 @@ const isEntryEnabled = Effect.fn("ProviderInstanceRegistry.isEntryEnabled")(func
   return Option.isSome(decoded) && resolveEntryEnabled(entry, decoded.value);
 });
 
+const aixProfileFromConfig = (config: unknown): string | undefined => {
+  if (config === null || typeof config !== "object" || Array.isArray(config)) return undefined;
+  const profile = (config as { readonly aixProfile?: unknown }).aixProfile;
+  return typeof profile === "string" && profile.trim() ? profile.trim() : undefined;
+};
+
 const buildEntry = Effect.fn("ProviderInstanceRegistry.buildEntry")(function* <R>(input: {
   readonly driversById: ReadonlyMap<ProviderDriverKind, AnyProviderDriver<R>>;
   readonly blockedReason: BlockedReason;
@@ -229,6 +235,12 @@ const buildEntry = Effect.fn("ProviderInstanceRegistry.buildEntry")(function* <R
     deferSecrets,
     carriedSecrets,
   } = input;
+  const aixProfile = entry.aixProfile ?? aixProfileFromConfig(entry.config);
+  const aixProfileLabel = entry.aixProfileLabel ?? aixProfile;
+  const aixMetadata = {
+    ...(aixProfile ? { aixProfile } : {}),
+    ...(aixProfileLabel ? { aixProfileLabel } : {}),
+  };
   const blocked = input.blockedReason(entry.driver);
   if (blocked !== undefined) {
     return {
@@ -238,6 +250,7 @@ const buildEntry = Effect.fn("ProviderInstanceRegistry.buildEntry")(function* <R
         instanceId,
         displayName: entry.displayName,
         accentColor: entry.accentColor,
+        ...aixMetadata,
         reason: blocked,
       }),
     };
@@ -251,6 +264,7 @@ const buildEntry = Effect.fn("ProviderInstanceRegistry.buildEntry")(function* <R
         instanceId,
         displayName: entry.displayName,
         accentColor: entry.accentColor,
+        ...aixMetadata,
         reason: `Driver '${entry.driver}' is not registered in this build.`,
       }),
     };
@@ -273,6 +287,7 @@ const buildEntry = Effect.fn("ProviderInstanceRegistry.buildEntry")(function* <R
         instanceId,
         displayName: entry.displayName,
         accentColor: entry.accentColor,
+        ...aixMetadata,
         reason: `Invalid config for instance '${rawInstanceId}': ${detail}`,
       }),
     };
@@ -288,6 +303,7 @@ const buildEntry = Effect.fn("ProviderInstanceRegistry.buildEntry")(function* <R
         instanceId,
         displayName: entry.displayName,
         accentColor: entry.accentColor,
+        ...aixMetadata,
         reason: "Reading secrets…",
       }),
     };
@@ -311,6 +327,7 @@ const buildEntry = Effect.fn("ProviderInstanceRegistry.buildEntry")(function* <R
         instanceId,
         displayName: entry.displayName,
         accentColor: entry.accentColor,
+        ...aixMetadata,
         reason: `Could not read ${unreadable.join(", ")} from its secret provider. Unlock it, then refresh.`,
       }),
     };
@@ -345,6 +362,7 @@ const buildEntry = Effect.fn("ProviderInstanceRegistry.buildEntry")(function* <R
         instanceId,
         displayName: entry.displayName,
         accentColor: entry.accentColor,
+        ...aixMetadata,
         reason: `Driver '${entry.driver}' failed to create instance: ${createResult.failure.detail}`,
       }),
     };
@@ -353,7 +371,7 @@ const buildEntry = Effect.fn("ProviderInstanceRegistry.buildEntry")(function* <R
   return {
     kind: "live" as const,
     live: {
-      instance: createResult.success,
+      instance: { ...createResult.success, ...aixMetadata },
       scope: childScope,
       entry,
       secrets,

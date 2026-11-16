@@ -145,6 +145,24 @@ const EMPTY_MODEL_FAVORITES: ReadonlyArray<{
   readonly model: string;
 }> = [];
 const FAVORITES_PROVIDER_FILTER = "@favorites";
+const SUBSCRIPTIONS_PROVIDER_FILTER = "@subscriptions";
+const AIX_PROFILE_FILTER_PREFIX = "@aix-profile:";
+const AIX_HARNESS_FILTER_PREFIX = "@aix-harness:";
+
+function aixProfileFromPickerFilter(filter: string | null): string | undefined {
+  if (filter?.startsWith(AIX_PROFILE_FILTER_PREFIX)) {
+    return filter.slice(AIX_PROFILE_FILTER_PREFIX.length);
+  }
+  if (filter?.startsWith(AIX_HARNESS_FILTER_PREFIX)) {
+    return filter.slice(AIX_HARNESS_FILTER_PREFIX.length).split(":", 1)[0];
+  }
+  return undefined;
+}
+
+function aixHarnessFromPickerFilter(filter: string | null): string | undefined {
+  if (!filter?.startsWith(AIX_HARNESS_FILTER_PREFIX)) return undefined;
+  return filter.slice(AIX_HARNESS_FILTER_PREFIX.length).split(":")[1];
+}
 // Servers that predate `migrateModelPreferences` drop it and keep reporting null favorites.
 const attemptedMigrationGenerations = new Map<EnvironmentId, number>();
 function ProviderHeader(props: {
@@ -480,7 +498,20 @@ function ThreadSettingsSessionProvider(
     });
   };
   const [showLegacyToggle, setShowLegacyToggle] = useState(false);
-  const [providerFilter, setProviderFilter] = useState<string | null>(null);
+  const [providerFilter, setProviderFilter] = useState<string | null>(() => {
+    const selectedInstanceId = props.selectedModel?.instanceId ?? props.providerInstanceId;
+    const selectedAixProfile = selectedInstanceId
+      ? props.providerGroups
+          .flatMap((group) => group.models)
+          .find((model) => model.selection.instanceId === selectedInstanceId)?.aixProfile
+      : undefined;
+    const hasAixProfiles = props.providerGroups.some((group) => group.models[0]?.aixProfile);
+    return selectedAixProfile
+      ? `${AIX_PROFILE_FILTER_PREFIX}${selectedAixProfile}`
+      : hasAixProfiles
+        ? SUBSCRIPTIONS_PROVIDER_FILTER
+        : null;
+  });
   const [searchQuery, setSearchQuery] = useState("");
   const [providerExpansionOverrides, setProviderExpansionOverrides] = useState<ReadonlySet<string>>(
     () => new Set(),
@@ -601,8 +632,13 @@ function ThreadSettingsSessionProvider(
 
   const environmentId = props.environmentId;
   // Like the web picker's open tab: scanning every provider would spawn a probe per provider.
-  const scannedInstanceId =
-    providerFilter !== null && providerFilter !== FAVORITES_PROVIDER_FILTER
+  const scannedInstanceId = aixHarnessFromPickerFilter(providerFilter)
+    ? ProviderInstanceId.make(aixHarnessFromPickerFilter(providerFilter)!)
+    : providerFilter !== null &&
+        providerFilter !== FAVORITES_PROVIDER_FILTER &&
+        providerFilter !== SUBSCRIPTIONS_PROVIDER_FILTER &&
+        !providerFilter.startsWith(AIX_PROFILE_FILTER_PREFIX) &&
+        !providerFilter.startsWith(AIX_HARNESS_FILTER_PREFIX)
       ? ProviderInstanceId.make(providerFilter)
       : props.providerInstanceId;
   const workspaceScan =
@@ -766,13 +802,27 @@ function buildThreadSettingsCatalogItems(
   session: ThreadSettingsSessionValue,
 ): ReadonlyArray<ThreadSettingsCatalogItem> {
   return session.providerGroups.flatMap((group) => {
+    const aixProfileFilter = aixProfileFromPickerFilter(session.providerFilter);
+    const aixHarnessFilter = aixHarnessFromPickerFilter(session.providerFilter);
     if (
       session.providerFilter !== null &&
       session.providerFilter !== FAVORITES_PROVIDER_FILTER &&
+      session.providerFilter !== SUBSCRIPTIONS_PROVIDER_FILTER &&
+      aixProfileFilter === undefined &&
       group.providerKey !== session.providerFilter
     ) {
       return [];
     }
+    if (
+      session.providerFilter === SUBSCRIPTIONS_PROVIDER_FILTER &&
+      group.models[0]?.aixProfile !== undefined
+    ) {
+      return [];
+    }
+    if (aixProfileFilter !== undefined && group.models[0]?.aixProfile !== aixProfileFilter) {
+      return [];
+    }
+    if (aixHarnessFilter !== undefined && group.providerKey !== aixHarnessFilter) return [];
     const driver = group.models[0]?.providerDriver ?? group.providerKey;
     const catalogModels =
       session.manageHidden ||
@@ -1219,6 +1269,26 @@ function ThreadSettingsModelsScreen() {
     compactToolbar: true,
   };
   const searchToolbarInset = useSearchToolbarInset(search);
+  const aixProfileFilter = aixProfileFromPickerFilter(session.providerFilter);
+  const aixHarnessFilter = aixHarnessFromPickerFilter(session.providerFilter);
+  const visibleProviderGroups = aixProfileFilter
+    ? session.providerGroups.filter((group) => group.models[0]?.aixProfile === aixProfileFilter)
+    : session.providerGroups.filter((group) => group.models[0]?.aixProfile === undefined);
+  const aixProfiles = [
+    ...new Map(
+      session.providerGroups.flatMap((group) =>
+        group.models[0]?.aixProfile
+          ? [
+              [
+                group.models[0].aixProfile,
+                group.models[0].aixProfileLabel ?? group.models[0].aixProfile,
+              ] as const,
+            ]
+          : [],
+      ),
+    ),
+  ];
+  const hasAixProfiles = aixProfiles.length > 0;
   const providerFilters = [
     { id: "all-providers", title: "All providers", value: null },
     { id: "favorites", title: "Favorites", value: FAVORITES_PROVIDER_FILTER },
@@ -1228,6 +1298,60 @@ function ThreadSettingsModelsScreen() {
       value: group.providerKey,
     })),
   ];
+  const modelFilterItems = hasAixProfiles
+    ? [
+        {
+          id: "favorites",
+          title: "Favorites",
+          selected: session.providerFilter === FAVORITES_PROVIDER_FILTER,
+          onPress: () => session.setProviderFilter(FAVORITES_PROVIDER_FILTER),
+        },
+        {
+          id: "scope",
+          title: "Scope",
+          items: [
+            {
+              id: "subscriptions",
+              title: "Subscriptions · Personal",
+              selected: session.providerFilter === SUBSCRIPTIONS_PROVIDER_FILTER,
+              onPress: () => session.setProviderFilter(SUBSCRIPTIONS_PROVIDER_FILTER),
+            },
+            {
+              id: "aix",
+              title: "aix · Work",
+              items: aixProfiles.map(([profile, label]) => ({
+                id: `aix-profile:${profile}`,
+                title: label,
+                selected: aixProfileFilter === profile,
+                onPress: () => session.setProviderFilter(`${AIX_PROFILE_FILTER_PREFIX}${profile}`),
+              })),
+            },
+          ],
+        },
+        {
+          id: "harness",
+          title: "Harness",
+          items: visibleProviderGroups.map((group) => ({
+            id: `provider:${group.providerKey}`,
+            title: group.providerLabel,
+            selected:
+              session.providerFilter === group.providerKey ||
+              aixHarnessFilter === group.providerKey,
+            onPress: () =>
+              session.setProviderFilter(
+                aixProfileFilter
+                  ? `${AIX_HARNESS_FILTER_PREFIX}${aixProfileFilter}:${group.providerKey}`
+                  : group.providerKey,
+              ),
+          })),
+        },
+      ]
+    : providerFilters.map((filter) => ({
+        id: filter.id,
+        title: filter.title,
+        selected: session.providerFilter === filter.value,
+        onPress: () => session.setProviderFilter(filter.value),
+      }));
 
   return (
     <>
@@ -1243,16 +1367,9 @@ function ThreadSettingsModelsScreen() {
               ? "line.3.horizontal.decrease.circle.fill"
               : "line.3.horizontal.decrease",
             items: [
-              {
-                id: "provider",
-                title: "Provider",
-                items: providerFilters.map((filter) => ({
-                  id: filter.id,
-                  title: filter.title,
-                  selected: session.providerFilter === filter.value,
-                  onPress: () => session.setProviderFilter(filter.value),
-                })),
-              },
+              ...(hasAixProfiles
+                ? modelFilterItems
+                : [{ id: "provider", title: "Provider", items: modelFilterItems }]),
               ...(session.hasLegacyModels
                 ? [
                     {

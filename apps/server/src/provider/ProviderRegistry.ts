@@ -380,9 +380,21 @@ const snapshotInstanceKey = (provider: ServerProvider): ProviderInstanceId => {
 const buildSnapshotSource = (instance: ProviderInstance): ProviderSnapshotSource => ({
   instanceId: instance.instanceId,
   driverKind: instance.driverKind,
-  getSnapshot: instance.snapshot.getSnapshot,
+  getSnapshot: instance.snapshot.getSnapshot.pipe(
+    Effect.map((provider) => ({
+      ...provider,
+      ...(instance.aixProfile ? { aixProfile: instance.aixProfile } : {}),
+      ...(instance.aixProfileLabel ? { aixProfileLabel: instance.aixProfileLabel } : {}),
+    })),
+  ),
   refresh: instance.snapshot.refresh,
-  streamChanges: instance.snapshot.streamChanges,
+  streamChanges: instance.snapshot.streamChanges.pipe(
+    Stream.map((provider) => ({
+      ...provider,
+      ...(instance.aixProfile ? { aixProfile: instance.aixProfile } : {}),
+      ...(instance.aixProfileLabel ? { aixProfileLabel: instance.aixProfileLabel } : {}),
+    })),
+  ),
 });
 
 export const layer = Layer.effect(

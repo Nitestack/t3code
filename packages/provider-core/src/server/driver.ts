@@ -41,6 +41,8 @@ export type ProviderWorkspaceSnapshot = ServerProvider &
 export interface ProviderInstance {
   readonly instanceId: ProviderInstanceId;
   readonly driverKind: ProviderDriverKind;
+  readonly aixProfile?: string | undefined;
+  readonly aixProfileLabel?: string | undefined;
   readonly continuationIdentity: ProviderContinuationIdentity;
   readonly displayName: string | undefined;
   readonly accentColor?: string | undefined;

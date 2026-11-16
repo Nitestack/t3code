@@ -68,6 +68,11 @@ import {
 } from "../../providerInstances";
 import { providerModelKey, sortProviderModelItems } from "../../modelOrdering";
 import { aixCatalogStatus } from "./aixModelMetadata";
+import {
+  groupAixProviderProfiles,
+  providerInstanceForPickerSelection,
+  providerInstancesForPickerLevel,
+} from "./providerInstancePickerHierarchy";
 
 type ModelPickerItem = {
   slug: string;
@@ -478,7 +483,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       if (
         props.lockedProvider !== null ||
         activeInstanceHasSelectableUnavailableModel ||
-        activeInstanceNeedsSetup
+        activeInstanceNeedsSetup ||
+        activeEntry?.aixProfile !== undefined
       ) {
         return props.activeInstanceId;
       }
@@ -635,7 +641,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           ...(model.isLegacy ? { isLegacy: true } : {}),
           ...(model.isUnavailable ? { isUnavailable: true } : {}),
           ...(model.catalogMetadata ? { catalogMetadata: model.catalogMetadata } : {}),
-          ...(instanceId.startsWith("aix-") ? { isAixModel: true } : {}),
+          ...(entry.aixProfile ? { isAixModel: true } : {}),
           instanceId,
           driverKind: entry.driverKind,
           instanceDisplayName: entry.displayName,
@@ -677,6 +683,13 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     for (const instanceId of tabsWithLegacyRow) addRow(instanceId);
     return Math.max(0, ...unitsByTab.values());
   })();
+  const aixProfiles = groupAixProviderProfiles(instanceEntries);
+  const hierarchyEntry =
+    selectedInstanceId === "favorites"
+      ? (activeEntry ?? undefined)
+      : entryByInstanceId.get(selectedInstanceId);
+  const hierarchyScope = hierarchyEntry?.aixProfile ? "aix" : "subscriptions";
+  const selectedAixProfile = hierarchyEntry?.aixProfile ?? aixProfiles[0]?.id;
   const lockedDisabledInstanceIds = (() => {
     if (!isLocked) {
       return undefined;
@@ -690,7 +703,12 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     return disabled;
   })();
   const sidebarInstanceEntries = (() => {
-    const enabledEntries = instanceEntries.filter(isProviderInstancePickerVisible);
+    const levelEntries = providerInstancesForPickerLevel({
+      entries: instanceEntries,
+      scope: hierarchyScope,
+      ...(hierarchyScope === "aix" && selectedAixProfile ? { aixProfile: selectedAixProfile } : {}),
+    });
+    const enabledEntries = levelEntries.filter(isProviderInstancePickerVisible);
     if (!isLocked) {
       return enabledEntries;
     }
@@ -792,7 +810,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
               : filteredModels.length === 0) &&
             !(
               entry.instanceId === selectedEntry?.instanceId &&
-              entry.instanceId.startsWith("aix-") &&
+              entry.aixProfile !== undefined &&
               props.environmentId !== null &&
               props.onRefreshAixCatalog
             ),
@@ -906,6 +924,26 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     )?.name;
     announce(`Model: ${name ?? selectedSlug}`, "model-picker");
   };
+  const selectHierarchyTarget = (scope: "subscriptions" | "aix", profile: string | undefined) => {
+    const eligibleEntries = providerInstancesForPickerLevel({
+      entries: instanceEntries,
+      scope,
+      ...(profile ? { aixProfile: profile } : {}),
+    }).filter(
+      (entry) =>
+        entry.enabled &&
+        !lockedDisabledInstanceIds?.has(entry.instanceId) &&
+        (isProviderInstancePickerReady(entry) ||
+          selectableUnavailableInstanceIds?.has(entry.instanceId)),
+    );
+    const target = providerInstanceForPickerSelection({
+      entries: eligibleEntries,
+      scope,
+      ...(profile ? { aixProfile: profile } : {}),
+      ...(hierarchyEntry ? { preferredDriver: hierarchyEntry.driverKind } : {}),
+    });
+    if (target) handleSelectInstance(target.instanceId);
+  };
 
   return (
     <TooltipProvider delay={0}>
@@ -934,6 +972,23 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
             onSelectInstance={handleSelectInstance}
             onFocusSearch={focusSearchInput}
             instanceEntries={sidebarInstanceEntries}
+            {...(aixProfiles.length > 0
+              ? {
+                  hierarchy: {
+                    profiles: aixProfiles,
+                    scope: hierarchyScope,
+                    selectedProfile: selectedAixProfile,
+                    onSelectScope: (scope: "subscriptions" | "aix") => {
+                      const profile =
+                        scope === "aix" ? (selectedAixProfile ?? aixProfiles[0]?.id) : undefined;
+                      selectHierarchyTarget(scope, profile);
+                    },
+                    onSelectProfile: (profile: string) => {
+                      selectHierarchyTarget("aix", profile);
+                    },
+                  },
+                }
+              : {})}
             showFavorites
             {...(selectableUnavailableInstanceIds ? { selectableUnavailableInstanceIds } : {})}
             {...(lockedDisabledInstanceIds
@@ -1082,7 +1137,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
               onTouchStart={(e) => e.stopPropagation()}
             />
 
-            {selectedEntry?.instanceId.startsWith("aix-") &&
+            {selectedEntry?.aixProfile !== undefined &&
             props.environmentId !== null &&
             props.onRefreshAixCatalog ? (
               <AixCatalogControls

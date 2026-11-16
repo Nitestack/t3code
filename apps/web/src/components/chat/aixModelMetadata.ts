@@ -5,7 +5,7 @@ export function aixCatalogStatus(provider: ServerProvider): {
   readonly kind: "current" | "warning" | "stale" | "unavailable";
   readonly message: string;
 } | null {
-  if (!provider.instanceId.startsWith("aix-")) return null;
+  if (!provider.aixProfile) return null;
   const message = provider.message?.trim();
   if (provider.status === "error") {
     return { kind: "unavailable", message: message || "The aix catalog is unavailable." };

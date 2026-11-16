@@ -10,6 +10,7 @@ import {
   shouldShowInstanceBadge,
   type ProviderInstanceEntry,
 } from "../../providerInstances";
+import type { AixProviderProfile } from "./providerInstancePickerHierarchy";
 
 function describeUnavailableInstance(entry: ProviderInstanceEntry): string {
   const label = entry.displayName;
@@ -34,6 +35,13 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
   onSelectInstance: (instanceId: ProviderInstanceId | "favorites") => void;
   onFocusSearch: () => void;
   instanceEntries: ReadonlyArray<ProviderInstanceEntry>;
+  hierarchy?: {
+    readonly profiles: ReadonlyArray<AixProviderProfile<ProviderInstanceEntry>>;
+    readonly scope: "subscriptions" | "aix";
+    readonly selectedProfile: string | undefined;
+    readonly onSelectScope: (scope: "subscriptions" | "aix") => void;
+    readonly onSelectProfile: (profile: string) => void;
+  };
   showFavorites?: boolean;
   disabledInstanceIds?: ReadonlySet<ProviderInstanceId>;
   selectableUnavailableInstanceIds?: ReadonlySet<ProviderInstanceId>;
@@ -120,6 +128,70 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                 </Tooltip>
               </div>
               <div className="border-b border-border/70" aria-hidden="true" />
+            </>
+          ) : null}
+
+          {props.hierarchy ? (
+            <>
+              <div className="flex flex-col gap-1 border-b border-border/70 pb-1">
+                {(["subscriptions", "aix"] as const).map((scope) => (
+                  <Tooltip key={scope}>
+                    <TooltipTrigger
+                      render={
+                        <Toolbar.Button
+                          className={cn(
+                            "flex aspect-square w-full items-center justify-center rounded-md text-3xs font-semibold uppercase hover:bg-foreground/10 focus-visible:outline-none",
+                            props.hierarchy?.scope === scope && "bg-foreground/10 text-primary",
+                          )}
+                          onClick={() => props.hierarchy?.onSelectScope(scope)}
+                          type="button"
+                          aria-label={scope === "aix" ? "aix · Work" : "Subscriptions · Personal"}
+                          aria-pressed={props.hierarchy?.scope === scope}
+                        >
+                          {scope === "aix" ? "aix" : "Sub"}
+                        </Toolbar.Button>
+                      }
+                    />
+                    <TooltipPopup
+                      side={PICKER_TOOLTIP_SIDE}
+                      sideOffset={PICKER_TOOLTIP_SIDE_OFFSET}
+                    >
+                      {scope === "aix" ? "aix · Work" : "Subscriptions · Personal"}
+                    </TooltipPopup>
+                  </Tooltip>
+                ))}
+              </div>
+              {props.hierarchy.scope === "aix" ? (
+                <div className="flex flex-col gap-1 border-b border-border/70 pb-1">
+                  {props.hierarchy.profiles.map((profile) => (
+                    <Tooltip key={profile.id}>
+                      <TooltipTrigger
+                        render={
+                          <Toolbar.Button
+                            className={cn(
+                              "flex aspect-square w-full items-center justify-center rounded-md text-3xs font-semibold hover:bg-foreground/10 focus-visible:outline-none",
+                              props.hierarchy?.selectedProfile === profile.id &&
+                                "bg-foreground/10 text-primary",
+                            )}
+                            onClick={() => props.hierarchy?.onSelectProfile(profile.id)}
+                            type="button"
+                            aria-label={profile.label}
+                            aria-pressed={props.hierarchy?.selectedProfile === profile.id}
+                          >
+                            {profile.label.slice(0, 3)}
+                          </Toolbar.Button>
+                        }
+                      />
+                      <TooltipPopup
+                        side={PICKER_TOOLTIP_SIDE}
+                        sideOffset={PICKER_TOOLTIP_SIDE_OFFSET}
+                      >
+                        {profile.label}
+                      </TooltipPopup>
+                    </Tooltip>
+                  ))}
+                </div>
+              ) : null}
             </>
           ) : null}
 

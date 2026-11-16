@@ -32,6 +32,8 @@ export type ModelOption = {
   readonly providerKey: string;
   readonly providerLabel: string;
   readonly providerDriver: string;
+  readonly aixProfile?: string | undefined;
+  readonly aixProfileLabel?: string | undefined;
   readonly supportedRuntimeModes?: ReadonlyArray<RuntimeMode>;
   readonly providerIconUrl?: string | undefined;
   readonly providerBadge?: {
@@ -65,7 +67,14 @@ function providerDisplayLabel(provider: {
   readonly displayName?: string | undefined;
   readonly driver: string;
   readonly instanceId: string;
+  readonly aixProfile?: string | undefined;
 }): string {
+  if (provider.aixProfile) {
+    if (provider.driver === "codex") return "Codex";
+    if (provider.driver === "claudeAgent") return "Claude Code";
+    if (provider.driver === "opencode") return "OpenCode";
+    return provider.driver;
+  }
   if (provider.displayName) return provider.displayName;
   if (provider.driver === "codex") return "Codex";
   if (provider.driver === "claudeAgent") return "Claude";
@@ -399,6 +408,8 @@ export function buildModelOptions(
         providerKey: provider.instanceId,
         providerLabel,
         providerDriver: provider.driver,
+        ...(provider.aixProfile ? { aixProfile: provider.aixProfile } : {}),
+        ...(provider.aixProfileLabel ? { aixProfileLabel: provider.aixProfileLabel } : {}),
         providerBadge,
         ...(provider.supportedRuntimeModes === undefined
           ? {}
