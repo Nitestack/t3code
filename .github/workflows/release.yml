@@ -896,6 +896,28 @@ jobs:
           --target "$RELEASE_SHA"
           --notes-file release-notes.md
 
+  # Separate job so a re-dispatch of an already published release still advances the branch.
+  fork_release_branch:
+    name: Advance the latest-release branch
+    needs: [fork_preflight, fork_publish]
+    if: >-
+      github.repository == 'Nitestack/t3code' &&
+      github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && inputs.publish == true &&
+      !cancelled() &&
+      needs.fork_preflight.result == 'success' &&
+      (needs.fork_publish.result == 'success' || needs.fork_preflight.outputs.already_published == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Check out the release helpers
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
       - name: Advance the latest-release branch
         env:
           GH_TOKEN: ${{ github.token }}
@@ -905,6 +927,7 @@ jobs:
         run: |
           set -euo pipefail
           ref="repos/$GH_REPO/git/ref/heads/release"
+          update_ref="repos/$GH_REPO/git/refs/heads/release"
           current_sha="$(gh api "$ref" --jq '.object.sha' 2>"$RUNNER_TEMP/release-ref.err" || true)"
           if [[ -z "$current_sha" ]]; then
             if ! grep -q "HTTP 404" "$RUNNER_TEMP/release-ref.err"; then
@@ -919,7 +942,10 @@ jobs:
               echo "$message" >> "$GITHUB_STEP_SUMMARY"
               exit 0
             fi
-            current_sha="$(gh api "$ref" --jq '.object.sha')"
+            if ! current_sha="$(gh api "$ref" --jq '.object.sha')"; then
+              cat "$RUNNER_TEMP/release-ref-create.err" >&2
+              exit 1
+            fi
           fi
 
           compare_status="$(gh api "repos/$GH_REPO/compare/$current_sha...$RELEASE_SHA" --jq '.status')"
@@ -941,7 +967,7 @@ jobs:
               ;;
             update)
               if printf '{"sha":"%s","force":false}\n' "$RELEASE_SHA" |
-                gh api --method PATCH "$ref" --input - >/dev/null 2>"$RUNNER_TEMP/release-ref-update.err"
+                gh api --method PATCH "$update_ref" --input - >/dev/null 2>"$RUNNER_TEMP/release-ref-update.err"
               then
                 message="Advanced the release branch to $RELEASE_SHA."
                 echo "::notice::$message"
