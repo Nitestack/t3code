@@ -10,6 +10,7 @@ import {
   checkProjectAccess,
   reportProjectFailure,
   useProjectGroupUpdate,
+  useProjectPin,
   type ProjectGroupUpdate,
 } from "../../hooks/useProjectGroupUpdate";
 import { Navigate, useLocation, useNavigate } from "@tanstack/react-router";
@@ -290,8 +291,8 @@ function ProjectDetail({
       ? window.desktopBridge?.pickProjectFavicon
       : undefined;
 
-  const { updateProjectGroup, canOrganizeProjectGroup, canSetProjectScope } =
-    useProjectGroupUpdate();
+  const { updateProjectGroup, canOrganizeProjectGroup } = useProjectGroupUpdate();
+  const { canMoveProjectGroupScope, moveProjectGroupScope } = useProjectPin();
   const updateAllMembers = (
     input: ProjectGroupUpdate | ((member: SidebarProjectGroupMember) => ProjectGroupUpdate),
     failureTitle: string,
@@ -301,11 +302,16 @@ function ProjectDetail({
     canOrganizeProjectGroup(allMembers);
   const canMoveProjectScope =
     allMembers.every((member) => editableIds.has(member.environmentId)) &&
-    canSetProjectScope(allMembers);
+    canMoveProjectGroupScope(group);
   const [isOrganizing, setIsOrganizing] = useState(false);
   const organize = async (input: ProjectGroupUpdate, failureTitle: string) => {
     setIsOrganizing(true);
     await updateProjectGroup(allMembers, input, failureTitle);
+    setIsOrganizing(false);
+  };
+  const moveScope = async () => {
+    setIsOrganizing(true);
+    await moveProjectGroupScope(group);
     setIsOrganizing(false);
   };
 
@@ -630,12 +636,7 @@ function ProjectDetail({
                   size="sm"
                   variant="outline"
                   disabled={isOrganizing}
-                  onClick={() =>
-                    void organize(
-                      { scope: group.scope === "work" ? "personal" : "work" },
-                      "Failed to move project",
-                    )
-                  }
+                  onClick={() => void moveScope()}
                 >
                   Move to {group.scope === "work" ? "Personal" : "Work"}
                 </Button>

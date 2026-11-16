@@ -1179,6 +1179,42 @@ export function filterSidebarProjectScopeItems<TItem extends { readonly value: s
   return input.items.filter((item) => item.value !== "all" && input.matches(item, query));
 }
 
+export type SidebarProjectContextMenuItemId =
+  | "new-thread"
+  | "copy-path"
+  | "change-scope"
+  | "pin"
+  | "unpin"
+  | "project-settings";
+
+export function buildSidebarProjectContextMenuItems(input: {
+  readonly scope: "personal" | "work";
+  readonly pinned: boolean;
+  readonly canMove: boolean;
+  readonly canPin: boolean;
+}): ContextMenuItem<SidebarProjectContextMenuItemId>[] {
+  return [
+    { id: "new-thread", label: "New thread" },
+    { id: "copy-path", label: "Copy path" },
+    ...(input.canMove
+      ? [
+          {
+            id: "change-scope" as const,
+            label: input.scope === "work" ? "Move to Personal" : "Move to Work",
+          },
+        ]
+      : []),
+    ...(input.canPin
+      ? [
+          input.pinned
+            ? { id: "unpin" as const, label: "Unpin project", icon: "pin-off" }
+            : { id: "pin" as const, label: "Pin project", icon: "pin" },
+        ]
+      : []),
+    { id: "project-settings", label: "Project settings", icon: "settings" },
+  ];
+}
+
 interface SidebarProjectScopeMenuState {
   readonly open: boolean;
   readonly query: string;

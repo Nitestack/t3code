@@ -20,6 +20,7 @@ import { projectEnvironment } from "../state/projects";
 import { readEnvironmentScope, useEnvironmentsWithScope } from "../state/session";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
 import { supportsProjectScope } from "@t3tools/client-runtime/environment";
+import { setActiveEnvironmentScope } from "../environmentScope";
 
 export type ProjectGroupUpdate = Partial<{
   title: string;
@@ -120,12 +121,46 @@ export function useProjectPin() {
     readonly memberProjects: ReadonlyArray<ProjectGroupMember>;
     readonly pinned: boolean;
   };
+  type ScopedPinnableGroup = PinnableGroup & { readonly scope?: ProjectScope | undefined };
   const canPinProjectGroup = (group: PinnableGroup) =>
     canOrganizeProjectGroup(group.memberProjects) &&
     group.memberProjects.every((member) => operableEnvironmentIds.has(member.environmentId));
-  const canMoveProjectGroupScope = (group: PinnableGroup) =>
+  const canMoveProjectGroupScope = (group: ScopedPinnableGroup) =>
     canSetProjectScope(group.memberProjects) &&
     group.memberProjects.every((member) => operableEnvironmentIds.has(member.environmentId));
+  const moveProjectGroupScope = async (group: ScopedPinnableGroup) => {
+    if (!canMoveProjectGroupScope(group)) return;
+    const sourceScope = group.scope ?? "personal";
+    const destinationScope = sourceScope === "work" ? "personal" : "work";
+    const destinationLabel = destinationScope === "work" ? "Work" : "Personal";
+    const result = await updateProjectGroup(
+      group.memberProjects,
+      { scope: destinationScope },
+      "Failed to move project",
+    );
+    if (result._tag !== "Success") return;
+    toastManager.add(
+      stackedThreadToast({
+        type: "success",
+        title: `Moved to ${destinationLabel}`,
+        actionProps: {
+          children: `Show ${destinationLabel}`,
+          onClick: () => void setActiveEnvironmentScope(destinationScope),
+        },
+        data: {
+          secondaryActionProps: {
+            children: "Undo",
+            onClick: () =>
+              void updateProjectGroup(
+                group.memberProjects,
+                { scope: sourceScope },
+                "Failed to move project",
+              ),
+          },
+        },
+      }),
+    );
+  };
   const setProjectGroupPinned = (group: PinnableGroup, pinned: boolean) => {
     void updateProjectGroup(
       group.memberProjects,
@@ -136,6 +171,7 @@ export function useProjectPin() {
   return {
     canPinProjectGroup,
     canMoveProjectGroupScope,
+    moveProjectGroupScope,
     setProjectGroupPinned,
     toggleProjectGroupPin: (group: PinnableGroup) => setProjectGroupPinned(group, !group.pinned),
   };

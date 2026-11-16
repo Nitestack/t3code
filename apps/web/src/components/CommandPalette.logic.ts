@@ -39,6 +39,13 @@ export const RECENT_THREAD_LIMIT = 12;
 export const ITEM_ICON_CLASS = "size-4 text-icon-muted";
 export const ADDON_ICON_CLASS = "size-4";
 
+export function shouldShowUnsupportedWorkProjectNote(input: {
+  readonly activeScope: "personal" | "work";
+  readonly supportsProjectScope: boolean;
+}): boolean {
+  return input.activeScope === "work" && !input.supportsProjectScope;
+}
+
 export function buildLinkedThreadActionItems(
   input: CommandPaletteLinkedThreads & {
     query: string;

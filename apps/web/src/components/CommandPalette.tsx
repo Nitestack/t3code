@@ -56,6 +56,7 @@ import {
 } from "@t3tools/contracts";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
+  ArrowLeftRightIcon,
   ArrowLeftIcon,
   BugIcon,
   ChartNoAxesColumnIcon,
@@ -229,6 +230,7 @@ import {
   createCommandPaletteSearchState,
   type CommandPaletteGroup,
   resolveAddProjectEntry,
+  shouldShowUnsupportedWorkProjectNote,
   type AddProjectCloneFlow,
   type AddProjectEnvironmentOption,
   buildPaletteRemoteSourceReadiness,
@@ -587,7 +589,12 @@ function OpenCommandPaletteDialog(props: {
       group,
     ]),
   );
-  const { canPinProjectGroup, toggleProjectGroupPin } = useProjectPin();
+  const {
+    canPinProjectGroup,
+    canMoveProjectGroupScope,
+    moveProjectGroupScope,
+    toggleProjectGroupPin,
+  } = useProjectPin();
   // A row's target record can change when another machine's copy loads, so the kept
   // order follows the project group instead.
   const rowOrderKey = (prefix: string) => (item: CommandPaletteActionItem) =>
@@ -660,6 +667,9 @@ function OpenCommandPaletteDialog(props: {
           ?.serverConfig?.environment.capabilities;
   const projectScopeCapabilities = projectScopeCapabilitiesFor(projectScopeEnvironmentId);
   const canSetProjectScope = supportsProjectScope(projectScopeCapabilities);
+  const showUnsupportedWorkProjectNote =
+    projectScopeCapabilities !== undefined &&
+    shouldShowUnsupportedWorkProjectNote({ activeScope, supportsProjectScope: canSetProjectScope });
   const effectiveProjectCreateScope = canSetProjectScope ? projectCreateScope : "personal";
   const browseEnvironmentIsDesktopLocal =
     browseEnvironment !== null && isDesktopLocalConnectionTarget(browseEnvironment.entry.target);
@@ -1783,6 +1793,18 @@ function OpenCommandPaletteDialog(props: {
         <PinIcon className={ITEM_ICON_CLASS} />
       ),
       run: async () => toggleProjectGroupPin(currentProjectGroup),
+    });
+  }
+  if (currentProjectGroup && canMoveProjectGroupScope(currentProjectGroup)) {
+    const destinationScope = currentProjectGroup.scope === "work" ? "personal" : "work";
+    actionItems.push({
+      kind: "action",
+      value: "action:project-scope",
+      searchTerms: ["move", "project", destinationScope],
+      title: `Move project to ${destinationScope === "work" ? "Work" : "Personal"}`,
+      description: currentProjectGroup.displayName,
+      icon: <ArrowLeftRightIcon className={ITEM_ICON_CLASS} />,
+      run: async () => moveProjectGroupScope(currentProjectGroup),
     });
   }
   const contextualProjectGroup = currentProjectGroup ?? projectGroups[0] ?? null;
@@ -3077,24 +3099,30 @@ function OpenCommandPaletteDialog(props: {
           environmentLabel={newProjectEnvironmentLabel}
         />
       ) : null}
-      {canSetProjectScope &&
-      (addProjectEnvironmentId !== null ||
-        addProjectCloneFlow !== null ||
-        newProjectFlow !== null) ? (
-        <div className="flex items-center justify-between gap-3 border-b px-4 py-2">
-          <span className="text-sm text-muted-foreground">Project scope</span>
-          <ToggleGroup
-            aria-label="Project scope"
-            value={[projectCreateScope]}
-            onValueChange={(next) => {
-              const value = next[0];
-              if (value === "personal" || value === "work") setProjectCreateScope(value);
-            }}
-          >
-            <Toggle value="personal">Personal</Toggle>
-            <Toggle value="work">Work</Toggle>
-          </ToggleGroup>
-        </div>
+      {addProjectEnvironmentId !== null ||
+      addProjectCloneFlow !== null ||
+      newProjectFlow !== null ? (
+        canSetProjectScope ? (
+          <div className="flex items-center justify-between gap-3 border-b px-4 py-2">
+            <span className="text-sm text-muted-foreground">Project scope</span>
+            <ToggleGroup
+              aria-label="Project scope"
+              value={[projectCreateScope]}
+              onValueChange={(next) => {
+                const value = next[0];
+                if (value === "personal" || value === "work") setProjectCreateScope(value);
+              }}
+            >
+              <Toggle value="personal">Personal</Toggle>
+              <Toggle value="work">Work</Toggle>
+            </ToggleGroup>
+          </div>
+        ) : showUnsupportedWorkProjectNote ? (
+          <div className="border-b px-4 py-2 text-sm text-muted-foreground">
+            This project will be added to Personal because this server does not support Work
+            projects.
+          </div>
+        ) : null
       ) : null}
       {addProjectCloneFlow?.step === "confirm" ? (
         <RemoteRepositorySummary

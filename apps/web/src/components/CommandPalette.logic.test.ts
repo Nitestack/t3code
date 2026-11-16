@@ -12,6 +12,7 @@ import {
   filterCommandPaletteGroups,
   reduceCommandPaletteUiState,
   resolveAddProjectEntry,
+  shouldShowUnsupportedWorkProjectNote,
   createCommandPaletteSearchState,
   reduceCommandPaletteSearchState,
   type CommandPaletteUiState,
@@ -131,6 +132,23 @@ describe("resolveAddProjectEntry", () => {
       kind: "choose-source",
       environmentId: local,
     });
+  });
+});
+
+describe("shouldShowUnsupportedWorkProjectNote", () => {
+  it("explains the Personal fallback only when Work is active and the server lacks support", () => {
+    expect(
+      shouldShowUnsupportedWorkProjectNote({ activeScope: "work", supportsProjectScope: false }),
+    ).toBe(true);
+    expect(
+      shouldShowUnsupportedWorkProjectNote({ activeScope: "work", supportsProjectScope: true }),
+    ).toBe(false);
+    expect(
+      shouldShowUnsupportedWorkProjectNote({
+        activeScope: "personal",
+        supportsProjectScope: false,
+      }),
+    ).toBe(false);
   });
 });
 
