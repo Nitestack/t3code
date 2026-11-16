@@ -56,6 +56,19 @@ describe("applyUsageLimitsUpdate", () => {
         update: { windows: [{ ...weekly, modelIds: ["opencode/b"] }] },
       })?.windows[0]?.modelIds,
     ).toEqual(["opencode/b"]);
+    const overCap = { ...weekly, usedPercent: 100 };
+    expect(
+      applyUsageLimitsUpdate({
+        previous: {
+          checkedAt,
+          windows: [{ ...overCap, amounts: { currency: "USD", spent: 210, total: 200 } }],
+        },
+        checkedAt,
+        update: {
+          windows: [{ ...overCap, amounts: { currency: "USD", spent: 250, total: 200 } }],
+        },
+      })?.windows[0]?.amounts?.spent,
+    ).toBe(250);
   });
 
   it("upserts by id and keeps the reset a percent-only update omits", () => {

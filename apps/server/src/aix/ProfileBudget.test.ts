@@ -86,8 +86,14 @@ it.each([
     name: "spend against a cap",
     info: { spend: "123.81", max_budget: "150.0000000000" },
     usedPercent: (123.81 / 150) * 100,
+    amounts: { currency: "USD", spent: 123.81, total: 150 },
   },
-  { name: "overspend as a full bar", info: { spend: 210, max_budget: 200 }, usedPercent: 100 },
+  {
+    name: "overspend as a full bar",
+    info: { spend: 210, max_budget: 200 },
+    usedPercent: 100,
+    amounts: { currency: "USD", spent: 210, total: 200 },
+  },
   {
     name: "a reported budget window and reset",
     info: {
@@ -97,6 +103,7 @@ it.each([
       budget_reset_at: "2026-12-01T00:00:00+00:00",
     },
     usedPercent: 10,
+    amounts: { currency: "USD", spent: 5, total: 50 },
     resetsAt: "2026-12-01T00:00:00.000Z",
     windowDurationMins: 43200,
   },
@@ -104,6 +111,7 @@ it.each([
     name: "an unreadable duration and reset as absent",
     info: { spend: 5, max_budget: 50, budget_duration: "weekly", budget_reset_at: "soon" },
     usedPercent: 10,
+    amounts: { currency: "USD", spent: 5, total: 50 },
   },
 ])("maps $name to one stable budget window", ({ name: _name, info, usedPercent, ...expected }) => {
   const limits = ProfileBudget.keyInfoUsageLimits({

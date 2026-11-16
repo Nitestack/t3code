@@ -107,7 +107,9 @@ function usageWindowEquals(a: ServerProviderUsageWindow, b: ServerProviderUsageW
         a.providerIds.length === b.providerIds.length &&
         a.providerIds.every((id, index) => id === b.providerIds?.[index]))) &&
     a.resetsAt === b.resetsAt &&
-    a.windowDurationMins === b.windowDurationMins
+    a.windowDurationMins === b.windowDurationMins &&
+    a.amounts?.spent === b.amounts?.spent &&
+    a.amounts?.total === b.amounts?.total
   );
 }
 
