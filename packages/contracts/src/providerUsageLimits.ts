@@ -9,7 +9,6 @@ import {
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import { UsageLimitSourceId } from "./usageLimitSourceId.ts";
 
-/** Stable per-provider ids let sparse updates merge with full probes. */
 export const ServerProviderUsageAmounts = Schema.Struct({
   currency: Schema.Literal("USD"),
   spent: Schema.Finite,
@@ -17,6 +16,7 @@ export const ServerProviderUsageAmounts = Schema.Struct({
 });
 export type ServerProviderUsageAmounts = typeof ServerProviderUsageAmounts.Type;
 
+/** Stable per-provider ids let sparse updates merge with full probes. */
 export const ServerProviderUsageWindow = Schema.Struct({
   id: TrimmedNonEmptyString,
   kind: Schema.Literals(["session", "weekly", "monthly", "other"]),

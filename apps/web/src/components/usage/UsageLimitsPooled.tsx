@@ -567,11 +567,17 @@ function PoolWindowCard({
           <span className="text-sm font-medium text-foreground">{label ?? pool.label}</span>
         ) : null}
         {amounts ? (
-          <span className="text-sm font-medium text-foreground tabular-nums">
-            {formatUsd(amounts.spent)} spent ·{" "}
-            {formatUsd(Math.max(0, amounts.total - amounts.spent))} left of{" "}
-            {formatUsd(amounts.total)}
-          </span>
+          <>
+            <span className="flex items-baseline gap-2">
+              <span className="text-3xl font-semibold text-foreground tabular-nums">
+                {formatUsd(Math.max(0, amounts.total - amounts.spent))}
+              </span>
+              <span className="text-sm text-muted-foreground">left</span>
+            </span>
+            <span className="text-xs text-muted-foreground tabular-nums">
+              {formatUsd(amounts.spent)} of {formatUsd(amounts.total)} spent
+            </span>
+          </>
         ) : (
           <span className="flex items-baseline gap-2">
             <span className="text-3xl font-semibold text-foreground tabular-nums">
