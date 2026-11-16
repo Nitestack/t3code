@@ -295,6 +295,7 @@ const aixModelOptions = new Map([
       {
         slug: "vendor/beta-v2",
         name: "Beta",
+        isLegacy: true,
         catalogMetadata: { contextTokens: 128000 },
       },
     ],
@@ -308,6 +309,7 @@ function renderAixPicker(permission: boolean) {
     return (
       <ProviderModelPicker
         environmentId={aixEnvironmentId}
+        projectScope="work"
         activeInstanceId={aixInstanceId}
         model={model}
         lockedProvider={null}

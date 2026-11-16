@@ -67,6 +67,7 @@ export function ScheduledTaskModelPickerRouteScreen() {
     <ThreadSettingsPickerScreen
       environmentId={editor.environmentId}
       projectId={projectId}
+      projectScope={null}
       cwd={null}
       providerGroups={providerGroups}
       selectedModel={selectedModel}

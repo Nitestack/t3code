@@ -23,9 +23,11 @@ const aixInstanceId = ProviderInstanceId.make("aix-codex-ac");
 function Picker({
   keybindings = [],
   withAix = false,
+  projectScope = "personal",
 }: {
   keybindings?: ResolvedKeybindingsConfig;
   withAix?: boolean;
+  projectScope?: "personal" | "work";
 }) {
   const [model, setModel] = useState("original");
   const modelOptionsByInstance = new Map([
@@ -46,6 +48,7 @@ function Picker({
       <ProviderModelPicker
         environmentId={null}
         activeInstanceId={instanceId}
+        projectScope={projectScope}
         model={model}
         lockedProvider={null}
         instanceEntries={deriveProviderInstanceEntries([
@@ -101,9 +104,8 @@ function FooterWithHierarchy() {
         <ModelPickerHierarchyContext.Provider
           value={{
             profiles: [{ id: "work", label: "adCare", entries: [] }],
-            scope: "aix",
+            scope: "work",
             profileId: "work",
-            onScopeChange: () => {},
             onProfileChange: () => {},
           }}
         >
@@ -172,22 +174,96 @@ it("moves ArrowLeft and Shift+Tab from search to the selected harness", async ()
   await expect.element(codex).toHaveFocus();
 });
 
-it("keeps scope controls available in non-composer pickers with aix profiles", async () => {
-  await using _screen = await render(<Picker withAix />);
+it("shows only the Work profile selector in Work and no scope toggle in Personal", async () => {
+  await using _screen = await render(<Picker withAix projectScope="work" />);
   await page.getByRole("button", { name: "Choose model" }).click();
 
-  const scope = page.getByRole("button", { name: "Model scope" });
-  await expect.element(scope).toHaveTextContent("Subscriptions");
-  await scope.click();
-  await page.getByRole("menuitemradio", { name: "aix" }).click();
-  const profile = page.getByRole("button", { name: "aix profile" });
+  const profile = page.getByRole("button", { name: "Work profile" });
   await expect.element(profile).toHaveTextContent("adCare");
+  await expect.element(page.getByRole("button", { name: "Model scope" })).not.toBeInTheDocument();
+  await expect.element(page.getByRole("button", { name: "Subscriptions" })).not.toBeInTheDocument();
+});
+
+it("does not show a Work profile selector in Personal", async () => {
+  await using _screen = await render(<Picker withAix projectScope="personal" />);
+  await page.getByRole("button", { name: "Choose model" }).click();
+  await expect.element(page.getByRole("button", { name: "Work profile" })).not.toBeInTheDocument();
   await expect
     .element(page.getByRole("status", { name: "Selected model" }))
     .toHaveTextContent("original");
-  profile.element().focus();
-  await userEvent.tab({ shift: true });
-  await expect.element(scope).toHaveFocus();
+});
+
+it("updates profile labels and model metadata when provider instances change", async () => {
+  function LivePicker() {
+    const [updated, setUpdated] = useState(false);
+    const modelOptionsByInstance = new Map([
+      [
+        aixInstanceId,
+        [
+          {
+            slug: "alpha",
+            name: "Alpha",
+            catalogMetadata: { contextTokens: updated ? 64000 : 128000 },
+          },
+        ],
+      ],
+    ]);
+    const entry = deriveProviderInstanceEntries([
+      {
+        instanceId: aixInstanceId,
+        driver: ProviderDriverKind.make("codex"),
+        enabled: true,
+        installed: true,
+        version: null,
+        status: "ready" as const,
+        auth: { status: "authenticated" as const },
+        checkedAt: "2026-01-01T00:00:00.000Z",
+        models: [
+          {
+            slug: "alpha",
+            name: "Alpha",
+            isCustom: false,
+            capabilities: {},
+            catalogMetadata: { contextTokens: updated ? 64000 : 128000 },
+          },
+        ],
+        slashCommands: [],
+        skills: [],
+        aixProfile: "ac",
+        aixProfileLabel: updated ? "Persönlich" : "adCare",
+      },
+    ]);
+    return (
+      <>
+        <button onClick={() => setUpdated(true)}>Update providers</button>
+        <ProviderModelPicker
+          environmentId={null}
+          projectScope="work"
+          activeInstanceId={aixInstanceId}
+          model="alpha"
+          lockedProvider={null}
+          instanceEntries={entry}
+          modelOptionsByInstance={modelOptionsByInstance}
+          triggerAriaLabel="Choose live model"
+          onInstanceModelChange={() => {}}
+        />
+      </>
+    );
+  }
+
+  await using _screen = await render(<LivePicker />);
+  await page.getByRole("button", { name: "Choose live model" }).click();
+  await expect
+    .element(page.getByRole("button", { name: "Work profile" }))
+    .toHaveTextContent("adCare");
+  await userEvent.keyboard("{Escape}");
+  await page.getByRole("button", { name: "Update providers" }).click();
+  await page.getByRole("button", { name: "Choose live model" }).click();
+  await expect
+    .element(page.getByRole("button", { name: "Work profile" }))
+    .toHaveTextContent("Persönlich");
+  await page.getByRole("button", { name: "Model details for Alpha" }).click();
+  await expect.element(page.getByText("64k tokens")).toBeVisible();
 });
 
 it("keeps composing keys from triggering model jump shortcuts", async () => {
@@ -216,13 +292,12 @@ it("keeps composing keys from triggering model jump shortcuts", async () => {
   }
 });
 
-it("keeps the footer scope and profile controls keyboard reachable", async () => {
+it("keeps the Work profile selector keyboard reachable", async () => {
   await using _screen = await render(<FooterWithHierarchy />, { router: false }); // no routes involved
   await page.getByRole("button", { name: "Picker" }).click();
-  const profile = page.getByRole("button", { name: "aix profile" });
-  const scope = page.getByRole("button", { name: "Model scope" });
+  const profile = page.getByRole("button", { name: "Work profile" });
   await expect.element(profile).toHaveTextContent("adCare");
   profile.element().focus();
   await userEvent.tab({ shift: true });
-  await expect.element(scope).toHaveFocus();
+  await expect.element(page.getByRole("button", { name: "Picker" })).toHaveFocus();
 });

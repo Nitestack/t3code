@@ -3720,6 +3720,14 @@ export default function ChatView(props: ChatViewProps) {
                                 }
                                 activeThreadModelSelection={activeThread?.modelSelection}
                                 activeProjectId={activeProject?.id ?? null}
+                                projectScope={
+                                  activeProject === null
+                                    ? null
+                                    : serverConfig?.environment.capabilities.projectScope ===
+                                          true && activeProject.scope === "work"
+                                      ? "work"
+                                      : "personal"
+                                }
                                 projectName={activeProject?.title}
                                 compactThreadUnavailable={compactThreadUnavailable}
                                 compactDisabled={compactDisabled}

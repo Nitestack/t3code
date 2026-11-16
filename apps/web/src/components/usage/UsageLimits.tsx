@@ -12,6 +12,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { normalizeProviderAccentColor } from "@t3tools/client-runtime/state/provider-instance-display";
 import {
   filterLimitPresentationsByGroup,
+  usageAixProfileLabels,
   type UsageLimitGroup,
   usageLimitEmptyMessage,
 } from "@t3tools/client-runtime/state/usage-grouping";
@@ -410,10 +411,12 @@ export function UsageLimitsSection({
     selectedEnvironmentIds,
     hiddenProviders,
   );
+  const profileLabels = usageAixProfileLabels(selected);
   return (
     <div className="space-y-5">
       <UsageLimitsPooled
         presentations={filterLimitPresentationsByGroup(selected, scope)}
+        aixProfileLabels={profileLabels}
         now={now}
         emptyMessage={usageLimitEmptyMessage(scope)}
       />

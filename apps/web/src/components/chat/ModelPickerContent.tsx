@@ -68,7 +68,10 @@ import {
 } from "../../providerInstances";
 import { providerModelKey, sortProviderModelItems } from "../../modelOrdering";
 import { aixCatalogStatus } from "./aixModelMetadata";
-import { providerInstancesForPickerLevel } from "@t3tools/client-runtime/provider-picker-hierarchy";
+import {
+  isPickerModelVisibleForProjectScope,
+  providerInstancesForProjectScope,
+} from "@t3tools/client-runtime/provider-picker-hierarchy";
 import { useModelPickerHierarchy } from "./ModelPickerHierarchyContext";
 
 type ModelPickerItem = {
@@ -433,6 +436,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   useLayoutEffect(() => registerModelPickerContent(), []);
   const highlightedModelKeyRef = useRef<string | null>(null);
   const { favorites } = useEnvironmentModelPreferences(props.environmentId);
+  const hierarchyScope = pickerHierarchy?.scope ?? "personal";
   const activeEntry = props.instanceEntries.find(
     (entry) => entry.instanceId === props.activeInstanceId,
   );
@@ -482,26 +486,30 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
         props.lockedProvider !== null ||
         activeInstanceHasSelectableUnavailableModel ||
         activeInstanceNeedsSetup ||
-        activeEntry?.aixProfile !== undefined
+        activeEntry?.aixProfile !== undefined ||
+        hierarchyScope === "work"
       ) {
         return props.activeInstanceId;
       }
-      const hasPickableFavorite = favorites.some((favorite) => {
-        const entry = instanceEntries.find((entry) => entry.instanceId === favorite.provider);
-        return (
-          entry !== undefined &&
-          (modelOptionsByInstance.get(favorite.provider) ?? []).some(
-            (option) =>
-              option.slug === favorite.model &&
-              shouldIncludeModelPickerOption({
-                entry,
-                option,
-                activeInstanceId: props.activeInstanceId,
-                activeModel: activeModelSlug,
-              }),
-          )
-        );
-      });
+      const hasPickableFavorite =
+        hierarchyScope === "personal" &&
+        favorites.some((favorite) => {
+          const entry = instanceEntries.find((entry) => entry.instanceId === favorite.provider);
+          return (
+            entry !== undefined &&
+            entry.aixProfile === undefined &&
+            (modelOptionsByInstance.get(favorite.provider) ?? []).some(
+              (option) =>
+                option.slug === favorite.model &&
+                shouldIncludeModelPickerOption({
+                  entry,
+                  option,
+                  activeInstanceId: props.activeInstanceId,
+                  activeModel: activeModelSlug,
+                }),
+            )
+          );
+        });
       return hasPickableFavorite ? "favorites" : props.activeInstanceId;
     },
   );
@@ -654,6 +662,18 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     }
     return out;
   })();
+  const aixProfiles = pickerHierarchy?.profiles ?? [];
+  const selectedAixProfile = pickerHierarchy?.profileId ?? aixProfiles[0]?.id;
+  const scopeModels = flatModels.filter((model) => {
+    const isSelected = selectedModelKeySet.has(modelPickerModelKey(model.instanceId, model.slug));
+    const entry = entryByInstanceId.get(model.instanceId);
+    return isPickerModelVisibleForProjectScope({
+      scope: hierarchyScope,
+      modelProfileId: entry?.aixProfile,
+      selectedProfileId: selectedAixProfile,
+      isSelected,
+    });
+  });
 
   const isLocked = lockedProvider !== null;
   const isSearching = searchQuery.trim().length > 0;
@@ -672,7 +692,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       if (!matchesLockedProvider(model)) continue;
       const isFavorite = favoritesSet.has(providerModelKey(model.instanceId, model.slug));
       if (isFavorite) addRow("favorites");
-      if (model.isLegacy && !isFavorite) {
+      if (model.isLegacy && !model.isAixModel && !isFavorite) {
         tabsWithLegacyRow.add(model.instanceId);
       } else {
         addRow(model.instanceId);
@@ -681,14 +701,6 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     for (const instanceId of tabsWithLegacyRow) addRow(instanceId);
     return Math.max(0, ...unitsByTab.values());
   })();
-  const aixProfiles = pickerHierarchy?.profiles ?? [];
-  const hierarchyEntry =
-    selectedInstanceId === "favorites"
-      ? (activeEntry ?? undefined)
-      : entryByInstanceId.get(selectedInstanceId);
-  const hierarchyScope = pickerHierarchy?.scope ?? "subscriptions";
-  const selectedAixProfile =
-    pickerHierarchy?.profileId ?? hierarchyEntry?.aixProfile ?? aixProfiles[0]?.id;
   const lockedDisabledInstanceIds = (() => {
     if (!isLocked) {
       return undefined;
@@ -702,10 +714,13 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     return disabled;
   })();
   const sidebarInstanceEntries = (() => {
-    const levelEntries = providerInstancesForPickerLevel({
+    const levelEntries = providerInstancesForProjectScope({
       entries: instanceEntries,
       scope: hierarchyScope,
-      ...(hierarchyScope === "aix" && selectedAixProfile ? { aixProfile: selectedAixProfile } : {}),
+      ...(hierarchyScope === "work" && selectedAixProfile
+        ? { aixProfile: selectedAixProfile }
+        : {}),
+      selectedInstanceId: props.activeInstanceId,
     });
     const enabledEntries = levelEntries.filter(isProviderInstancePickerVisible);
     if (!isLocked) {
@@ -714,7 +729,12 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     const available: ProviderInstanceEntry[] = [];
     const disabled: ProviderInstanceEntry[] = [];
     for (const entry of enabledEntries) {
-      if (matchesLockedProvider(entry)) {
+      const matchesLock =
+        lockedProvider === null ||
+        (entry.driverKind === lockedProvider &&
+          (!lockedContinuationGroupKey ||
+            entry.continuationGroupKey === lockedContinuationGroupKey));
+      if (matchesLock) {
         available.push(entry);
       } else {
         disabled.push(entry);
@@ -726,7 +746,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   const instanceOrder = instanceEntries.map((entry) => entry.instanceId);
 
   const filteredModels = (() => {
-    let result = flatModels;
+    let result = scopeModels;
 
     if (searchQuery.trim()) {
       const candidates =
@@ -744,12 +764,20 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     if (lockedProvider !== null) {
       result = result.filter((m) => matchesLockedProvider(m));
       if (selectedInstanceId === "favorites") {
-        result = result.filter((m) => favoritesSet.has(providerModelKey(m.instanceId, m.slug)));
+        result = result.filter(
+          (model) =>
+            favoritesSet.has(providerModelKey(model.instanceId, model.slug)) ||
+            selectedModelKeySet.has(modelPickerModelKey(model.instanceId, model.slug)),
+        );
       } else {
         result = result.filter((m) => m.instanceId === selectedInstanceId);
       }
     } else if (selectedInstanceId === "favorites") {
-      result = result.filter((m) => favoritesSet.has(providerModelKey(m.instanceId, m.slug)));
+      result = result.filter(
+        (model) =>
+          favoritesSet.has(providerModelKey(model.instanceId, model.slug)) ||
+          selectedModelKeySet.has(modelPickerModelKey(model.instanceId, model.slug)),
+      );
     } else {
       result = result.filter((m) => m.instanceId === selectedInstanceId);
     }
@@ -769,7 +797,9 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     const legacyModels: ModelPickerItem[] = [];
     for (const model of filteredModels) {
       const isLegacy =
-        model.isLegacy && !favoritesSet.has(providerModelKey(model.instanceId, model.slug));
+        model.isLegacy &&
+        !model.isAixModel &&
+        !favoritesSet.has(providerModelKey(model.instanceId, model.slug));
       (isLegacy ? legacyModels : currentModels).push(model);
     }
     if (legacyModels.length === 0) {
@@ -829,9 +859,9 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     .slice(0, MODEL_PICKER_JUMP_KEYBINDING_COMMANDS.length)
     .map((model) => modelPickerModelKey(model.instanceId, model.slug));
   const allItemKeys = ((): string[] => [
-    ...flatModels.map((model) => modelPickerModelKey(model.instanceId, model.slug)),
+    ...scopeModels.map((model) => modelPickerModelKey(model.instanceId, model.slug)),
     ...new Set(
-      flatModels
+      scopeModels
         .filter((model) => model.isLegacy)
         .map((model) => modelPickerLegacySectionKey(model.instanceId)),
     ),

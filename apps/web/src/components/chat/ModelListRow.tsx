@@ -72,7 +72,7 @@ export const ModelListRow = memo(function ModelListRow(props: {
         indicatorBackground="var(--popover)"
         badgeClassName="right-[-0.125rem] bottom-[-0.125rem] h-3 min-w-3 px-0.5 text-5xs"
       />
-      <div className="flex min-w-0 flex-1 items-center gap-2 text-left">
+      <div className="flex min-w-0 flex-1 flex-nowrap items-center gap-2 text-left">
         <div
           className="min-w-0 truncate text-sm font-normal leading-snug"
           // Names the row in full on hover only when it is cut off.

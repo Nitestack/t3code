@@ -2,14 +2,15 @@ import { ProviderDriverKind, ProviderInstanceId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import {
   aixMetadataFromInstanceId,
+  aixProfileLabel,
+  aixProfileLabels,
   groupAixProviderProfiles,
+  isPickerModelVisibleForProjectScope,
   pickerFilterIsFavorites,
-  pickerFilterIsSubscriptions,
   pickerFilterProfileId,
   pickerFilterProviderKey,
-  pickerFilterStateForSelection,
-  pickerSelectionTarget,
-  providerInstancesForPickerLevel,
+  providerInstancesForProjectScope,
+  resolveAixProfileId,
 } from "./providerPickerHierarchy.ts";
 
 const entry = (
@@ -41,35 +42,7 @@ describe("provider picker hierarchy", () => {
     ]);
   });
 
-  it("deduplicates harnesses within a profile and keeps the first enabled entry", () => {
-    const disabledFirst = entry("aix-codex-ac-disabled-first", "codex", "ac", "adCare", false);
-    const enabledSecond = entry("aix-codex-ac-second", "codex", "ac", "adCare");
-    expect(
-      providerInstancesForPickerLevel({
-        entries: [disabledFirst, ...entries, enabledSecond],
-        scope: "aix",
-        aixProfile: "ac",
-      }),
-    ).toEqual([entries[1], entries[2]]);
-  });
-
-  it("keeps subscriptions separate and maps a profile plus harness to its exact instance", () => {
-    expect(
-      providerInstancesForPickerLevel({ entries, scope: "subscriptions" }).map(
-        (item) => item.instanceId,
-      ),
-    ).toEqual(["codex"]);
-    expect(
-      pickerSelectionTarget({
-        entries,
-        scope: "aix",
-        profileId: "ac",
-        preferredDriver: ProviderDriverKind.make("opencode"),
-      })?.instanceId,
-    ).toBe("aix-opencode-ac");
-    expect(
-      pickerFilterStateForSelection({ scope: "aix", profileId: "ac", providerKey: "codex" }),
-    ).toEqual({ tag: "aix-harness", profileId: "ac", providerKey: "codex" });
+  it("does not infer a profile for subscription instances", () => {
     expect(groupAixProviderProfiles([entries[0]!])).toEqual([]);
   });
 
@@ -85,7 +58,6 @@ describe("provider picker hierarchy", () => {
     expect(pickerFilterProviderKey(harnessFilter)).toBe("codex");
     expect(pickerFilterProviderKey({ tag: "provider", providerKey: "codex" })).toBe("codex");
     expect(pickerFilterIsFavorites({ tag: "favorites" })).toBe(true);
-    expect(pickerFilterIsSubscriptions({ tag: "subscriptions" })).toBe(true);
   });
 
   it("classifies older snapshots by the aix instance id prefix", () => {
@@ -96,5 +68,81 @@ describe("provider picker hierarchy", () => {
       ),
     ).toEqual({ aixProfile: "engineering", aixProfileLabel: "engineering" });
     expect(aixMetadataFromInstanceId("codex", ProviderDriverKind.make("codex"))).toBeUndefined();
+  });
+
+  it("filters instances by project scope and keeps the selected instance visible", () => {
+    expect(
+      providerInstancesForProjectScope({ entries, scope: "personal" }).map(
+        (item) => item.instanceId,
+      ),
+    ).toEqual(["codex"]);
+    expect(
+      providerInstancesForProjectScope({ entries, scope: "work", aixProfile: "ac" }).map(
+        (item) => item.instanceId,
+      ),
+    ).toEqual(["aix-codex-ac", "aix-opencode-ac"]);
+    expect(
+      providerInstancesForProjectScope({
+        entries,
+        scope: "work",
+        aixProfile: "ac",
+        selectedInstanceId: ProviderInstanceId.make("codex"),
+      }).map((item) => item.instanceId),
+    ).toEqual(["aix-codex-ac", "aix-opencode-ac", "codex"]);
+  });
+
+  it("filters models by project scope while retaining a selected model from the other scope", () => {
+    expect(
+      isPickerModelVisibleForProjectScope({
+        scope: "personal",
+        modelProfileId: "ac",
+        isSelected: false,
+      }),
+    ).toBe(false);
+    expect(
+      isPickerModelVisibleForProjectScope({
+        scope: "work",
+        modelProfileId: "ac",
+        selectedProfileId: "ac",
+        isSelected: false,
+      }),
+    ).toBe(true);
+    expect(
+      isPickerModelVisibleForProjectScope({
+        scope: "work",
+        modelProfileId: "other",
+        selectedProfileId: "ac",
+        isSelected: false,
+      }),
+    ).toBe(false);
+    expect(
+      isPickerModelVisibleForProjectScope({
+        scope: "work",
+        modelProfileId: undefined,
+        selectedProfileId: "ac",
+        isSelected: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("falls back from a missing remembered profile to the selected model then the first profile", () => {
+    const profiles = groupAixProviderProfiles(entries);
+    expect(
+      resolveAixProfileId({
+        profiles,
+        rememberedProfileId: "removed",
+        selectedModelProfileId: "personal",
+      }),
+    ).toBe("personal");
+    expect(resolveAixProfileId({ profiles, rememberedProfileId: "removed" })).toBe("ac");
+  });
+
+  it("uses profile labels when present and falls back to ids on older server data", () => {
+    const labels = aixProfileLabels([
+      entry("aix-codex-ac", "codex", "ac", "adCare"),
+      entry("aix-codex-personal", "codex", "personal"),
+    ]);
+    expect(aixProfileLabel("ac", labels)).toBe("adCare");
+    expect(aixProfileLabel("personal", labels)).toBe("personal");
   });
 });

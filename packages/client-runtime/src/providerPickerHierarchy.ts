@@ -1,4 +1,4 @@
-import type { ProviderDriverKind, ProviderInstanceId } from "@t3tools/contracts";
+import type { ProjectScope, ProviderDriverKind, ProviderInstanceId } from "@t3tools/contracts";
 
 export type PickerProviderInstance = {
   readonly instanceId: ProviderInstanceId;
@@ -8,11 +8,9 @@ export type PickerProviderInstance = {
   readonly aixProfileLabel?: string | undefined;
 };
 
-export type PickerScope = "subscriptions" | "aix";
 export type PickerFilterState =
   | { readonly tag: "all" }
   | { readonly tag: "favorites" }
-  | { readonly tag: "subscriptions" }
   | { readonly tag: "provider"; readonly providerKey: string }
   | { readonly tag: "aix-profile"; readonly profileId: string }
   | { readonly tag: "aix-harness"; readonly profileId: string; readonly providerKey: string };
@@ -27,9 +25,6 @@ export const pickerFilterProviderKey = (filter: PickerFilterState | null): strin
       : undefined;
 export const pickerFilterIsFavorites = (filter: PickerFilterState | null): boolean =>
   filter?.tag === "favorites";
-export const pickerFilterIsSubscriptions = (filter: PickerFilterState | null): boolean =>
-  filter?.tag === "subscriptions";
-
 export type AixProviderProfile<T extends PickerProviderInstance> = {
   readonly id: string;
   readonly label: string;
@@ -60,50 +55,70 @@ export function groupAixProviderProfiles<T extends PickerProviderInstance>(
   return [...profiles].map(([id, profile]) => ({ id, ...profile }));
 }
 
-export function providerInstancesForPickerLevel<T extends PickerProviderInstance>(input: {
+export function resolveAixProfileId<T extends PickerProviderInstance>(input: {
+  readonly profiles: ReadonlyArray<AixProviderProfile<T>>;
+  readonly rememberedProfileId?: string | undefined;
+  readonly selectedModelProfileId?: string | undefined;
+}): string | undefined {
+  const exists = (profileId: string | undefined) =>
+    profileId !== undefined && input.profiles.some((profile) => profile.id === profileId);
+  if (exists(input.rememberedProfileId)) return input.rememberedProfileId;
+  if (exists(input.selectedModelProfileId)) return input.selectedModelProfileId;
+  return input.profiles[0]?.id;
+}
+
+export function aixProfileLabels(
+  entries: ReadonlyArray<PickerProviderInstance>,
+): ReadonlyMap<string, string> {
+  return new Map(groupAixProviderProfiles(entries).map(({ id, label }) => [id, label]));
+}
+
+export function aixProfileLabel(profileId: string, labels: ReadonlyMap<string, string>): string {
+  // Older servers omit profile labels, so keep the stable profile id visible.
+  return labels.get(profileId) ?? profileId;
+}
+
+export function providerInstancesForProjectScope<T extends PickerProviderInstance>(input: {
   readonly entries: ReadonlyArray<T>;
-  readonly scope: PickerScope;
+  readonly scope: ProjectScope;
   readonly aixProfile?: string | undefined;
+  readonly selectedInstanceId?: ProviderInstanceId | undefined;
 }): ReadonlyArray<T> {
-  const candidates = input.entries.filter((entry) =>
-    input.scope === "aix"
-      ? entry.enabled === true &&
-        entry.aixProfile !== undefined &&
-        entry.aixProfile === input.aixProfile
-      : entry.aixProfile === undefined,
+  const inScope = (entry: T) =>
+    input.scope === "work"
+      ? entry.enabled === true && entry.aixProfile !== undefined
+      : entry.aixProfile === undefined;
+  const candidates = input.entries.filter(
+    (entry) =>
+      inScope(entry) &&
+      (input.scope !== "work" ||
+        input.aixProfile === undefined ||
+        entry.aixProfile === input.aixProfile),
   );
-  if (input.scope !== "aix") return candidates;
+  const selected =
+    input.selectedInstanceId === undefined
+      ? undefined
+      : input.entries.find((entry) => entry.instanceId === input.selectedInstanceId);
+  if (selected && !inScope(selected)) {
+    candidates.push(selected);
+  }
+  if (input.scope === "personal") return candidates;
   const byDriver = new Map<ProviderDriverKind, T>();
-  for (const entry of candidates)
-    if (!byDriver.has(entry.driverKind)) byDriver.set(entry.driverKind, entry);
-  return [...byDriver.values()];
+  for (const entry of candidates) {
+    if (inScope(entry) && !byDriver.has(entry.driverKind)) byDriver.set(entry.driverKind, entry);
+  }
+  const selectedOutOfScope = selected && !inScope(selected) ? [selected] : [];
+  return [...byDriver.values(), ...selectedOutOfScope];
 }
 
-export function pickerFilterStateForSelection(input: {
-  readonly scope: PickerScope;
-  readonly profileId?: string | undefined;
-  readonly providerKey?: string | undefined;
-}): PickerFilterState {
-  if (input.scope === "subscriptions")
-    return input.providerKey
-      ? { tag: "provider", providerKey: input.providerKey }
-      : { tag: "subscriptions" };
-  if (input.profileId === undefined) return { tag: "all" };
-  return input.providerKey
-    ? { tag: "aix-harness", profileId: input.profileId, providerKey: input.providerKey }
-    : { tag: "aix-profile", profileId: input.profileId };
-}
-
-export function pickerSelectionTarget<T extends PickerProviderInstance>(input: {
-  readonly entries: ReadonlyArray<T>;
-  readonly scope: PickerScope;
-  readonly profileId?: string | undefined;
-  readonly preferredDriver?: ProviderDriverKind | undefined;
-}): T | undefined {
-  const candidates = providerInstancesForPickerLevel({
-    entries: input.entries,
-    scope: input.scope,
-    ...(input.profileId === undefined ? {} : { aixProfile: input.profileId }),
-  });
-  return candidates.find((entry) => entry.driverKind === input.preferredDriver) ?? candidates[0];
+export function isPickerModelVisibleForProjectScope(input: {
+  readonly scope: ProjectScope;
+  readonly modelProfileId?: string | undefined;
+  readonly selectedProfileId?: string | undefined;
+  readonly isSelected: boolean;
+}): boolean {
+  if (input.isSelected) return true;
+  return input.scope === "work"
+    ? input.modelProfileId !== undefined && input.modelProfileId === input.selectedProfileId
+    : input.modelProfileId === undefined;
 }

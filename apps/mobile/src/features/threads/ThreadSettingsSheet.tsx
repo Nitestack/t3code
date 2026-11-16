@@ -18,6 +18,7 @@ import type {
   EnvironmentId,
   ModelSelection,
   ProjectId,
+  ProjectScope,
   ProviderOptionDescriptor,
   ProviderOptionSelection,
   RuntimeMode,
@@ -85,7 +86,7 @@ import { ChatGptSharingStatus } from "./ChatGptSharingStatus";
 import { environmentCatalog } from "../../connection/catalog";
 import { useEnvironmentQuery } from "../../state/query";
 import { scopedThreadKey } from "../../lib/scopedEntities";
-import { useThreadReportedModelSelection } from "../../state/entities";
+import { useProject, useThreadReportedModelSelection } from "../../state/entities";
 import {
   setComposerDraftText,
   updateComposerDraftSettings,
@@ -129,13 +130,16 @@ import {
 import { formatProviderUpdateRequiredNotice } from "@t3tools/client-runtime/providerUpdateRequiredModels";
 import {
   pickerFilterIsFavorites,
-  pickerFilterIsSubscriptions,
   pickerFilterProfileId,
   pickerFilterProviderKey,
   groupAixProviderProfiles,
-  providerInstancesForPickerLevel,
+  isPickerModelVisibleForProjectScope,
+  providerInstancesForProjectScope,
+  resolveAixProfileId,
   type PickerFilterState,
 } from "@t3tools/client-runtime/provider-picker-hierarchy";
+import { resolveProjectScope, scopeProjectRef } from "@t3tools/client-runtime/environment";
+import { useMobileEnvironmentScope } from "../environment-scope/useMobileEnvironmentScope";
 
 const PRIMARY_PROVIDER_DRIVERS: ReadonlySet<string> = new Set([
   "claudeAgent",
@@ -277,6 +281,7 @@ type ThreadSettingsSubmenuPage =
 type ThreadSettingsSessionProps = {
   readonly environmentId: EnvironmentId | null;
   readonly projectId: ProjectId | null;
+  readonly projectScope: unknown | null;
   readonly cwd: string | null;
   readonly providerInstanceId?: ProviderInstanceId;
   readonly lockedProviderInstanceId?: ProviderInstanceId;
@@ -302,6 +307,7 @@ export type ExistingThreadSettingsRouteParams = {
 
 type ThreadSettingsSessionValue = {
   readonly environmentId: EnvironmentId | null;
+  readonly projectScope: ProjectScope;
   readonly providerInstanceId?: ProviderInstanceId;
   readonly providerGroups: ReadonlyArray<ProviderGroup>;
   readonly favoriteKeys: ReadonlySet<string>;
@@ -346,6 +352,13 @@ function ThreadSettingsSessionProvider(
   const preferences = useAtomValue(mobilePreferencesAtom);
   const configs = useAtomValue(environmentServerConfigsAtom);
   const config = props.environmentId ? configs.get(props.environmentId) : undefined;
+  const { activeScope } = useMobileEnvironmentScope();
+  const projectScope =
+    props.projectScope === null
+      ? activeScope
+      : config?.environment.capabilities.projectScope === true
+        ? resolveProjectScope(props.projectScope)
+        : "personal";
   const settings = config?.settings;
   const connection = useEnvironmentQuery(
     props.environmentId ? environmentCatalog.stateAtom(props.environmentId) : null,
@@ -494,18 +507,18 @@ function ThreadSettingsSessionProvider(
   };
   const [showLegacyToggle, setShowLegacyToggle] = useState(false);
   const [providerFilter, setProviderFilter] = useState<PickerFilterState | null>(() => {
+    if (projectScope !== "work") return null;
     const selectedInstanceId = props.selectedModel?.instanceId ?? props.providerInstanceId;
     const selectedAixProfile = selectedInstanceId
       ? props.providerGroups
           .flatMap((group) => group.models)
           .find((model) => model.selection.instanceId === selectedInstanceId)?.aixProfile
       : undefined;
-    const hasAixProfiles = props.providerGroups.some((group) => group.models[0]?.aixProfile);
-    return selectedAixProfile
-      ? { tag: "aix-profile", profileId: selectedAixProfile }
-      : hasAixProfiles
-        ? { tag: "subscriptions" }
-        : null;
+    const firstAixProfile = props.providerGroups
+      .flatMap((group) => group.models)
+      .find((model) => model.aixProfile)?.aixProfile;
+    const profileId = selectedAixProfile ?? firstAixProfile;
+    return profileId ? { tag: "aix-profile", profileId } : null;
   });
   const [searchQuery, setSearchQuery] = useState("");
   const [providerExpansionOverrides, setProviderExpansionOverrides] = useState<ReadonlySet<string>>(
@@ -636,6 +649,7 @@ function ThreadSettingsSessionProvider(
 
   const value = {
     environmentId,
+    projectScope,
     providerInstanceId: props.providerInstanceId,
     providerGroups,
     manageHidden,
@@ -801,8 +815,32 @@ function buildThreadSettingsCatalogItems(
       ? { aixProfileLabel: group.models[0].aixProfileLabel }
       : {}),
   }));
+  const profiles = groupAixProviderProfiles(hierarchyEntries);
+  const selectedModelProfileId = session.displayedModelSelection
+    ? session.providerGroups
+        .flatMap((group) => group.models)
+        .find((model) => model.selection.instanceId === session.displayedModelSelection?.instanceId)
+        ?.aixProfile
+    : undefined;
+  const aixProfileFilter =
+    session.projectScope === "work"
+      ? resolveAixProfileId({
+          profiles,
+          rememberedProfileId: pickerFilterProfileId(session.providerFilter),
+          selectedModelProfileId,
+        })
+      : undefined;
+  const visibleEntrySet = new Set(
+    providerInstancesForProjectScope({
+      entries: hierarchyEntries,
+      scope: session.projectScope,
+      ...(aixProfileFilter ? { aixProfile: aixProfileFilter } : {}),
+      ...(session.displayedModelSelection
+        ? { selectedInstanceId: session.displayedModelSelection.instanceId }
+        : {}),
+    }).map((entry) => entry.providerKey),
+  );
   return session.providerGroups.flatMap((group) => {
-    const aixProfileFilter = pickerFilterProfileId(session.providerFilter);
     const aixHarnessFilter =
       session.providerFilter?.tag === "aix-harness"
         ? session.providerFilter.providerKey
@@ -811,26 +849,21 @@ function buildThreadSettingsCatalogItems(
     if (providerFilter && group.providerKey !== providerFilter) {
       return [];
     }
-    if (
-      pickerFilterIsSubscriptions(session.providerFilter) &&
-      group.models[0]?.aixProfile !== undefined
-    ) {
-      return [];
-    }
-    if (aixProfileFilter !== undefined) {
-      const profileEntries = providerInstancesForPickerLevel({
-        entries: hierarchyEntries,
-        scope: "aix",
-        aixProfile: aixProfileFilter,
-      });
-      if (!profileEntries.some((entry) => entry.providerKey === group.providerKey)) return [];
-    }
+    if (!visibleEntrySet.has(group.providerKey)) return [];
     if (aixHarnessFilter !== undefined && group.providerKey !== aixHarnessFilter) return [];
     const driver = group.models[0]?.providerDriver ?? group.providerKey;
+    const scopeModels = group.models.filter((model) =>
+      isPickerModelVisibleForProjectScope({
+        scope: session.projectScope,
+        modelProfileId: model.aixProfile,
+        selectedProfileId: aixProfileFilter,
+        isSelected: session.isApplied(model),
+      }),
+    );
     const catalogModels =
       session.manageHidden || session.showLegacy || pickerFilterIsFavorites(session.providerFilter)
-        ? group.models
-        : group.models.filter(
+        ? scopeModels
+        : scopeModels.filter(
             (model) =>
               !model.isLegacy || session.isDisplayed(model) || session.favoriteKeys.has(model.key),
           );
@@ -857,7 +890,9 @@ function buildThreadSettingsCatalogItems(
     const isPrimary = driver !== undefined && PRIMARY_PROVIDER_DRIVERS.has(driver);
     const containsAppliedSelection = group.models.some(session.isApplied);
     const isNarrowed =
-      (session.providerFilter !== null && session.providerFilter.tag !== "all") ||
+      session.providerFilter?.tag === "provider" ||
+      session.providerFilter?.tag === "aix-harness" ||
+      pickerFilterIsFavorites(session.providerFilter) ||
       session.searchQuery.trim().length > 0;
     const collapsible = !isNarrowed;
     const collapsed = providerSectionIsCollapsed({
@@ -1274,7 +1309,6 @@ function ThreadSettingsModelsScreen() {
     compactToolbar: true,
   };
   const searchToolbarInset = useSearchToolbarInset(search);
-  const aixProfileFilter = pickerFilterProfileId(session.providerFilter);
   const aixHarnessFilter =
     session.providerFilter?.tag === "aix-harness" ? session.providerFilter.providerKey : undefined;
   const hierarchyEntries = session.providerGroups.map((group) => ({
@@ -1287,24 +1321,39 @@ function ThreadSettingsModelsScreen() {
       ? { aixProfileLabel: group.models[0].aixProfileLabel }
       : {}),
   }));
+  const aixProfiles = groupAixProviderProfiles(hierarchyEntries);
+  const selectedModelProfileId = session.displayedModelSelection
+    ? session.providerGroups
+        .flatMap((group) => group.models)
+        .find((model) => model.selection.instanceId === session.displayedModelSelection?.instanceId)
+        ?.aixProfile
+    : undefined;
+  const aixProfileFilter =
+    session.projectScope === "work"
+      ? resolveAixProfileId({
+          profiles: aixProfiles,
+          rememberedProfileId: pickerFilterProfileId(session.providerFilter),
+          selectedModelProfileId,
+        })
+      : undefined;
   const visibleEntrySet = new Set(
-    providerInstancesForPickerLevel({
+    providerInstancesForProjectScope({
       entries: hierarchyEntries,
-      scope: aixProfileFilter ? "aix" : "subscriptions",
+      scope: session.projectScope,
       ...(aixProfileFilter ? { aixProfile: aixProfileFilter } : {}),
+      ...(session.displayedModelSelection
+        ? { selectedInstanceId: session.displayedModelSelection.instanceId }
+        : {}),
     }).map((entry) => entry.providerKey),
   );
   const visibleProviderGroups = session.providerGroups.filter((group) =>
     visibleEntrySet.has(group.providerKey),
   );
-  const aixProfiles = groupAixProviderProfiles(hierarchyEntries).map(
-    ({ id, label }) => [id, label] as const,
-  );
-  const hasAixProfiles = aixProfiles.length > 0;
+  const hasAixProfiles = session.projectScope === "work" && aixProfiles.length > 0;
   const providerFilters = [
     { id: "all-providers", title: "All providers", value: { tag: "all" } as const },
     { id: "favorites", title: "Favorites", value: FAVORITES_PROVIDER_FILTER },
-    ...session.providerGroups.map((group) => ({
+    ...visibleProviderGroups.map((group) => ({
       id: `provider:${group.providerKey}`,
       title: group.providerLabel,
       value: { tag: "provider", providerKey: group.providerKey } as const,
@@ -1319,27 +1368,14 @@ function ThreadSettingsModelsScreen() {
           onPress: () => session.setProviderFilter(FAVORITES_PROVIDER_FILTER),
         },
         {
-          id: "scope",
-          title: "Scope",
-          items: [
-            {
-              id: "subscriptions",
-              title: "Subscriptions · Personal",
-              selected: pickerFilterIsSubscriptions(session.providerFilter),
-              onPress: () => session.setProviderFilter({ tag: "subscriptions" }),
-            },
-            {
-              id: "aix",
-              title: "aix · Work",
-              items: aixProfiles.map(([profile, label]) => ({
-                id: `aix-profile:${profile}`,
-                title: label,
-                selected: aixProfileFilter === profile,
-                onPress: () =>
-                  session.setProviderFilter({ tag: "aix-profile", profileId: profile }),
-              })),
-            },
-          ],
+          id: "work-profile",
+          title: "Work profile",
+          items: aixProfiles.map((profile) => ({
+            id: `aix-profile:${profile.id}`,
+            title: profile.label,
+            selected: aixProfileFilter === profile.id,
+            onPress: () => session.setProviderFilter({ tag: "aix-profile", profileId: profile.id }),
+          })),
         },
         {
           id: "harness",
@@ -1495,6 +1531,9 @@ export function ExistingThreadSettingsRouteScreen({
   // Reads the same environmentId/threadId params as the Thread route beneath it.
   const { selectedThread, selectedThreadDetailRef, selectedEnvironmentRuntime } =
     useThreadSelection();
+  const project = useProject(
+    selectedThread ? scopeProjectRef(selectedThread.environmentId, selectedThread.projectId) : null,
+  );
   const { selectedThreadCwd } = useSelectedThreadWorktree();
   // Streamed text would otherwise re-render the whole model picker on every delta.
   const structure = useQuietThreadStructure(selectedThreadDetailRef);
@@ -1540,6 +1579,7 @@ export function ExistingThreadSettingsRouteScreen({
     <ThreadSettingsPickerScreen
       environmentId={selectedThread.environmentId}
       projectId={selectedThread.projectId}
+      projectScope={project?.scope}
       cwd={selectedThreadCwd}
       providerInstanceId={modelSelection.instanceId}
       {...(lockedProviderInstanceId ? { lockedProviderInstanceId } : {})}
@@ -1585,6 +1625,7 @@ export function NewTaskThreadSettingsRouteScreen() {
     <ThreadSettingsPickerScreen
       environmentId={flow.selectedEnvironmentId}
       projectId={flow.selectedProject?.id ?? null}
+      projectScope={flow.selectedProject ? flow.selectedProject.scope : null}
       cwd={flow.workspaceCwd}
       {...(flow.selectedModel ? { providerInstanceId: flow.selectedModel.instanceId } : {})}
       providerGroups={flow.providerGroups}

@@ -15,6 +15,7 @@ import {
   type ModelSelection,
   type ProviderDriverKind,
   type ProviderInstanceId,
+  type ProjectScope,
   type RuntimeMode,
   type ServerProvider,
 } from "@t3tools/contracts";
@@ -41,6 +42,7 @@ const MODEL_TRIGGER_STATES = "data-popup-open:bg-accent data-popup-open:text-for
 
 export function ComposerControlsBar(props: {
   environmentId: EnvironmentId;
+  projectScope: ProjectScope;
   workspaceCwd: string | null;
   routeKind: ChatComposerProps["routeKind"];
   routeThreadRef: ChatComposerProps["routeThreadRef"];
@@ -184,6 +186,7 @@ export function ComposerControlsBar(props: {
   const composerModelPicker = (
     <ComposerModelPicker
       environmentId={environmentId}
+      projectScope={props.projectScope}
       workspaceCwd={props.workspaceCwd}
       compact={false}
       isComposerOwned

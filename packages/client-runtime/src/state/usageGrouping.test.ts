@@ -18,6 +18,7 @@ import {
   resolveUsageLimitGroup,
   usageLimitGroupForProvider,
   usageLimitGroupsInPresentations,
+  usageAixProfileLabels,
   usageScopeGroupsInBuckets,
 } from "./usageGrouping.ts";
 
@@ -182,6 +183,51 @@ describe("usage limit grouping", () => {
     expect(work?.usageLimitSources).toEqual([]);
     expect(personal?.providers.map((entry) => entry.instanceId)).toEqual(["codex"]);
     expect(personal?.usageLimitSources?.map((source) => source.id)).toEqual(["hub"]);
+  });
+
+  it("resolves Work usage headings from the current AIX provider labels", () => {
+    const id = EnvironmentId.make("env");
+    const presentations = new Map([
+      [
+        id,
+        {
+          entry: { target: { label: "Remote" } },
+          serverConfig: {
+            providers: [
+              provider({
+                instanceId: ProviderInstanceId.make("aix-codex-ac"),
+                aixProfile: "ac",
+                aixProfileLabel: "adCare",
+                usageLimits: { checkedAt, profileName: "ac", windows: [] },
+              }),
+            ],
+            usageLimitSources: [],
+          },
+        },
+      ],
+    ]);
+
+    expect(usageAixProfileLabels(presentations).get("ac")).toBe("adCare");
+    const updated = new Map([
+      [
+        id,
+        {
+          entry: { target: { label: "Remote" } },
+          serverConfig: {
+            providers: [
+              provider({
+                instanceId: ProviderInstanceId.make("aix-codex-ac"),
+                aixProfile: "ac",
+                aixProfileLabel: "Persönlich",
+                usageLimits: { checkedAt, profileName: "ac", windows: [] },
+              }),
+            ],
+            usageLimitSources: [],
+          },
+        },
+      ],
+    ]);
+    expect(usageAixProfileLabels(updated).get("ac")).toBe("Persönlich");
   });
 
   it("shows the chosen group while it has limits, then the active scope, then Personal", () => {

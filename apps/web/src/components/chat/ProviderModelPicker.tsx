@@ -3,6 +3,7 @@ import {
   type ProviderInstanceId,
   type EnvironmentId,
   type ProviderDriverKind,
+  type ProjectScope,
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
 import { RegistryContext } from "@effect/atom-react";
@@ -21,6 +22,7 @@ import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
+import { useClientEnvironmentScope } from "../../environmentScope";
 import { ModelPickerContent, resolveModelPickerSelectedModel } from "./ModelPickerContent";
 import { retainedModelWhileProviderLocked } from "./ProviderModelPicker.logic";
 import { ChatGptSharingControl } from "./ChatGptSharingControl";
@@ -33,7 +35,7 @@ import {
 } from "../../providerInstances";
 import {
   groupAixProviderProfiles,
-  type PickerScope,
+  resolveAixProfileId,
 } from "@t3tools/client-runtime/provider-picker-hierarchy";
 import { ModelPickerHierarchyContext } from "./ModelPickerHierarchyContext";
 import { ModelPickerHierarchyFooterControls } from "./ModelPickerHierarchyFooter";
@@ -103,6 +105,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   environmentId: EnvironmentId | null;
   workspaceCwd?: string | null;
   activeInstanceId: ProviderInstanceId;
+  projectScope?: ProjectScope;
   model: string;
   selectedModels?: ReadonlyArray<{ instanceId: ProviderInstanceId; model: string }>;
   onToggleModel?: (instanceId: ProviderInstanceId, model: string) => void;
@@ -141,6 +144,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   footer?: ReactNode;
 }) {
   const composerFloatingLayerProps = useComposerMenuProps();
+  const { activeScope } = useClientEnvironmentScope();
   const [uncontrolledIsMenuOpen, setUncontrolledIsMenuOpen] = useState(false);
   const isMenuOpen = props.open ?? uncontrolledIsMenuOpen;
   const registry = useContext(RegistryContext);
@@ -200,18 +204,28 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   const aixProfiles = groupAixProviderProfiles(
     props.instanceEntries.filter(isProviderInstancePickerVisible),
   );
-  const [hierarchyScope, setHierarchyScope] = useState<PickerScope>(
-    activeEntry?.aixProfile ? "aix" : "subscriptions",
-  );
+  const hierarchyScope = props.projectScope ?? activeScope;
   const [hierarchyProfileId, setHierarchyProfileId] = useState<string | undefined>(
     activeEntry?.aixProfile ?? aixProfiles[0]?.id,
   );
+  const resolvedProfileId = resolveAixProfileId({
+    profiles: aixProfiles,
+    rememberedProfileId: hierarchyProfileId,
+    selectedModelProfileId: activeEntry?.aixProfile,
+  });
   const hierarchy = {
     profiles: aixProfiles,
     scope: hierarchyScope,
-    profileId: hierarchyProfileId,
-    onScopeChange: setHierarchyScope,
+    profileId: resolvedProfileId,
     onProfileChange: setHierarchyProfileId,
+  };
+  const resetHierarchyProfile = () => {
+    setHierarchyProfileId(
+      resolveAixProfileId({
+        profiles: aixProfiles,
+        selectedModelProfileId: activeEntry?.aixProfile,
+      }),
+    );
   };
 
   const activeInstanceId = props.activeInstanceId;
@@ -238,10 +252,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     activeEntry !== null && shouldShowInstanceBadge(activeEntry, props.instanceEntries);
 
   const setIsMenuOpen = (open: boolean) => {
-    if (open) {
-      setHierarchyScope(activeEntry?.aixProfile ? "aix" : "subscriptions");
-      setHierarchyProfileId(activeEntry?.aixProfile ?? aixProfiles[0]?.id);
-    }
+    if (open) resetHierarchyProfile();
     props.onOpenChange?.(open);
     if (props.open === undefined) {
       setUncontrolledIsMenuOpen(open);
@@ -395,6 +406,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
         setIsMenuOpen(open);
       }}
       onOpenChangeComplete={(open) => {
+        if (open) resetHierarchyProfile();
         const target = takeOpenTarget(triggerRef.current);
         if (open && docked && target) openTarget(target);
       }}
@@ -521,7 +533,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
         padding="none"
         touchBackdrop
       >
-        <ModelPickerHierarchyContext.Provider value={aixProfiles.length > 0 ? hierarchy : null}>
+        <ModelPickerHierarchyContext.Provider value={hierarchy}>
           {props.effortColumn ? (
             <DockedPickerContext value={{ modelLabel: triggerTitle }}>
               <div className="flex max-h-(--available-height) flex-col">
@@ -551,7 +563,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                 {props.footer}
               </div>
             </DockedPickerContext>
-          ) : aixProfiles.length > 0 ? (
+          ) : hierarchyScope === "work" && aixProfiles.length > 0 ? (
             <div className="flex flex-col">
               {picker}
               <div className="flex shrink-0 items-center gap-2 border-t border-border/70 bg-muted/40 px-3 py-2">

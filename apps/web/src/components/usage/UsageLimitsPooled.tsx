@@ -18,6 +18,7 @@ import {
 } from "@t3tools/shared/usageLimits";
 import type { Popover as PopoverPrimitive } from "@base-ui/react/popover";
 import { normalizeProviderAccentColor } from "@t3tools/client-runtime/state/provider-instance-display";
+import { aixProfileLabel } from "@t3tools/client-runtime/provider-picker-hierarchy";
 import { AlertTriangleIcon, ExternalLinkIcon, TicketIcon } from "lucide-react";
 import {
   createContext,
@@ -586,7 +587,15 @@ function PoolWindowCard({
   );
 }
 
-function PoolSection({ pool, now }: { readonly pool: LimitPool; readonly now: number }) {
+function PoolSection({
+  pool,
+  now,
+  aixProfileLabels,
+}: {
+  readonly pool: LimitPool;
+  readonly now: number;
+  readonly aixProfileLabels: ReadonlyMap<string, string>;
+}) {
   const color = pool.profileName ? "var(--foreground)" : barColor(pool.driver);
   const label = providerClients.get(pool.driver)?.label ?? String(pool.driver);
   const profileEnvironment = pool.accounts[0]?.environments[0]?.label;
@@ -595,7 +604,7 @@ function PoolSection({ pool, now }: { readonly pool: LimitPool; readonly now: nu
     <section className="flex flex-col gap-3">
       <h2 className="flex items-center gap-2 text-sm font-medium text-foreground">
         {pool.profileName ? (
-          <span>{pool.profileLabel ?? pool.profileName}</span>
+          <span>{aixProfileLabel(pool.profileName, aixProfileLabels)}</span>
         ) : (
           <>
             <ProviderInstanceIcon
@@ -611,7 +620,7 @@ function PoolSection({ pool, now }: { readonly pool: LimitPool; readonly now: nu
       </h2>
       {pool.profileName ? (
         <p className="-mt-2 text-xs text-muted-foreground">
-          AIX profile{profileEnvironment ? ` · ${profileEnvironment}` : ""}
+          Work profile{profileEnvironment ? ` · ${profileEnvironment}` : ""}
         </p>
       ) : null}
       {windows.map((window) => {
@@ -636,10 +645,12 @@ export function UsageLimitsPooled({
   presentations,
   now,
   emptyMessage = "No provider on the selected environments reports subscription limits.",
+  aixProfileLabels = new Map(),
 }: {
   readonly presentations: Parameters<typeof collectLimitAccounts>[0];
   readonly now: number;
   readonly emptyMessage?: string;
+  readonly aixProfileLabels?: ReadonlyMap<string, string>;
 }) {
   const [segmentPopover] = useState(() => PopoverCreateHandle<SegmentPayload>());
   const segmentPopoverActions = useRef<PopoverPrimitive.Root.Actions | null>(null);
@@ -656,7 +667,7 @@ export function UsageLimitsPooled({
           <Fragment
             key={pool.profileName ? (pool.accounts[0]?.key ?? pool.profileName) : pool.driver}
           >
-            <PoolSection pool={pool} now={now} />
+            <PoolSection pool={pool} now={now} aixProfileLabels={aixProfileLabels} />
           </Fragment>
         ))}
       </SegmentPopoverContext>
