@@ -16,7 +16,7 @@ const makeHttpClient = (respond: (request: HttpClientRequest.HttpClientRequest) 
     Effect.sync(() => HttpClientResponse.fromWeb(request, respond(request))),
   );
 
-it("normalizes known model names while preserving exact selectable IDs", () => {
+it("normalizes known names and collapses wildcard routes to concrete selectable IDs", () => {
   const models = ModelCatalog.normalizeModelInfo(
     [
       deployment("gpt-6.1-sol", { litellm_provider: "openai", mode: "responses" }),
@@ -26,6 +26,11 @@ it("normalizes known model names while preserving exact selectable IDs", () => {
         "anthropic/claude-opus-5-5*",
       ),
       deployment(
+        "claude-opus-5-5",
+        { litellm_provider: "anthropic", mode: "chat" },
+        "anthropic/claude-opus-5-5",
+      ),
+      deployment(
         "google/gemma-4-31b-it",
         { litellm_provider: "vertex_ai", mode: "chat" },
         "vertex_ai/google/gemma-4-31b-it",
@@ -33,18 +38,18 @@ it("normalizes known model names while preserving exact selectable IDs", () => {
       deployment("gpt-oss-120b", { litellm_provider: "openai", mode: "chat" }),
     ],
     undefined,
-    ["gpt-6.1-sol", "claude-opus-5-5*", "google/gemma-4-31b-it", "gpt-oss-120b"],
+    ["gpt-6.1-sol", "claude-opus-5-5*", "claude-opus-5-5", "google/gemma-4-31b-it", "gpt-oss-120b"],
   );
 
   expect(models.map(({ id, displayName }) => [id, displayName])).toEqual([
-    ["claude-opus-5-5*", "Claude Opus 5.5"],
+    ["claude-opus-5-5", "Claude Opus 5.5"],
     ["google/gemma-4-31b-it", "Gemma 4 31B IT"],
     ["gpt-6.1-sol", "GPT-6.1 Sol"],
     ["gpt-oss-120b", "GPT-OSS 120B"],
   ]);
   expect(models.find(({ id }) => id === "gpt-oss-120b")?.provider).toBe("openai");
   expect(models.map(({ id, family }) => [id, family])).toEqual([
-    ["claude-opus-5-5*", "Claude"],
+    ["claude-opus-5-5", "Claude"],
     ["google/gemma-4-31b-it", "Gemma"],
     ["gpt-6.1-sol", "OpenAI GPT"],
     ["gpt-oss-120b", "GPT-OSS"],
@@ -61,6 +66,7 @@ it("filters non-chat and generic wildcard routes but keeps named wildcard aliase
       deployment("*", { mode: "chat" }, "openai/*"),
       deployment("claude-opus-5-5*", { mode: "chat" }, "anthropic/claude-opus-5-5*"),
       deployment("claude-sonnet-5-5*", { mode: "chat" }, "anthropic/another-model*"),
+      deployment("claude*opus*", { mode: "chat" }, "anthropic/claude*opus*"),
     ],
     undefined,
     [
@@ -71,10 +77,48 @@ it("filters non-chat and generic wildcard routes but keeps named wildcard aliase
       "*",
       "claude-opus-5-5*",
       "claude-sonnet-5-5*",
+      "claude*opus*",
     ],
   );
 
-  expect(models.map(({ id }) => id)).toEqual(["claude-opus-5-5*"]);
+  expect(models.map(({ id }) => id)).toEqual(["claude-opus-5-5"]);
+});
+
+it("normalizes resolvable trailing wildcard routes and carries their metadata", () => {
+  const models = ModelCatalog.normalizeModelInfo(
+    [
+      deployment(
+        "claude-opus-5-5*",
+        {
+          litellm_provider: "Google",
+          mode: "chat",
+          display_name: "Claude Opus 5.5 Gateway",
+          max_input_tokens: 200_000,
+          max_output_tokens: 16_000,
+          input_cost_per_token: 0.000003,
+          output_cost_per_token: 0.000015,
+          reasoning_effort_levels: ["low", "high"],
+          default_reasoning_effort: "high",
+        },
+        "claude-opus-5-5*",
+      ),
+    ],
+    undefined,
+    ["claude-opus-5-5*"],
+  );
+
+  expect(models).toEqual([
+    {
+      id: "claude-opus-5-5",
+      displayName: "Claude Opus 5.5 Gateway",
+      family: "Claude",
+      provider: "google",
+      contextTokens: 200_000,
+      maxOutputTokens: 16_000,
+      pricing: { inputPerMillionTokens: 3, outputPerMillionTokens: 15 },
+      reasoning: { efforts: ["low", "high"], defaultEffort: "high" },
+    },
+  ]);
 });
 
 it("filters known non-chat and generic wildcard IDs even when model info is missing", () => {

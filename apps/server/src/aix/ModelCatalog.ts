@@ -159,12 +159,23 @@ function providerOf({ params, info }: Deployment): string | undefined {
 
 const genericWildcard = (name: string) => name === "*" || name.endsWith("/*");
 
+const concreteWildcardId = (name: string): string | undefined => {
+  if (!name.endsWith("*") || name.indexOf("*") !== name.length - 1 || genericWildcard(name)) {
+    return undefined;
+  }
+  const id = name.slice(0, -1);
+  return id.length > 0 ? id : undefined;
+};
+
 function unresolvedWildcard({ name, params }: Deployment): boolean {
   if (!name.includes("*")) return false;
+  const concreteId = concreteWildcardId(name);
   const model = stringAt(params, "model");
   const upstreamName = model?.split("/").at(-1);
   return (
-    genericWildcard(name) || model === undefined || (model.includes("*") && upstreamName !== name)
+    concreteId === undefined ||
+    model === undefined ||
+    (model.includes("*") && upstreamName !== name)
   );
 }
 
@@ -336,6 +347,7 @@ export function normalizeModelInfo(
   const knownNames = new Set<string>();
   const unresolved = new Set<string>();
   const nonChat = new Set<string>();
+  const resolvedWildcards = new Set<string>();
 
   for (const raw of entries) {
     const deployment = parseDeployment(raw);
@@ -345,6 +357,7 @@ export function normalizeModelInfo(
       unresolved.add(deployment.name);
       continue;
     }
+    const id = concreteWildcardId(deployment.name) ?? deployment.name;
     const provider = providerOf(deployment);
     const mode = stringAt(deployment.info, "mode")?.toLowerCase();
     if (
@@ -355,15 +368,23 @@ export function normalizeModelInfo(
       nonChat.add(deployment.name);
       continue;
     }
-    const deployments = byName.get(deployment.name) ?? [];
+    if (id !== deployment.name) resolvedWildcards.add(deployment.name);
+    const deployments = byName.get(id) ?? [];
     deployments.push(deployment);
-    byName.set(deployment.name, deployments);
+    byName.set(id, deployments);
   }
 
-  const listed = modelIds === undefined ? undefined : new Set(modelIds);
+  const listed =
+    modelIds === undefined
+      ? undefined
+      : new Set(
+          modelIds.map((name) =>
+            resolvedWildcards.has(name) ? (concreteWildcardId(name) ?? name) : name,
+          ),
+        );
   for (const name of listed ?? []) {
     if (knownNonChatId(name) || name.includes("*")) continue;
-    if (knownNames.has(name) || unresolved.has(name)) continue;
+    if (knownNames.has(name) || unresolved.has(name) || byName.has(name)) continue;
     byName.set(name, [{ name, params: {}, info: {} }]);
   }
 
@@ -372,7 +393,14 @@ export function normalizeModelInfo(
       ([name]) =>
         !unresolved.has(name) && !nonChat.has(name) && (listed === undefined || listed.has(name)),
     )
-    .map(([name, deployments]) => toModel(name, deployments, groups?.get(name)))
+    .map(([name, deployments]) =>
+      toModel(
+        name,
+        deployments,
+        groups?.get(name) ??
+          (resolvedWildcards.has(`${name}*`) ? groups?.get(`${name}*`) : undefined),
+      ),
+    )
     .sort(
       (left, right) =>
         left.displayName.localeCompare(right.displayName, "de", { numeric: true }) ||
