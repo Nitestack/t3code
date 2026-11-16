@@ -1438,7 +1438,7 @@ function useProjectImport({
 }) {
   const { activeScope } = useClientEnvironmentScope();
   const serverConfigs = useServerConfigs();
-  const canSetProjectScope = scans.every((scan) =>
+  const canSetProjectScope = scans.some((scan) =>
     supportsProjectScope(serverConfigs.get(scan.environmentId)?.environment.capabilities),
   );
   const [scopeOverride, setScopeOverride] = useState<"personal" | "work" | null>(null);

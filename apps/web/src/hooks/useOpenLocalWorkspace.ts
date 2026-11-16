@@ -9,7 +9,7 @@ import type { DesktopAppActivationRequest } from "@t3tools/contracts";
 import { handleDesktopAppActivationRequest } from "../desktopAppActivation";
 import { newProjectId } from "../lib/utils";
 import { useClientEnvironmentScope } from "../environmentScope";
-import { readProjects, waitForProject } from "../state/entities";
+import { readProjects, useServerConfigs, waitForProject } from "../state/entities";
 import { usePrimaryEnvironment } from "../state/environments";
 import { projectEnvironment } from "../state/projects";
 import { useEnvironmentShellHasSnapshot } from "../state/shell";
@@ -27,6 +27,7 @@ import { useNewThreadHandler } from "./useHandleNewThread";
 export function useOpenLocalWorkspace() {
   const { activeScope } = useClientEnvironmentScope();
   const primaryEnvironment = usePrimaryEnvironment();
+  const serverConfigs = useServerConfigs();
   const createProject = useAtomCommand(projectEnvironment.create, { reportFailure: false });
   const updateProject = useOrchestrationCommand(projectEnvironment.update, {
     label: "project unarchive",
@@ -68,7 +69,7 @@ export function useOpenLocalWorkspace() {
             title: inferProjectTitleFromPath(workspaceRoot),
             workspaceRoot,
             ...projectScopeInput(
-              primaryEnvironment?.serverConfig?.environment.capabilities,
+              serverConfigs.get(environmentId)?.environment.capabilities,
               activeScope,
             ),
             createWorkspaceRootIfMissing: false,

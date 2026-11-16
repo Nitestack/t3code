@@ -299,7 +299,9 @@ function ProjectDetail({
   const canOrganize =
     allMembers.every((member) => editableIds.has(member.environmentId)) &&
     canOrganizeProjectGroup(allMembers);
-  const canMoveProjectScope = canSetProjectScope(allMembers);
+  const canMoveProjectScope =
+    allMembers.every((member) => editableIds.has(member.environmentId)) &&
+    canSetProjectScope(allMembers);
   const [isOrganizing, setIsOrganizing] = useState(false);
   const organize = async (input: ProjectGroupUpdate, failureTitle: string) => {
     setIsOrganizing(true);

@@ -170,9 +170,10 @@ function ProjectOverviewContent(props: {
   const offline = memberTargets.some((target) => target === undefined);
   const canMoveProjectScope =
     environmentScopeEnabled &&
+    allMembers.every((member) => removableEnvironments.has(member.environmentId)) &&
     memberTargets.every(
       (target) =>
-        target !== undefined && supportsProjectScope(target.serverConfig.environment.capabilities),
+        target === undefined || supportsProjectScope(target.serverConfig.environment.capabilities),
     );
   // Older servers drop pin and archive, so their projects do not offer them.
   // Offline members are checked when the write runs, so their reason can show.

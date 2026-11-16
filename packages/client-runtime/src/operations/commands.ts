@@ -386,16 +386,7 @@ const persistAttachments = Effect.fn("EnvironmentCommands.persistAttachments")(f
 
 const mutateProject = Effect.fn("EnvironmentCommands.mutateProject")(function* (
   mutation:
-    | {
-        readonly type: "project.create";
-        readonly commandId: CommandId;
-        readonly projectId: ProjectId;
-        readonly title: string;
-        readonly workspaceRoot: string;
-        readonly createWorkspaceRootIfMissing?: boolean;
-        readonly defaultModelSelection?: ModelSelection | null;
-        readonly scripts?: ReadonlyArray<ProjectScript>;
-      }
+    | Extract<ProjectMutation, { readonly type: "project.create" }>
     | Extract<ProjectMutation, { readonly type: "project.update" }>
     | {
         readonly type: "project.delete";

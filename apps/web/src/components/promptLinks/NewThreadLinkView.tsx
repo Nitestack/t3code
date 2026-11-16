@@ -1,4 +1,8 @@
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import {
+  projectScopeInput,
+  scopeProjectRef,
+  scopeThreadRef,
+} from "@t3tools/client-runtime/environment";
 import {
   getAddProjectInitialQuery,
   getCloneDestinationPath,
@@ -223,7 +227,7 @@ export function NewThreadLinkView({ link }: { readonly link: NewThreadLink }) {
         projectId: newProjectId(),
         title: repository.name,
         createdAt: new Date().toISOString(),
-        scope: activeScope,
+        ...projectScopeInput(serverConfig.environment.capabilities, activeScope),
         remoteUrl,
         destinationPath: getCloneDestinationPath(
           settings.ghqCloneLayout

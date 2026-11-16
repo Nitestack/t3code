@@ -1275,7 +1275,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     setProjectGroupPinned,
     toggleProjectGroupPin,
   } = useProjectPin();
-  const { updateProjectGroup } = useProjectGroupUpdate();
+  const { updateProjectGroup, canSetProjectScope } = useProjectGroupUpdate();
   const handleProjectSettings = useStableCallback(
     (
       event: ReactMouseEvent<HTMLElement> | ReactKeyboardEvent<HTMLInputElement>,
@@ -1302,7 +1302,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             [
               { id: "new-thread", label: "New thread" },
               { id: "copy-path", label: "Copy path" },
-              ...(canPinProject(group)
+              ...(canSetProjectScope(group.memberProjects)
                 ? [
                     {
                       id: "change-scope",
@@ -1331,6 +1331,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             copyPathToClipboard(group.workspaceRoot, { path: group.workspaceRoot });
             return;
           case "change-scope":
+            if (!canSetProjectScope(group.memberProjects)) return;
             void updateProjectGroup(
               group.memberProjects,
               { scope: group.scope === "work" ? "personal" : "work" },
