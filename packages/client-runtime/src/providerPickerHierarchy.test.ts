@@ -285,6 +285,15 @@ describe("provider picker hierarchy", () => {
         providers: [personal, aix],
       }),
     ).toEqual({ instanceId: aix.instanceId, model: "work-default" });
+
+    expect(
+      resolveDraftModelSelectionAfterUsageLimitFallback({
+        scope: "personal",
+        exhaustedSelection: { instanceId: personal.instanceId, model: "gpt-default" },
+        fallbackSelection: { instanceId: personal.instanceId, model: "gpt-sibling" },
+        providers: [{ ...personal, models: [...personal.models, { slug: "gpt-sibling" }] }],
+      }),
+    ).toBeNull();
   });
 
   it("uses a sticky selection only when it belongs to the draft scope", () => {

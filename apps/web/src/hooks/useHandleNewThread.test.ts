@@ -433,6 +433,21 @@ describe.each([
 });
 
 describe("useNewThreadHandler", () => {
+  it("clears a stale non-explicit model selection when no default resolves", async () => {
+    testState.reset(null);
+
+    const pending = useNewThreadHandler()({
+      environmentId: "environment-ssh",
+      projectId: "project-remote",
+    } as never);
+    testState.completeProjectFileRead(null);
+    await pending;
+
+    expect(testState.draftStore.setModelSelection).toHaveBeenCalledWith("draft-delayed", null, {
+      replaceOptions: true,
+    });
+  });
+
   it("does not carry an exhausted explicit source model into a new draft", async () => {
     testState.reset(null);
     testState.providers = [

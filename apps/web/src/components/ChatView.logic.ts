@@ -109,6 +109,25 @@ import {
 type ThreadProjection = EnvironmentThread["projection"];
 type ThreadStructureRow = ThreadStructure["visibleTurnItems"][number];
 
+export function resolveDraftFallbackBannerDefault(input: {
+  readonly selection: ModelSelection | null;
+  readonly providers: ReadonlyArray<
+    Pick<ServerProvider, "instanceId" | "displayName" | "driver" | "models">
+  >;
+}) {
+  if (!input.selection) return null;
+  const provider = input.providers.find(
+    (candidate) => candidate.instanceId === input.selection?.instanceId,
+  );
+  if (!provider) return null;
+  const model = provider.models.find((candidate) => candidate.slug === input.selection?.model);
+  return {
+    selection: input.selection,
+    providerName: provider.displayName ?? provider.driver,
+    modelName: model?.name ?? input.selection.model,
+  };
+}
+
 export const LAST_INVOKED_SCRIPT_BY_PROJECT_KEY = "t3code:last-invoked-script-by-project";
 export const MAX_HIDDEN_MOUNTED_TERMINAL_THREADS = 10;
 
