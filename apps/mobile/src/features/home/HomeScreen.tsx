@@ -24,6 +24,7 @@ import {
   useRef,
   useState,
   type ComponentProps,
+  type ReactNode,
 } from "react";
 import {
   Platform,
@@ -105,6 +106,8 @@ import { deriveHomeEmptyState } from "./home-empty-state";
 import { useMobileEnvironmentScope } from "../environment-scope/useMobileEnvironmentScope";
 
 interface HomeScreenProps {
+  /** Android draws it at the top of the rounded list card. */
+  readonly header?: ReactNode;
   /** Whether this list is the one on screen; see `useHomeRouteVisible`. */
   readonly visible: boolean;
   readonly projects: ReadonlyArray<EnvironmentProject>;
@@ -749,9 +752,16 @@ export function HomeScreen(props: HomeScreenProps) {
       />
     );
 
+  const cardHeader = props.header ? (
+    <View className="pt-2" style={{ paddingHorizontal: androidListGutter + 8 }}>
+      {props.header}
+    </View>
+  ) : null;
+
   if (Platform.OS === "android" && threadListV2Items.length === 0) {
     return (
       <ScreenContent surface="screen">
+        {cardHeader}
         <View
           className="flex-1 items-center justify-center px-4"
           style={{ paddingBottom: insets.bottom }}
@@ -765,6 +775,7 @@ export function HomeScreen(props: HomeScreenProps) {
   return (
     <View className={containerClassName}>
       <ScreenContent surface="screen">
+        {cardHeader}
         <View className={cn("flex-1", Platform.OS !== "android" && contentBackground)}>
           <SwipeableScrollGateProvider enabled={swipeEnabled} activation={swipeRowActivation}>
             <GestureDetector gesture={homeScrollGesture}>

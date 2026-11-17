@@ -269,21 +269,6 @@ function UsageScreen(props: {
     <SettingsScreen
       title="Usage"
       menus={showEnvironmentFilter ? [environmentMenu] : undefined}
-      trailing={
-        scopeGroups.size > 1 ? (
-          <SegmentedControl
-            options={[
-              { value: "personal", label: "Personal" },
-              { value: "work", label: "Work" },
-            ]}
-            selected={scope}
-            onSelect={(value) => {
-              if (value === "personal" || value === "work") setRequestedScope(value);
-            }}
-            size="compact"
-          />
-        ) : undefined
-      }
       workspaceRoot={props.workspace}
     >
       {headerOnly ? null : (
@@ -304,6 +289,18 @@ function UsageScreen(props: {
           }
         >
           <View className="w-full gap-6 self-center" style={{ maxWidth: MAX_CONTENT_WIDTH }}>
+            {scopeGroups.size > 1 ? (
+              <SegmentedControl
+                options={[
+                  { value: "personal", label: "Personal" },
+                  { value: "work", label: "Work" },
+                ]}
+                selected={scope}
+                onSelect={(value) => {
+                  if (value === "personal" || value === "work") setRequestedScope(value);
+                }}
+              />
+            ) : null}
             {wide ? (
               <View className="flex-row items-center gap-3">
                 {showingLimits ? (

@@ -160,6 +160,15 @@ export function HomeRouteScreen() {
     );
   }
 
+  const scopeSwitcher = (
+    <EnvironmentScopeSwitcher
+      onScopeChange={() => {
+        setSelectedEnvironmentId(null);
+        setSelectedProjectKey(null);
+      }}
+    />
+  );
+
   return (
     <AndroidHomeFabLayout onStartNewTask={startNewTask}>
       <>
@@ -185,14 +194,10 @@ export function HomeRouteScreen() {
           }}
         />
 
-        <EnvironmentScopeSwitcher
-          onScopeChange={() => {
-            setSelectedEnvironmentId(null);
-            setSelectedProjectKey(null);
-          }}
-        />
+        {Platform.OS === "android" ? null : scopeSwitcher}
 
         <HomeScreen
+          header={Platform.OS === "android" ? scopeSwitcher : undefined}
           catalogState={catalogState}
           environments={environments}
           onAddConnection={() => openSettings(navigation, "SettingsEnvironmentNew")}
