@@ -833,9 +833,21 @@ jobs:
           run-id: ${{ inputs.artifact_run_id }}
           github-token: ${{ github.token }}
 
+      # GITHUB_TOKEN cannot point refs at a commit whose workflows differ from main.
+      - id: release_app_token
+        name: Mint fork release App token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+        with:
+          app-id: ${{ secrets.FORK_SYNC_APP_ID }}
+          private-key: ${{ secrets.FORK_SYNC_APP_PRIVATE_KEY }}
+          owner: Nitestack
+          repositories: t3code
+          permission-contents: write
+          permission-workflows: write
+
       - name: Recheck source identity and tag before publication
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.release_app_token.outputs.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ needs.fork_preflight.outputs.tag }}
           RELEASE_SHA: ${{ needs.fork_preflight.outputs.sha }}
@@ -964,9 +976,21 @@ jobs:
           git fetch --no-tags --quiet origin '+refs/heads/*:refs/remotes/origin/*' '+refs/tags/*:refs/tags/*'
           git checkout --quiet --detach "$CHECKOUT_REF"
 
+      # GITHUB_TOKEN cannot point refs at a commit whose workflows differ from main.
+      - id: branch_app_token
+        name: Mint fork release App token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+        with:
+          app-id: ${{ secrets.FORK_SYNC_APP_ID }}
+          private-key: ${{ secrets.FORK_SYNC_APP_PRIVATE_KEY }}
+          owner: Nitestack
+          repositories: t3code
+          permission-contents: write
+          permission-workflows: write
+
       - name: Advance the latest-release branch
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.branch_app_token.outputs.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_SHA: ${{ needs.fork_preflight.outputs.sha }}
         shell: bash
