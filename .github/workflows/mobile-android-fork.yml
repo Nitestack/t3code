@@ -20,6 +20,8 @@ on:
         required: true
       ANDROID_KEY_PASSWORD:
         required: true
+      ANDROID_GOOGLE_SERVICES_JSON:
+        required: false
   workflow_dispatch:
     inputs:
       version:
@@ -133,8 +135,17 @@ jobs:
 
       - name: Generate Android project
         working-directory: apps/mobile
+        env:
+          ANDROID_GOOGLE_SERVICES_JSON: ${{ secrets.ANDROID_GOOGLE_SERVICES_JSON }}
         run: |
           set -euo pipefail
+          # T3 Connect sends pushes through the official Firebase project; without it push stays off.
+          if [ -n "$ANDROID_GOOGLE_SERVICES_JSON" ]; then
+            umask 077
+            google_services="$RUNNER_TEMP/google-services.json"
+            printf '%s' "$ANDROID_GOOGLE_SERVICES_JSON" > "$google_services"
+            export T3CODE_ANDROID_GOOGLE_SERVICES_FILE="$google_services"
+          fi
           # app.config.ts reads T3 Connect's public identifiers from the root .env.
           cp ../../.env.example ../../.env
           pnpm exec expo config --json | node -e 'const fs = require("node:fs"); const c = JSON.parse(fs.readFileSync(0, "utf8")); fs.appendFileSync(process.env.GITHUB_ENV, "T3_ANDROID_EXPECTED_VERSION_NAME=" + c.version + "\nT3_ANDROID_EXPECTED_VERSION_CODE=" + c.android.versionCode + "\n");'
