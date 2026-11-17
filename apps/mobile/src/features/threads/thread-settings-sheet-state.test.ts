@@ -11,7 +11,11 @@ import {
   rememberModelOptions,
   withRememberedModelOptions,
 } from "../../state/use-model-option-memory";
-import { canCommitPendingModel, pendingModelAfterPress } from "./thread-settings-sheet-state";
+import {
+  aixCatalogRefreshInstanceId,
+  canCommitPendingModel,
+  pendingModelAfterPress,
+} from "./thread-settings-sheet-state";
 
 function modelOption(
   model: string,
@@ -141,6 +145,22 @@ describe("thread settings sheet state", () => {
         { providerKey: "codex", providerLabel: "Codex", models: [{ ...pending, isHidden: true }] },
       ]),
     ).toBe(false);
+  });
+
+  it("offers catalog refresh only for provider groups with an aix profile", () => {
+    const instanceId = ProviderInstanceId.make("aix-codex-ac");
+    const aixModel = {
+      ...modelOption("gpt-next"),
+      aixProfile: "engineering",
+      selection: { ...modelOption("gpt-next").selection, instanceId },
+    };
+
+    expect(
+      aixCatalogRefreshInstanceId({
+        models: [modelOption("gpt-next")],
+      }),
+    ).toBeUndefined();
+    expect(aixCatalogRefreshInstanceId({ models: [aixModel] })).toBe(instanceId);
   });
 
   it("cannot save a staged model after sign-out removes it from the catalog", () => {
