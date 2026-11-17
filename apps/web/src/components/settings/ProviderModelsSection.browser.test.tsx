@@ -36,6 +36,36 @@ it("lists a favorite the provider no longer reports so it can be unstarred", asy
   expect(onToggleFavorite).toHaveBeenCalledWith("retired-model");
 });
 
+it("lets users hide read-only custom models and includes them in bulk visibility", async () => {
+  const onHiddenModelsChange = vi.fn();
+  const custom = { slug: "aix-model", name: "AIX Model", isCustom: true, capabilities: null };
+  await using screen = await render(
+    section({
+      canManageCustomModels: false,
+      models: [custom, { slug: "built-in", name: "Built in", isCustom: false, capabilities: null }],
+      hiddenModels: ["aix-model", "built-in"],
+      onHiddenModelsChange,
+    }),
+  );
+
+  expect(screen.getByText(/2 hidden/)).toBeInTheDocument();
+  expect(screen.getByText("Hidden from picker")).toBeInTheDocument();
+  await screen.getByRole("button", { name: "Enable all" }).click();
+  expect(onHiddenModelsChange).toHaveBeenCalledWith([], ["aix-model", "built-in"]);
+});
+
+it("enables the visibility switch for read-only custom models", async () => {
+  await using screen = await render(
+    section({
+      canManageCustomModels: false,
+      models: [{ slug: "aix-model", name: "AIX Model", isCustom: true, capabilities: null }],
+    }),
+  );
+
+  const toggle = screen.getByRole("switch", { name: "Show AIX Model in the model picker" });
+  await expect.element(toggle).toBeEnabled();
+});
+
 it("keeps custom model drafts until they save, so a failed save can be retried", async () => {
   const saves: Array<(saved: boolean) => void> = [];
   const onChange = () => new Promise<boolean>((resolve) => saves.push(resolve));

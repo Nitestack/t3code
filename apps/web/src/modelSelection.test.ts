@@ -272,6 +272,28 @@ describe("instance-scoped model selection", () => {
     });
   });
 
+  it("filters hidden custom models from an aix instance's picker options", () => {
+    const instanceId = ProviderInstanceId.make("aix-codex-work");
+    const entry = deriveProviderInstanceEntries([provider({ instanceId, models: [] })])[0]!;
+    const settings: UnifiedSettings = {
+      ...settingsWithProviderInstances(),
+      providerInstances: {
+        ...settingsWithProviderInstances().providerInstances,
+        [instanceId]: {
+          driver: ProviderDriverKind.make("codex"),
+          config: { customModels: ["vendor/model"] },
+        },
+      },
+      providerModelPreferences: {
+        [instanceId]: { hiddenModels: ["vendor/model"], modelOrder: [] },
+      },
+    };
+
+    expect(
+      getAppModelOptionsForInstance(settings, entry).map((option) => option.slug),
+    ).not.toContain("vendor/model");
+  });
+
   it("keeps custom models on the provider instance that declared them", () => {
     const providers = [
       provider({

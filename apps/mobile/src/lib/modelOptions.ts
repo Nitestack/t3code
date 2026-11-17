@@ -393,7 +393,7 @@ export function buildModelOptions(
     const hiddenModels = new Set(preferences?.hiddenModels ?? []);
     const order = new Map((preferences?.modelOrder ?? []).map((slug, index) => [slug, index]));
     const models = provider.models.filter(
-      (model) => includeHidden || model.isCustom || !hiddenModels.has(model.slug),
+      (model) => includeHidden || !hiddenModels.has(model.slug),
     );
     if (order.size > 0)
       models.sort((a, b) => (order.get(a.slug) ?? Infinity) - (order.get(b.slug) ?? Infinity));
@@ -424,8 +424,8 @@ export function buildModelOptions(
           ? {}
           : { supportedRuntimeModes: provider.supportedRuntimeModes }),
         ...(provider.iconUrl ? { providerIconUrl: provider.iconUrl } : {}),
-        isHidden: !model.isCustom && hiddenModels.has(model.slug),
-        canHide: !model.isCustom,
+        isHidden: hiddenModels.has(model.slug),
+        canHide: !model.isCustom || Boolean(provider.aixProfile ?? aixMetadata),
         isDefault: model.isDefault === true,
         isLegacy: model.isLegacy === true,
         ...(updateRequired ? { providerUpdateRequired: updateRequired } : {}),

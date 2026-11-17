@@ -928,7 +928,7 @@ describe("synchronized mobile model visibility", () => {
       options
         .filter((option) => option.providerKey === provider)
         .map((option) => option.selection.model),
-    ).toEqual(["second", "first", "custom"]);
+    ).toEqual(["second", "first"]);
     expect(
       options
         .filter((option) => option.providerKey === other)
@@ -936,7 +936,7 @@ describe("synchronized mobile model visibility", () => {
     ).toEqual(["hidden", "first", "second", "custom"]);
   });
 
-  it("exposes hidden built-ins for management without offering custom visibility controls", () => {
+  it("exposes hidden models for management while keeping regular custom models non-hideable", () => {
     const options = buildModelOptions(
       config,
       { instanceId: provider, model: "hidden" },
@@ -955,8 +955,39 @@ describe("synchronized mobile model visibility", () => {
       canHide: true,
     });
     expect(options.find((option) => option.selection.model === "custom")).toMatchObject({
-      isHidden: false,
+      isHidden: true,
       canHide: false,
+    });
+  });
+
+  it("allows hiding custom models from an aix instance", () => {
+    const instanceId = ProviderInstanceId.make("aix-codex-work");
+    const config = {
+      settings: {
+        ...DEFAULT_SERVER_SETTINGS,
+        providerInstances: {
+          [instanceId]: { driver: ProviderDriverKind.make("codex"), enabled: true },
+        },
+        providerModelPreferences: {
+          [instanceId]: { hiddenModels: ["aix-model"], modelOrder: [] },
+        },
+      },
+      providers: [
+        {
+          instanceId,
+          driver: "codex",
+          enabled: true,
+          installed: true,
+          auth: { status: "authenticated" },
+          models: [{ slug: "aix-model", name: "AIX Model", isCustom: true, capabilities: null }],
+        },
+      ],
+    } as unknown as ServerConfig;
+
+    expect(buildModelOptions(config, null, instanceId, null)).toEqual([]);
+    expect(buildModelOptions(config, null, instanceId, null, true)[0]).toMatchObject({
+      isHidden: true,
+      canHide: true,
     });
   });
 
@@ -965,7 +996,7 @@ describe("synchronized mobile model visibility", () => {
       buildModelOptions(config, { instanceId: provider, model }, provider, null).map(
         (option) => option.selection.model,
       ),
-    ).toEqual(["second", "first", "custom"]);
+    ).toEqual(["second", "first"]);
   });
 
   // regression: #16816 sync model favorites and visibility across clients

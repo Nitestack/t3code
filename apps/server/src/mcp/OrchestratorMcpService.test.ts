@@ -2120,7 +2120,10 @@ describe("OrchestratorMcpService provider resolution", () => {
                     { provider: opencodeInstanceId, model: "oc/m10" },
                   ],
                   providerModelPreferences: {
-                    [opencodeInstanceId]: { hiddenModels: ["oc/m02"], modelOrder: ["oc/m12"] },
+                    [opencodeInstanceId]: {
+                      hiddenModels: ["oc/m02", "oc-custom"],
+                      modelOrder: ["oc/m12"],
+                    },
                   },
                 }),
                 providerRegistryLayer(catalog),
@@ -2161,7 +2164,6 @@ describe("OrchestratorMcpService provider resolution", () => {
                 "oc/m08",
                 "oc/m09",
                 "oc/m10",
-                "oc-custom",
               ],
               omitted: 2,
             },
