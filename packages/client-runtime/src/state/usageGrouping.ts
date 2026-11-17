@@ -1,11 +1,13 @@
 import {
   isProviderAvailable,
+  type ServerProviderUsageAmounts,
   type ServerProvider,
   type UsageBucket,
   type UsageSummary,
 } from "@t3tools/contracts";
 import {
   aixProfileNameFromWindowId,
+  elapsedShare,
   type LimitAccount,
   type LimitPresentations,
 } from "@t3tools/shared/usageLimits";
@@ -13,6 +15,108 @@ import { aixMetadataFromInstanceId, aixProfileLabels } from "../providerPickerHi
 
 export type UsageLimitGroup = "personal" | "work";
 export type UsageScope = UsageLimitGroup;
+
+export interface WorkUsageRow {
+  readonly account: LimitAccount;
+  readonly label: string;
+  readonly window: LimitAccount["limits"]["windows"][number] | undefined;
+  readonly usedPercent: number;
+  readonly elapsedPercent: number | null;
+  readonly status: "nearLimit" | "overPace" | null;
+  readonly message: string | undefined;
+}
+
+export interface WorkUsageGroup {
+  readonly id: string | null;
+  readonly name: string;
+  readonly projectAmounts: ServerProviderUsageAmounts | undefined;
+  readonly rows: readonly WorkUsageRow[];
+  readonly spent: number;
+}
+
+export interface WorkUsageGroups {
+  readonly groups: readonly WorkUsageGroup[];
+  readonly flat: boolean;
+  readonly spent: number;
+}
+
+/** Group newer Gateway reports by project while keeping older server reports flat. */
+export function groupWorkUsage(accounts: readonly LimitAccount[], now: number): WorkUsageGroups {
+  const latestByCredential = new Map<string, LimitAccount>();
+  for (const account of accounts) {
+    const key = account.limits.credentialFingerprint
+      ? `credential:${account.limits.credentialFingerprint}`
+      : `account:${account.key}`;
+    const previous = latestByCredential.get(key);
+    if (!previous || Date.parse(account.limits.checkedAt) > Date.parse(previous.limits.checkedAt)) {
+      latestByCredential.set(key, account);
+    }
+  }
+  const unique = [...latestByCredential.values()];
+  const flat = unique.every((account) => account.limits.aixProject?.id === undefined);
+  const groups = new Map<string, { id: string | null; accounts: LimitAccount[] }>();
+  for (const account of unique) {
+    const project = account.limits.aixProject;
+    const id = project?.id ?? null;
+    const key = id ?? "no-project";
+    const group = groups.get(key);
+    if (group) group.accounts.push(account);
+    else groups.set(key, { id, accounts: [account] });
+  }
+
+  const result = [...groups.values()].map(({ id, accounts: members }): WorkUsageGroup => {
+    const labels = members
+      .map((account) => account.profileLabel?.trim() || account.profileName?.trim())
+      .filter((label): label is string => Boolean(label))
+      .sort((left, right) => left.localeCompare(right));
+    const projectReport = members
+      .filter((account) => account.limits.aixProject && account.limits.aixProject.id === id)
+      .sort(
+        (left, right) => Date.parse(right.limits.checkedAt) - Date.parse(left.limits.checkedAt),
+      )[0]?.limits.aixProject;
+    const rows = members
+      .map((account): WorkUsageRow => {
+        const window = account.limits.windows[0];
+        const usedPercent = window?.usedPercent ?? 0;
+        const elapsed = window ? elapsedShare(window, now) : null;
+        return {
+          account,
+          label:
+            account.profileLabel?.trim() ||
+            account.profileName?.trim() ||
+            account.displayName?.trim() ||
+            "Work key",
+          window,
+          usedPercent,
+          elapsedPercent: elapsed === null ? null : elapsed * 100,
+          status:
+            usedPercent >= 95
+              ? "nearLimit"
+              : elapsed !== null && usedPercent > elapsed * 100
+                ? "overPace"
+                : null,
+          message: account.limits.unavailable?.message,
+        };
+      })
+      .sort(
+        (left, right) =>
+          right.usedPercent - left.usedPercent || left.label.localeCompare(right.label),
+      );
+    return {
+      id,
+      name: id === null ? "No project" : (labels[0] ?? members[0]?.profileName ?? "Work"),
+      projectAmounts:
+        projectReport && "amounts" in projectReport ? projectReport.amounts : undefined,
+      rows,
+      spent: rows.reduce((sum, row) => sum + (row.window?.amounts?.spent ?? 0), 0),
+    };
+  });
+  return {
+    groups: result.sort((left, right) => left.name.localeCompare(right.name)),
+    flat,
+    spent: result.reduce((sum, group) => sum + group.spent, 0),
+  };
+}
 
 export function usageAixProfileLabels(
   presentations: LimitPresentations,
@@ -129,7 +233,8 @@ export function usageLimitGroupsInPresentations(
       if (
         isVisibleProvider &&
         limits !== undefined &&
-        limits.unavailable?.reason !== "unsupported"
+        (limits.unavailable?.reason !== "unsupported" ||
+          usageLimitGroupForProvider(provider) === "work")
       ) {
         groups.add(usageLimitGroupForProvider(provider));
       }

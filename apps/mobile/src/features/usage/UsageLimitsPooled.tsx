@@ -38,6 +38,7 @@ import { ProviderIcon } from "../../components/ProviderIcon";
 import { SettingsScreen } from "../settings/components/SettingsScreen";
 import { environmentPresentations } from "../../state/presentation";
 import { ResetCredits } from "./UsageLimitsSection";
+import { UsageLimitsWork } from "./UsageLimitsWork";
 import { usageProviderKind, useProviderColors } from "./usageProviders";
 
 const PACE_LABEL = { ahead: "Ahead of pace", on: "On pace", under: "Under pace" } as const;
@@ -418,7 +419,7 @@ function PoolWindowCard({
         <View className="w-44 gap-1">{summary}</View>
         <View className="min-w-0 flex-1 gap-1">
           {bar}
-          {inlineLabels ? null : legend}
+          {pool.columns.length >= 2 && !inlineLabels ? legend : null}
         </View>
       </View>
     );
@@ -427,7 +428,7 @@ function PoolWindowCard({
     <View className="gap-3 rounded-[24px] border-continuous bg-grouped-card p-4">
       {summary}
       {bar}
-      {legend}
+      {pool.columns.length >= 2 ? legend : null}
     </View>
   );
 }
@@ -452,10 +453,42 @@ export function UsageLimitsSection({
       : new Map([...presentations].filter(([id]) => selectedEnvironmentIds.has(id)));
   const scopedPresentations = filterLimitPresentationsByGroup(selected, scope);
   const pools = collectLimitPools(collectLimitAccounts(scopedPresentations), now);
+  const workAccounts =
+    scope === "work"
+      ? collectLimitAccounts(scopedPresentations, { includeUnsupportedAix: true })
+      : [];
   const repeatedProfiles = profilesOnSeveralEnvironments(pools);
   const notices = collectLimitNotices(scopedPresentations);
   const externalLinks = collectExternalUsageLinks(scopedPresentations);
   const colors = useProviderColors();
+  if (scope === "work") {
+    return (
+      <View className="gap-3">
+        <UsageLimitsWork presentations={scopedPresentations} now={now} />
+        {workAccounts.length === 0 && notices.length === 0 && externalLinks.length === 0 ? (
+          <Text className="py-12 text-center text-base text-foreground-muted">
+            {selected.size === 0
+              ? "Select an environment to see limits."
+              : usageLimitEmptyMessage(scope)}
+          </Text>
+        ) : null}
+        {notices.length > 0 || failedLabels.length > 0 ? (
+          <View className="gap-1 rounded-xl border border-warning-border bg-warning px-3.5 py-3">
+            {notices.map((notice) => (
+              <Text key={notice} className="text-sm font-t3-medium text-warning-foreground">
+                {notice}
+              </Text>
+            ))}
+            {failedLabels.length > 0 ? (
+              <Text className="text-sm font-t3-medium text-warning-foreground">
+                {failedLabels.join(", ")} could not refresh limits. Showing the last known values.
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
+      </View>
+    );
+  }
   return (
     <View className="gap-6">
       {pools.length === 0 && notices.length === 0 && externalLinks.length === 0 ? (

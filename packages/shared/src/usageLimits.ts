@@ -383,7 +383,10 @@ export interface LimitAccount {
   readonly limits: ServerProviderUsageLimits;
 }
 
-export function collectLimitAccounts(presentations: LimitPresentations): readonly LimitAccount[] {
+export function collectLimitAccounts(
+  presentations: LimitPresentations,
+  options: { readonly includeUnsupportedAix?: boolean } = {},
+): readonly LimitAccount[] {
   const accounts = new Map<string, LimitAccount>();
   const creditSources = new Map<string, LimitAccount>();
   const hubRedeems = new Map<string, LimitAccount>();
@@ -468,8 +471,17 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
   for (const [environmentId, presentation] of presentations) {
     const label = presentation.entry.target.label;
     for (const provider of providersWithLimits(presentation.serverConfig?.providers ?? [])) {
-      if (!provider.usageLimits || limitsNotice(provider.usageLimits) !== null) continue;
       const profileName = aixProfileName(provider.usageLimits);
+      if (
+        !provider.usageLimits ||
+        (limitsNotice(provider.usageLimits) !== null &&
+          !(
+            options.includeUnsupportedAix &&
+            profileName &&
+            provider.usageLimits.unavailable?.reason === "unsupported"
+          ))
+      )
+        continue;
       if (
         profileName &&
         latestProfiles.get(aixProfileKey(environmentId, profileName))?.provider !== provider

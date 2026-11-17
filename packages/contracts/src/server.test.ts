@@ -186,6 +186,10 @@ describe("server config forward compatibility", () => {
       ...baseProviderSnapshot,
       usageLimits: {
         checkedAt: "2026-04-10T00:00:00.000Z",
+        aixProject: {
+          id: "6dc2eb8d-45c5-4cbe-884f-127fbb7d18cc",
+          amounts: { currency: "USD", spent: 250, total: 500 },
+        },
         windows: [
           { id: "primary", kind: "session", label: "Session", usedPercent: 12 },
           { id: "future", kind: "some-future-kind", label: "Future", usedPercent: 1 },
@@ -197,6 +201,10 @@ describe("server config forward compatibility", () => {
     expect(parsed.usageLimits?.windows).toEqual([
       { id: "primary", kind: "session", label: "Session", usedPercent: 12 },
     ]);
+    expect(parsed.usageLimits?.aixProject).toEqual({
+      id: "6dc2eb8d-45c5-4cbe-884f-127fbb7d18cc",
+      amounts: { currency: "USD", spent: 250, total: 500 },
+    });
   });
 });
 

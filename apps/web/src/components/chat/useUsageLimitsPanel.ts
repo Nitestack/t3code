@@ -50,6 +50,7 @@ export function useUsageLimitsPanel(input: {
           `usage-limits:${panel.key}:${panel.now}`,
           report,
           environmentId,
+          providerInstanceId,
           selectedScope,
           () => setPanel(null),
         )
