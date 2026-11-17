@@ -89,6 +89,10 @@ jobs:
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
           persist-credentials: false
 
       - name: Verify source, CI, versions, and release identity
@@ -359,6 +363,10 @@ jobs:
         with:
           ref: ${{ needs.fork_preflight.outputs.sha }}
           fetch-depth: 0
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
           persist-credentials: false
 
       - name: Setup Vite+ and dependencies
@@ -467,7 +475,16 @@ jobs:
         with:
           ref: ${{ needs.fork_preflight.outputs.sha }}
           fetch-depth: 0
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
           persist-credentials: false
+
+      # The flake packages the whole tree; checkout's credential cleanup only had to skip
+      # the vendored gitlinks under .repos (no .gitmodules entry).
+      - name: Restore the full source tree
+        run: git sparse-checkout disable
 
       - name: Install Nix
         uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31
@@ -692,6 +709,10 @@ jobs:
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
           persist-credentials: false
 
       - id: verify
@@ -774,6 +795,10 @@ jobs:
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
           persist-credentials: false
 
       - name: Download installers from this authorized auto-publication run
