@@ -30,6 +30,7 @@ const KeyInfo = Schema.Struct({
     max_budget: Schema.optional(Schema.NullOr(Amount)),
     budget_duration: Schema.optional(Schema.NullOr(Schema.String)),
     budget_reset_at: Schema.optional(Schema.NullOr(Schema.String)),
+    budget_period_start: Schema.optional(Schema.NullOr(Schema.String)),
   }),
 });
 export type KeyInfo = typeof KeyInfo.Type;
@@ -52,6 +53,29 @@ const isoTime = (value: string | null | undefined): string | undefined =>
     ? undefined
     : Option.getOrUndefined(Option.map(DateTime.make(value), DateTime.formatIso));
 
+const MONTHLY_WINDOW_MINUTES = DURATION_MINUTES.mo;
+
+// Gateways that report only a period start (the AI Hub) reset monthly; explicit fields win.
+const monthlyResetAfter = (
+  periodStart: string | null | undefined,
+  checkedAt: string,
+): string | undefined => {
+  if (periodStart == null) return undefined;
+  const start = Option.getOrUndefined(DateTime.make(periodStart));
+  const now = Option.getOrUndefined(DateTime.make(checkedAt));
+  if (start === undefined || now === undefined) return undefined;
+  const months = Math.max(
+    1,
+    (DateTime.getPartUtc(now, "year") - DateTime.getPartUtc(start, "year")) * 12 +
+      DateTime.getPartUtc(now, "month") -
+      DateTime.getPartUtc(start, "month"),
+  );
+  const reset = DateTime.add(start, { months });
+  return DateTime.formatIso(
+    DateTime.isGreaterThan(reset, now) ? reset : DateTime.add(start, { months: months + 1 }),
+  );
+};
+
 const budgetWindowId = (profileName: string, credentialFingerprint?: string) =>
   `aix-budget:${profileName}${credentialFingerprint ? `#credential:${credentialFingerprint}` : ""}`;
 
@@ -61,7 +85,13 @@ export function keyInfoUsageLimits(input: {
   readonly checkedAt: string;
   readonly credentialFingerprint?: string;
 }): ServerProviderUsageLimits {
-  const { spend, max_budget: maxBudget, budget_duration, budget_reset_at } = input.keyInfo.info;
+  const {
+    spend,
+    max_budget: maxBudget,
+    budget_duration,
+    budget_reset_at,
+    budget_period_start,
+  } = input.keyInfo.info;
   if (maxBudget == null) {
     return makeUnavailableUsageLimits({
       checkedAt: input.checkedAt,
@@ -84,8 +114,14 @@ export function keyInfoUsageLimits(input: {
       message: "The aix gateway returned an unrecognized budget.",
     });
   }
-  const resetsAt = isoTime(budget_reset_at);
-  const windowDurationMins = durationMinutes(budget_duration);
+  const monthlyReset =
+    budget_reset_at == null && budget_duration == null
+      ? monthlyResetAfter(budget_period_start, input.checkedAt)
+      : undefined;
+  const resetsAt = isoTime(budget_reset_at) ?? monthlyReset;
+  const windowDurationMins =
+    durationMinutes(budget_duration) ??
+    (monthlyReset === undefined ? undefined : MONTHLY_WINDOW_MINUTES);
   return {
     ...makeUsageLimits({
       checkedAt: input.checkedAt,
