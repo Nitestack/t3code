@@ -641,11 +641,17 @@ export function HomeScreen(props: HomeScreenProps) {
       : (props.savedConnectionsById[props.selectedEnvironmentId]?.environmentLabel ??
         "this environment");
   const emptyState = deriveHomeEmptyState(props.catalogState, props.projects.length);
+  const cardHeader = props.header ? (
+    <View className="pt-2" style={{ paddingHorizontal: androidListGutter + 8 }}>
+      {props.header}
+    </View>
+  ) : null;
 
   if (!hasAnyThreads) {
     return (
       <View className={containerClassName}>
         <ScreenContent surface={sidebarSurface ? "drawer" : "screen"}>
+          {cardHeader}
           <View
             className={cn(
               "flex-1 items-center justify-center px-8",
@@ -751,12 +757,6 @@ export function HomeScreen(props: HomeScreenProps) {
         variant={Platform.OS === "android" ? "plain" : undefined}
       />
     );
-
-  const cardHeader = props.header ? (
-    <View className="pt-2" style={{ paddingHorizontal: androidListGutter + 8 }}>
-      {props.header}
-    </View>
-  ) : null;
 
   if (Platform.OS === "android" && threadListV2Items.length === 0) {
     return (
