@@ -23,6 +23,52 @@ import {
 } from "./modelOptions";
 
 describe("mobile model options", () => {
+  it("marks models free only when input and output prices are both zero", () => {
+    const options = buildModelOptions(
+      {
+        providers: [
+          {
+            instanceId: "codex",
+            driver: "codex",
+            enabled: true,
+            installed: true,
+            auth: { status: "authenticated" },
+            models: [
+              {
+                slug: "free",
+                name: "Free",
+                catalogMetadata: {
+                  pricing: { inputPerMillionTokens: 0, outputPerMillionTokens: 0 },
+                },
+              },
+              {
+                slug: "paid",
+                name: "Paid",
+                catalogMetadata: {
+                  pricing: { inputPerMillionTokens: 0, outputPerMillionTokens: 0.1 },
+                },
+              },
+              {
+                slug: "incomplete",
+                name: "Incomplete",
+                catalogMetadata: { pricing: { inputPerMillionTokens: 0 } },
+              },
+            ],
+          },
+        ],
+      } as unknown as ServerConfig,
+      null,
+      undefined,
+      null,
+    );
+
+    expect(options.map(({ key, isFree }) => [key, isFree])).toEqual([
+      ["codex:free", true],
+      ["codex:paid", undefined],
+      ["codex:incomplete", undefined],
+    ]);
+  });
+
   it("keeps aix profile metadata and model selections bound to their provider instances", () => {
     const providers = [
       { instanceId: "codex", driver: "codex", slug: "gpt-personal" },

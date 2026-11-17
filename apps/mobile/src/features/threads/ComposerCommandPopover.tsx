@@ -224,6 +224,14 @@ const CommandRow = memo(function CommandRow(props: {
           props.item.label
         )}
       </Text>
+      {props.item.type === "model" && props.item.option.isFree ? (
+        <Text
+          accessibilityLabel="Free model"
+          className="text-sm font-t3-bold text-adaptive-emerald-600-400"
+        >
+          $
+        </Text>
+      ) : null}
       {props.item.description ? (
         <Text className="min-w-0 flex-1 text-xs text-foreground-muted" numberOfLines={1}>
           {props.item.description}

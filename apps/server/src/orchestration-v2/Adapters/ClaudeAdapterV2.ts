@@ -204,6 +204,7 @@ import {
   resolveClaudeModelSlug,
   resolveClaudeReportedModelSlug,
   scopeClaudeModelCatalog,
+  withoutAixClaudeCatalogOptions,
 } from "../../provider/ClaudeModelCatalog.ts";
 import {
   boundProviderEventForLogging,
@@ -5515,6 +5516,7 @@ function claudeProposedPlan(input: unknown): string | null {
 
 export interface ClaudeAdapterV2Options {
   readonly instanceId: ProviderInstanceId;
+  readonly aixManaged?: boolean;
   readonly settings: ClaudeSettings;
   readonly modelCatalog?: Effect.Effect<ClaudeModelCatalog>;
   readonly environment: NodeJS.ProcessEnv;
@@ -5563,7 +5565,10 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
   const loadModelCatalog = (
     adapterOptions.modelCatalog ?? Effect.succeed(BUNDLED_CLAUDE_MODEL_CATALOG)
   ).pipe(
-    Effect.map((catalog) => scopeClaudeModelCatalog(catalog, adapterOptions.settings.customModels)),
+    Effect.map((catalog) => {
+      const scoped = scopeClaudeModelCatalog(catalog, adapterOptions.settings.customModels);
+      return adapterOptions.aixManaged ? withoutAixClaudeCatalogOptions(scoped) : scoped;
+    }),
   );
   // Reloaded at each turn and steer so downloaded manifest updates apply without a release.
   let modelCatalog = yield* loadModelCatalog;
@@ -14521,6 +14526,7 @@ export const createClaudeAdapterV2 = Effect.fn("ClaudeAdapterV2Driver.create")(
     hooks: Pick<
       ClaudeAdapterV2Options,
       | "scopedLimitNames"
+      | "aixManaged"
       | "onUsageLimits"
       | "onSessionInit"
       | "modelCatalog"

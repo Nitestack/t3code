@@ -2,7 +2,7 @@ import { assert, describe, it } from "@effect/vitest";
 import type { ServerProviderModel } from "@t3tools/contracts";
 import type * as ModelCatalog from "@t3tools/provider-core/server/ModelCatalog";
 
-import { applyCodexModelCatalog } from "./codexModelCatalog.ts";
+import { applyCodexModelCatalog, withoutAixCodexModelOptions } from "./codexModelCatalog.ts";
 
 const model = (overrides: Partial<ServerProviderModel>): ServerProviderModel => ({
   slug: "gpt-test",
@@ -66,6 +66,24 @@ describe("applyCodexModelCatalog", () => {
     ]) {
       assert.isUndefined(result.updateRequiredModels);
     }
+  });
+
+  it("removes aix-incompatible Codex speed options", () => {
+    const modelWithOptions = model({
+      capabilities: {
+        optionDescriptors: [
+          { id: "reasoningEffort", label: "Reasoning", type: "select", options: [] },
+          { id: "serviceTier", label: "Service Tier", type: "select", options: [] },
+          { id: "fastMode", label: "Fast", type: "boolean" },
+          { id: "ultracode", label: "Ultracode", type: "boolean" },
+        ],
+      },
+    });
+    const filtered = withoutAixCodexModelOptions([modelWithOptions]);
+    assert.deepStrictEqual(
+      filtered[0]?.capabilities?.optionDescriptors?.map((descriptor) => descriptor.id),
+      ["reasoningEffort"],
+    );
   });
 
   it("classifies qualified Codex families without changing their wire ids", () => {

@@ -465,6 +465,23 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   const selectedModelKeySet = new Set(
     selectedModelKeys ?? (activeModelKey ? [activeModelKey] : []),
   );
+  const inScopePickerInstances = providerInstancesForProjectScope({
+    entries: instanceEntries,
+    scope: hierarchyScope,
+    ...(hierarchyScope === "work" && selectedAixProfile ? { aixProfile: selectedAixProfile } : {}),
+  }).filter(
+    (entry) =>
+      isProviderInstancePickerVisible(entry) &&
+      (props.lockedProvider === null ||
+        (entry.driverKind === props.lockedProvider &&
+          (!props.lockedContinuationGroupKey ||
+            entry.continuationGroupKey === props.lockedContinuationGroupKey))),
+  );
+  const defaultPickerInstanceId =
+    inScopePickerInstances.find((entry) => entry.instanceId === props.activeInstanceId)
+      ?.instanceId ??
+    inScopePickerInstances[0]?.instanceId ??
+    props.activeInstanceId;
   const activeInstanceHasSelectableUnavailableModel =
     activeEntry !== undefined &&
     (modelOptionsByInstance.get(props.activeInstanceId) ?? []).some((option) =>
@@ -493,7 +510,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       activeInstanceHasSelectableUnavailableModel ||
       activeInstanceNeedsSetup
     ) {
-      instanceId = props.activeInstanceId;
+      instanceId = defaultPickerInstanceId;
     } else {
       const hasPickableFavorite = favorites.some((favorite) => {
         const entry = instanceEntries.find((entry) => entry.instanceId === favorite.provider);
@@ -512,7 +529,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           )
         );
       });
-      instanceId = hasPickableFavorite ? "favorites" : props.activeInstanceId;
+      instanceId = hasPickableFavorite ? "favorites" : defaultPickerInstanceId;
     }
     return { hierarchyKey: hierarchySelectionKey, instanceId };
   });
@@ -750,7 +767,6 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       ...(hierarchyScope === "work" && selectedAixProfile
         ? { aixProfile: selectedAixProfile }
         : {}),
-      selectedInstanceId: props.activeInstanceId,
     });
     const enabledEntries = levelEntries.filter(isProviderInstancePickerVisible);
     if (!isLocked) {

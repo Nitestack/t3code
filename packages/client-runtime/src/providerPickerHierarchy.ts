@@ -119,7 +119,6 @@ export function providerInstancesForProjectScope<T extends PickerProviderInstanc
   readonly entries: ReadonlyArray<T>;
   readonly scope: ProjectScope;
   readonly aixProfile?: string | undefined;
-  readonly selectedInstanceId?: ProviderInstanceId | undefined;
 }): ReadonlyArray<T> {
   const inScope = (entry: T) =>
     input.scope === "work"
@@ -132,20 +131,12 @@ export function providerInstancesForProjectScope<T extends PickerProviderInstanc
         input.aixProfile === undefined ||
         entry.aixProfile === input.aixProfile),
   );
-  const selected =
-    input.selectedInstanceId === undefined
-      ? undefined
-      : input.entries.find((entry) => entry.instanceId === input.selectedInstanceId);
-  if (selected && !inScope(selected)) {
-    candidates.push(selected);
-  }
   if (input.scope === "personal") return candidates;
   const byDriver = new Map<ProviderDriverKind, T>();
   for (const entry of candidates) {
     if (inScope(entry) && !byDriver.has(entry.driverKind)) byDriver.set(entry.driverKind, entry);
   }
-  const selectedOutOfScope = selected && !inScope(selected) ? [selected] : [];
-  return [...byDriver.values(), ...selectedOutOfScope];
+  return [...byDriver.values()];
 }
 
 export function resolvePickerHierarchy<T extends PickerProviderInstance>(input: {
@@ -153,7 +144,6 @@ export function resolvePickerHierarchy<T extends PickerProviderInstance>(input: 
   readonly scope: ProjectScope;
   readonly rememberedProfileId?: string | undefined;
   readonly selectedModelProfileId?: string | undefined;
-  readonly selectedInstanceId?: ProviderInstanceId | undefined;
 }) {
   const profiles = groupAixProviderProfiles(input.entries);
   const profileId =
@@ -168,7 +158,6 @@ export function resolvePickerHierarchy<T extends PickerProviderInstance>(input: 
     entries: input.entries,
     scope: input.scope,
     ...(profileId ? { aixProfile: profileId } : {}),
-    ...(input.selectedInstanceId ? { selectedInstanceId: input.selectedInstanceId } : {}),
   });
   return { profiles, profileId, visibleEntries };
 }

@@ -221,7 +221,6 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     scope: hierarchyScope,
     rememberedProfileId: hierarchyProfileId,
     selectedModelProfileId: activeEntry?.aixProfile,
-    selectedInstanceId: props.activeInstanceId,
   });
   const aixProfiles = resolvedHierarchy.profiles;
   const resolvedProfileId = resolvedHierarchy.profileId;

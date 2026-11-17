@@ -74,7 +74,7 @@ describe("provider picker hierarchy", () => {
     expect(aixMetadataFromInstanceId("codex", ProviderDriverKind.make("codex"))).toBeUndefined();
   });
 
-  it("filters instances by project scope and keeps the selected instance visible", () => {
+  it("filters instances to the current project scope", () => {
     expect(
       providerInstancesForProjectScope({ entries, scope: "personal" }).map(
         (item) => item.instanceId,
@@ -90,16 +90,14 @@ describe("provider picker hierarchy", () => {
         entries,
         scope: "work",
         aixProfile: "ac",
-        selectedInstanceId: ProviderInstanceId.make("codex"),
       }).map((item) => item.instanceId),
-    ).toEqual(["aix-codex-ac", "aix-opencode-ac", "codex"]);
+    ).toEqual(["aix-codex-ac", "aix-opencode-ac"]);
     expect(
       providerInstancesForProjectScope({
         entries,
         scope: "personal",
-        selectedInstanceId: ProviderInstanceId.make("aix-codex-ac"),
       }).map((item) => item.instanceId),
-    ).toEqual(["codex", "aix-codex-ac"]);
+    ).toEqual(["codex"]);
   });
 
   it("resolves project picker scope only when the environment supports it", () => {

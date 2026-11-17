@@ -70,6 +70,14 @@ export function ModelRowContent(
             >
               {props.option.label}
             </Text>
+            {props.option.isFree ? (
+              <Text
+                accessibilityLabel="Free model"
+                className="text-sm font-t3-bold text-adaptive-emerald-600-400"
+              >
+                $
+              </Text>
+            ) : null}
             {props.option.isDefault ? (
               <View className="rounded-md bg-subtle-strong px-1.5 py-0.5">
                 <Text className="text-3xs font-t3-bold text-foreground-muted">Default</Text>

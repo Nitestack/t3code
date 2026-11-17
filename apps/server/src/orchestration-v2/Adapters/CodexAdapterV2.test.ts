@@ -156,6 +156,27 @@ describe("CodexAdapterV2 assistant message streaming", () => {
 });
 
 describe("CodexAdapterV2 runtime policy", () => {
+  it.effect("omits stale fast selections for aix-managed turns", () =>
+    Effect.gen(function* () {
+      const params = yield* CodexAdapterV2.buildCodexTurnStartParams({
+        nativeThreadId: "native-aix-fast-selection",
+        codexInput: [{ type: "text", text: "test" }],
+        runtimePolicy: { runtimeMode: "full-access", interactionMode: "default", cwd: null },
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("aix-codex-ac"),
+          model: "gpt-5.4",
+          options: [
+            { id: "serviceTier", value: "fast" },
+            { id: "fastMode", value: true },
+            { id: "ultracode", value: true },
+          ],
+        },
+        omitServiceTier: true,
+      });
+      assert.isUndefined(params.serviceTier);
+    }),
+  );
+
   it.effect.each([undefined, false, true])(
     "selects native collaboration modes without prompt overrides with hasT3Mcp=%s",
     (hasT3Mcp) =>
