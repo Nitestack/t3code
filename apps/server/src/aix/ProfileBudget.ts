@@ -15,6 +15,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 import { HttpClient, HttpClientRequest } from "effect/http";
 import { ChildProcessSpawner } from "effect/process";
 
@@ -112,7 +113,8 @@ const keyInfoUrl = (endpoint: string) => {
   return url.href;
 };
 
-const REQUEST_TIMEOUT = Duration.seconds(10);
+// The gateway answers key/info one at a time (about 1-2s each), and other T3 servers share it.
+const REQUEST_TIMEOUT = Duration.seconds(30);
 
 type BudgetFailure =
   | { readonly _tag: "status"; readonly status: number }
@@ -173,6 +175,7 @@ const readProfileBudget = Effect.fn("AixProfileBudget.read")(function* (
   source: AixBudgetSource,
   profileName: string,
   digest: Digest.Digest["Service"],
+  serialize: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>,
 ) {
   const checkedAt = DateTime.formatIso(yield* DateTime.now);
   const environment = yield* source.resolveEnvironment(profileName).pipe(Effect.option);
@@ -190,7 +193,7 @@ const readProfileBudget = Effect.fn("AixProfileBudget.read")(function* (
       message: "This aix profile connects directly to Anthropic, which reports no gateway budget.",
     });
   }
-  const keyInfo = yield* readKeyInfo(environment.value).pipe(Effect.result);
+  const keyInfo = yield* serialize(readKeyInfo(environment.value)).pipe(Effect.result);
   if (Result.isSuccess(keyInfo)) {
     const credentialFingerprint = yield* digest
       .digest(
@@ -228,9 +231,10 @@ export class AixProfileBudget extends Context.Service<
 export const make = Effect.fn("AixProfileBudget.make")(function* (source: AixBudgetSource) {
   const http = yield* HttpClient.HttpClient;
   const digest = yield* Digest.Digest;
+  const gateway = yield* Semaphore.make(1);
   const cache = yield* Cache.make({
     lookup: (profileName: string) =>
-      readProfileBudget(source, profileName, digest).pipe(
+      readProfileBudget(source, profileName, digest, gateway.withPermits(1)).pipe(
         Effect.provideService(HttpClient.HttpClient, http),
       ),
     capacity: 64,
