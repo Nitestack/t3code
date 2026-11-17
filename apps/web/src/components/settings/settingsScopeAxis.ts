@@ -161,9 +161,9 @@ export function selectSingleEnvironmentScope(
   return selected ? { ...search, machine: selected.environmentId } : search;
 }
 
-/** Labels each project Personal or Work once any project is Work; until then every label is Personal. */
+/** Labels each project Personal or Work once any project is Work; unscoped projects count as Personal. */
 export function settingsScopeProjectScopeLabels(groups: readonly SidebarProjectSnapshot[]) {
   const showLabels = groups.some((group) => group.scope === "work");
   return (group: SidebarProjectSnapshot) =>
-    !showLabels || group.scope === undefined ? null : group.scope === "work" ? "Work" : "Personal";
+    !showLabels ? null : group.scope === "work" ? "Work" : "Personal";
 }

@@ -141,6 +141,7 @@ function ProjectOverviewContent(props: {
   const { isRemoving, setIsRemoving, startRemoval, finishRemoval } = props;
   const { enabled: environmentScopeEnabled } = useMobileEnvironmentScope();
   const representative = props.members[0]!;
+  const isWork = props.members.some((member) => member.scope === "work");
   const displayName = deriveProjectGroupLabel({
     groupKey: props.group.key,
     representative,
@@ -376,17 +377,15 @@ function ProjectOverviewContent(props: {
         {canMoveProjectScope ? (
           <SettingsActionRow
             icon="arrow.left.arrow.right"
-            label={representative.scope === "work" ? "Move to Personal" : "Move to Work"}
+            label={isWork ? "Move to Personal" : "Move to Work"}
             description={
               offline
                 ? "Connect every machine with this project to change its scope."
-                : `In ${representative.scope === "work" ? "Work" : "Personal"}. Moves every checkout of this project between Personal and Work.`
+                : `In ${isWork ? "Work" : "Personal"}. Moves every checkout of this project between Personal and Work.`
             }
             disabled={isOrganizing || offline}
             loading={isOrganizing}
-            onPress={() =>
-              void organize({ scope: representative.scope === "work" ? "personal" : "work" })
-            }
+            onPress={() => void organize({ scope: isWork ? "personal" : "work" })}
           />
         ) : null}
       </SettingsSection>

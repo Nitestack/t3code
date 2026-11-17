@@ -26,7 +26,11 @@ describe("settings scope axes", () => {
 
     expect(settingsScopeProjectScopeLabels([personal, unscoped])(personal)).toBeNull();
     const label = settingsScopeProjectScopeLabels([personal, work, unscoped]);
-    expect([label(personal), label(work), label(unscoped)]).toEqual(["Personal", "Work", null]);
+    expect([label(personal), label(work), label(unscoped)]).toEqual([
+      "Personal",
+      "Work",
+      "Personal",
+    ]);
   });
 
   it("drops a checkout narrowing from older links when either axis changes", () => {
