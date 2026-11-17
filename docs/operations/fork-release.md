@@ -116,10 +116,12 @@ this implementation does not change repository settings:
   actor. A ruleset alone does not satisfy the workflow's required-check preflight.
 - Add Actions secrets `FORK_SYNC_APP_ID` and `FORK_SYNC_APP_PRIVATE_KEY` for a GitHub App installed
   only on `Nitestack/t3code`, with exactly `actions:write`, `administration:read`, `contents:write`,
-  and `pull_requests:write`. Administration read inspects branch protection and rulesets. Contents
+  `pull_requests:write`, and `workflows:write`. Administration read inspects branch protection and rulesets. Contents
   and pull-request write push the sync branch and open and merge its PR. Actions write lets the
-  main-CI completion job dispatch the existing `Release` workflow. The branch-creation token is scoped to the
-  other three permissions. The App must not have repository administrator access and must not be a
+  main-CI completion job dispatch the existing `Release` workflow. Workflows write lets the
+  publisher set the release tag and `release` branch on a source commit whose workflow files differ
+  from `main`, which `GITHUB_TOKEN` refuses. The branch-creation token is scoped to
+  administration, contents, and pull requests. The App must not have repository administrator access and must not be a
   ruleset bypass actor.
 - The merge job uses the App token for the protected merge; the main-CI completion job uses it for
   release dispatch. Their `GITHUB_TOKEN`
