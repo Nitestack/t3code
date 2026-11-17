@@ -1,6 +1,6 @@
 # T3 Code with aix support
 
-A soft fork of [T3 Code](https://github.com/pingdotgg/t3code), created by pingdotgg and released under the [MIT License](./LICENSE). It keeps T3's provider, thread, and remote-work flows, and adds runtime support for [aix](https://github.com/Nitestack/aix) API-key profiles and a client-side Work/Personal view.
+A soft fork of [T3 Code](https://github.com/pingdotgg/t3code), created by pingdotgg and released under the [MIT License](./LICENSE). It keeps T3's provider, thread, and remote-work flows, and adds runtime support for [aix](https://github.com/Nitestack/aix) API-key profiles and project-level Personal and Work scopes.
 
 [Upstream T3 Code](https://github.com/pingdotgg/t3code) · [aix setup and profiles](https://github.com/Nitestack/aix#installation) · [Fork guide](./docs/user/nitestack-fork.md) · [Remote access](./docs/user/remote-access.md) · [Portable handoffs](./docs/user/portable-handoffs.md) · [MIT License](./LICENSE)
 
@@ -8,32 +8,41 @@ A soft fork of [T3 Code](https://github.com/pingdotgg/t3code), created by pingdo
 
 - **aix profiles as providers.** Enable with `T3CODE_AIX=1` on the server host. Each API-key profile becomes a provider instance with its own gateway endpoint. Keys stay on the server.
 - **Conservative model routing.** Supported models are mapped to Codex, Claude Code, or the T3-managed OpenCode provider according to known-compatible routes. Unsupported combinations are omitted; a failed selection is not silently replaced with another provider or model.
-- **Model and gateway details.** When aix or the gateway supplies them, model details include family, context and output limits, prices, and reasoning levels. Missing values appear as Unknown. A profile's LiteLLM budget window is shared by that profile's instances when the gateway reports a cap; a reset time appears when supplied.
-- **Catalog refresh and client views.** Refresh aix profiles and catalogs on demand; a failed refresh keeps the last catalog marked stale. Web, desktop, and the fork's Android app can classify environments as Work and filter them from the Personal view. Classification is saved per client.
+- **Model and gateway details.** When aix or the gateway supplies them, model details include family, context and output limits, prices, and reasoning levels. Missing values appear as Unknown. A profile's LiteLLM budget is shown on the Usage page when the gateway reports a cap; a reset time appears when supplied.
+- **Catalog refresh.** Refresh aix profiles and catalogs on demand; a failed refresh keeps the last catalog marked stale.
+- **Personal and Work scopes.** Each project is Personal or Work. On web, desktop, and the fork's Android app, the sidebar switch shows one scope's projects and threads, and the model picker starts in the project's scope: subscription providers for Personal, aix profiles for Work.
 
 T3's existing providers, threads, provider switching and handoffs, and remote access remain available. Without `T3CODE_AIX=1`, aix integration is off and normal T3 providers work as usual.
 
 ## In the app
 
-Captured from the fork's web client with real model IDs, demo profiles, and a local fake API. Prices, budgets, and profile names are illustrative.
+Captured from the fork's web client with demo projects, demo profiles (Acme and Research), and a local fake gateway. Prices, budgets, and names are illustrative.
 
 ### aix profiles and model details
 
-Choose a profile's model and inspect the context window, output limits, and pricing supplied by its gateway.
+In a Work project, the picker lists the selected profile's Codex, Claude Code, and OpenCode models. Model details show the context window, output limit, and pricing supplied by the gateway.
 
-![aix model picker showing Gemma 4 31B IT and demo gateway metadata](./.github/readme/aix/aix-model-picker.png)
+![aix model picker in a Work project showing Gemma 4 31B IT and demo gateway metadata](./.github/readme/aix/aix-model-picker.png)
+
+Switch profiles from the picker footer.
+
+![Model picker footer with the Acme and Research profile menu open](./.github/readme/aix/aix-profile-menu.png)
+
+In Settings → Providers, the Personal/Work switch and profile menu list each profile's provider instances. aix supplies the models; you can still hide, reorder, and favorite them.
+
+![Provider settings showing the Research profile's OpenCode instance and its aix models](./.github/readme/aix/aix-provider-settings.png)
 
 ### Gateway budgets
 
-Usage limits show the budget reported for each profile, including a reset time when the gateway supplies one.
+The Usage page's Work tab shows the budget reported for each profile, including a reset time when the gateway supplies one.
 
-![Demo gateway budgets for the research and work aix profiles](./.github/readme/aix/aix-budget-windows.png)
+![Usage page Work tab with demo budgets for the Acme and Research profiles](./.github/readme/aix/aix-budget-windows.png)
 
-### Work and Personal views
+### Personal and Work scopes
 
-Classify environments as Work, then switch views to filter their projects and threads. The view does not change server permissions or stop running agents.
+Move a project between Personal and Work from its sidebar menu, the command palette, or Project settings; the sidebar switch then filters projects and threads. The scope does not change server permissions or stop running agents.
 
-![Personal and Work switch with the environment classification menu open](./.github/readme/aix/work-personal-scope.png)
+![Project settings listing demo projects with their Personal and Work scopes](./.github/readme/aix/work-personal-scope.png)
 
 ## Set up aix and run T3
 
@@ -69,16 +78,16 @@ The command prints pairing details for connecting another client. Keep each inde
 
 Select an aix profile's model from the thread model picker. The profile and model determine the gateway endpoint and supported agent route. Open model details to review the metadata the gateway provides. Use the picker refresh control after changing aix profiles or models; if the gateway cannot be reached, T3 keeps the last catalog and marks it stale.
 
-For a LiteLLM API key with a reported budget, check the Gateway budget window in usage limits. Classify connected environments as Work to filter them from the Personal view on that client. This classification is a client-side view preference, **not** an authentication or data boundary. For actual isolation, run separate servers with separate data directories.
+For a LiteLLM API key with a reported budget, check its budget on the Usage page's Work tab. Put work projects in the Work scope to keep them out of the Personal view. The scope is an organizing aid, **not** an authentication or data boundary. For actual isolation, run separate servers with separate data directories.
 
 ## Limits and downloads
 
 - aix integration requires API-key profiles. ChatGPT OAuth profiles remain unsupported; regular T3 provider sign-ins, including subscription-based providers, continue to work.
 - Native Codex and Claude Code routing is limited to combinations known to work. The OpenCode route covers supported chat models, but arbitrary gateway aliases and model compatibility are not guaranteed. T3 does not silently substitute another model or provider.
 - Model metadata may be absent. Budget windows and reset times are shown only when the gateway reports them.
-- Official iOS and Android apps have no fork switch or extended model details and have not been verified against a fork server. A separately signed Android build path exists, but no fork APK has been published or device-verified. There is no fork iOS app.
+- The fork's Android app is signed separately, has its own package ID, and includes the Personal/Work switch. The official iOS and Android apps have no scope switch or extended model details and have not been verified against a fork server. There is no fork iOS app.
 - The fork's Nix flake builds from source and currently targets `x86_64-linux`; it is not a universal prebuilt binary.
-- [Fork releases](https://github.com/Nitestack/t3code/releases) use upstream stable versions (for example, **T3 Code v0.1.9**). For Nix, `github:Nitestack/t3code/release` follows the latest published release after the first one; pin a release tag for a reproducible version. `main` includes unreleased fork changes. The [fork release runbook](./docs/operations/fork-release.md) explains the process. Upstream download links below install original T3 Code, not this fork.
+- [Fork releases](https://github.com/Nitestack/t3code/releases) use upstream stable versions (for example, **T3 Code v0.1.10**). For Nix, `github:Nitestack/t3code/release` follows the latest published release after the first one; pin a release tag for a reproducible version. `main` includes unreleased fork changes. The [fork release runbook](./docs/operations/fork-release.md) explains the process. Upstream download links below install original T3 Code, not this fork.
 
 For provider details, remote connections, troubleshooting, and mobile boundaries, see the [fork guide](./docs/user/nitestack-fork.md), [provider setup](./docs/user/install.md#providers), [remote access](./docs/user/remote-access.md), and [T3 Connect troubleshooting](./docs/user/t3-connect-troubleshooting.md).
 
