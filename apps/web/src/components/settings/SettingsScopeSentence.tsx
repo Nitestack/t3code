@@ -45,6 +45,7 @@ import {
   settingsScopeEnvironmentLabel,
   settingsScopeEnvironmentLabels,
   settingsScopeProjectMachines,
+  settingsScopeProjectScopeLabels,
 } from "./settingsScopeAxis";
 
 export const SETTINGS_DEVICE_ONLY_PATHS: ReadonlySet<string> = new Set([
@@ -354,6 +355,7 @@ function ProjectScopeMenu({ value, groups, environments, onChange }: SettingsSco
     group,
     machines: settingsScopeProjectMachines(group, environments, true).join(", "),
   }));
+  const projectScopeLabel = settingsScopeProjectScopeLabels(projects.map(({ group }) => group));
   return (
     <ScopeMenu
       ariaLabel="Project scope"
@@ -380,7 +382,9 @@ function ProjectScopeMenu({ value, groups, environments, onChange }: SettingsSco
         return {
           value: group.projectKey,
           label: group.displayName,
-          secondary: group.archived ? ["Archived", location].filter(Boolean).join(" · ") : location,
+          secondary: [group.archived ? "Archived" : null, projectScopeLabel(group), location]
+            .filter(Boolean)
+            .join(" · "),
           icon: <ProjectFavicon project={group} className="size-3.5 shrink-0" />,
         };
       })}

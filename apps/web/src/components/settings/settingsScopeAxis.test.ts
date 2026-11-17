@@ -6,6 +6,7 @@ import {
   selectProjectAxis,
   settingsScopeCheckoutChoices,
   settingsScopeCheckoutLabel,
+  settingsScopeProjectScopeLabels,
 } from "./settingsScopeAxis";
 
 const member = (environmentId: string, physicalProjectKey: string, workspaceRoot = "") =>
@@ -18,6 +19,20 @@ const group = (...memberProjects: SidebarProjectSnapshot["memberProjects"]) =>
   ({ memberProjects }) as SidebarProjectSnapshot;
 
 describe("settings scope axes", () => {
+  it("labels project scopes only once any project is Work", () => {
+    const personal = { scope: "personal" } as SidebarProjectSnapshot;
+    const work = { scope: "work" } as SidebarProjectSnapshot;
+    const unscoped = {} as SidebarProjectSnapshot;
+
+    expect(settingsScopeProjectScopeLabels([personal, unscoped])(personal)).toBeNull();
+    const label = settingsScopeProjectScopeLabels([personal, work, unscoped]);
+    expect([label(personal), label(work), label(unscoped)]).toEqual([
+      "Personal",
+      "Work",
+      "Personal",
+    ]);
+  });
+
   it("drops a checkout narrowing from older links when either axis changes", () => {
     const checkout = { project: "app", checkout: "app@first", machine: "first" };
     expect(selectEnvironmentAxis(checkout, "second")).toEqual({

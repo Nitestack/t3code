@@ -246,6 +246,7 @@ export function planAixInstanceSync(input: {
     const nextEnabled = wasDisabledBySync(existing) ? want.enabled : existing.enabled;
     const next = {
       ...want,
+      ...(existing.accentColor === undefined ? {} : { accentColor: existing.accentColor }),
       ...(nextEnabled === undefined ? {} : { enabled: nextEnabled }),
       config: withoutSyncDisabledMarker(want.config),
     };

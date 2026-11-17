@@ -596,11 +596,12 @@ describe("planAixInstanceSync", () => {
     );
   });
 
-  it("preserves a user-disabled instance when an available profile changes its models", () => {
+  it("preserves user-owned fields when an available profile changes its models", () => {
     const current = {
       [ProviderInstanceId.make("aix-codex-work")]: {
         ...codexInstance("work"),
         enabled: false,
+        accentColor: "#22c55e",
       },
     } as ProviderInstanceConfigMap;
     const codexId = ProviderInstanceId.make("aix-codex-work");
@@ -620,7 +621,11 @@ describe("planAixInstanceSync", () => {
     expect(
       planAixInstanceSync({ current, desired: changed, unavailableProfiles: new Set() }),
     ).toEqual([
-      { operation: "upsert", instanceId: codexId, instance: { ...changedCodex, enabled: false } },
+      {
+        operation: "upsert",
+        instanceId: codexId,
+        instance: { ...changedCodex, enabled: false, accentColor: "#22c55e" },
+      },
       {
         operation: "create",
         instanceId: OPENCODE_INSTANCE,
