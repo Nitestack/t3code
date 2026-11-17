@@ -680,6 +680,16 @@ jobs:
 
           vp run dist:desktop:artifact "${args[@]}"
 
+      - name: List the native Windows payload after a failed build
+        if: failure() && github.repository == 'Nitestack/t3code' && inputs.fork_build_only && inputs.platform == 'win' && startsWith(inputs.runner, 'windows-')
+        shell: bash
+        run: |
+          temp_dir="$(cygpath -u "$(node -p 'require("node:os").tmpdir()')")"
+          for unpacked in "$temp_dir"/t3code-desktop-win-stage-*/app/dist/win-unpacked; do
+            [[ -d "$unpacked" ]] || continue
+            (cd "$unpacked" && find . -type f | sort)
+          done
+
       - name: Verify packaged Windows natives on Windows
         if: github.repository == 'Nitestack/t3code' && inputs.fork_build_only && inputs.platform == 'win' && startsWith(inputs.runner, 'windows-')
         shell: bash
