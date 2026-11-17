@@ -49,7 +49,7 @@ The workflow checks that all four secrets exist before installing dependencies, 
 
 Back up the original keystore and passwords separately from GitHub. For sideloaded installs, replacing the signing key means Android will reject an in-place update signed by the new key. Coordinate rotation as a new install: users must remove the prior app and install the new APK. Keep the old key available for releases intended to update existing installations.
 
-This standalone build disables Expo Updates and does not require EAS, Clerk, Firebase, or Play credentials. Native Google sign-in and push need upstream Google and Firebase credentials tied to the Play signing key, so they may not work. Android HTTPS app-link verification depends on `assetlinks.json` listing the Play signing key, so the app's dedicated `t3code-aix` scheme is the portable deep-link path.
+This standalone build disables Expo Updates and does not require EAS, Clerk, Firebase, or Play credentials. T3 Connect sends Android pushes through the official Firebase project, so the optional `ANDROID_GOOGLE_SERVICES_JSON` secret holds that project's `google-services.json` (its client values are the ones shipped in the official app). Without it, device notifications stay off. Native Google sign-in depends on the Play signing key and may not work. Android HTTPS app-link verification depends on `assetlinks.json` listing the Play signing key, so the app's dedicated `t3code-aix` scheme is the portable deep-link path.
 
 ## Update and rollback
 
