@@ -84,16 +84,20 @@ jobs:
       source_branch: ${{ steps.resolve.outputs.source_branch }}
       publication_mode: ${{ steps.resolve.outputs.publication_mode }}
     steps:
+      # Fork jobs check out with plain git, like release-desktop.yml: the repo is public,
+      # and checkout's credential cleanup runs `git submodule foreach`, which fails on the
+      # vendored gitlinks under .repos (no .gitmodules entry), even in a sparse checkout.
       - name: Check out the release source
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 0
-          sparse-checkout: |
-            /*
-            !/.repos/
-          sparse-checkout-cone-mode: false
-          persist-credentials: false
+        shell: bash
+        env:
+          CHECKOUT_REF: ${{ github.sha }}
+          GIT_TERMINAL_PROMPT: "0"
+        run: |
+          set -euo pipefail
+          git init -q .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags --quiet origin '+refs/heads/*:refs/remotes/origin/*' '+refs/tags/*:refs/tags/*'
+          git checkout --quiet --detach "$CHECKOUT_REF"
 
       - name: Verify source, CI, versions, and release identity
         id: resolve
@@ -359,15 +363,16 @@ jobs:
       contents: read
     steps:
       - name: Check out the exact fork release source
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-        with:
-          ref: ${{ needs.fork_preflight.outputs.sha }}
-          fetch-depth: 0
-          sparse-checkout: |
-            /*
-            !/.repos/
-          sparse-checkout-cone-mode: false
-          persist-credentials: false
+        shell: bash
+        env:
+          CHECKOUT_REF: ${{ needs.fork_preflight.outputs.sha }}
+          GIT_TERMINAL_PROMPT: "0"
+        run: |
+          set -euo pipefail
+          git init -q .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags --quiet origin '+refs/heads/*:refs/remotes/origin/*' '+refs/tags/*:refs/tags/*'
+          git checkout --quiet --detach "$CHECKOUT_REF"
 
       - name: Setup Vite+ and dependencies
         uses: ./.github/actions/setup-ci-deps
@@ -471,20 +476,16 @@ jobs:
       store_path: ${{ steps.build.outputs.store_path }}
     steps:
       - name: Check out the exact fork release source
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-        with:
-          ref: ${{ needs.fork_preflight.outputs.sha }}
-          fetch-depth: 0
-          sparse-checkout: |
-            /*
-            !/.repos/
-          sparse-checkout-cone-mode: false
-          persist-credentials: false
-
-      # The flake packages the whole tree; checkout's credential cleanup only had to skip
-      # the vendored gitlinks under .repos (no .gitmodules entry).
-      - name: Restore the full source tree
-        run: git sparse-checkout disable
+        shell: bash
+        env:
+          CHECKOUT_REF: ${{ needs.fork_preflight.outputs.sha }}
+          GIT_TERMINAL_PROMPT: "0"
+        run: |
+          set -euo pipefail
+          git init -q .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags --quiet origin '+refs/heads/*:refs/remotes/origin/*' '+refs/tags/*:refs/tags/*'
+          git checkout --quiet --detach "$CHECKOUT_REF"
 
       - name: Install Nix
         uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31
@@ -705,15 +706,16 @@ jobs:
       build_run_attempt: ${{ steps.verify.outputs.build_run_attempt }}
     steps:
       - name: Check out the trusted release verifier
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 0
-          sparse-checkout: |
-            /*
-            !/.repos/
-          sparse-checkout-cone-mode: false
-          persist-credentials: false
+        shell: bash
+        env:
+          CHECKOUT_REF: ${{ github.sha }}
+          GIT_TERMINAL_PROMPT: "0"
+        run: |
+          set -euo pipefail
+          git init -q .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags --quiet origin '+refs/heads/*:refs/remotes/origin/*' '+refs/tags/*:refs/tags/*'
+          git checkout --quiet --detach "$CHECKOUT_REF"
 
       - id: verify
         name: Verify the exact successful build-only run and artifact
@@ -791,15 +793,16 @@ jobs:
       contents: write
     steps:
       - name: Check out the trusted release verifier
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 0
-          sparse-checkout: |
-            /*
-            !/.repos/
-          sparse-checkout-cone-mode: false
-          persist-credentials: false
+        shell: bash
+        env:
+          CHECKOUT_REF: ${{ github.sha }}
+          GIT_TERMINAL_PROMPT: "0"
+        run: |
+          set -euo pipefail
+          git init -q .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags --quiet origin '+refs/heads/*:refs/remotes/origin/*' '+refs/tags/*:refs/tags/*'
+          git checkout --quiet --detach "$CHECKOUT_REF"
 
       - name: Download installers from this authorized auto-publication run
         if: inputs.artifact_run_id == ''
@@ -938,11 +941,16 @@ jobs:
       contents: write
     steps:
       - name: Check out the release helpers
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-        with:
-          ref: ${{ github.sha }}
-          sparse-checkout: .github/scripts
-          persist-credentials: false
+        shell: bash
+        env:
+          CHECKOUT_REF: ${{ github.sha }}
+          GIT_TERMINAL_PROMPT: "0"
+        run: |
+          set -euo pipefail
+          git init -q .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags --quiet origin '+refs/heads/*:refs/remotes/origin/*' '+refs/tags/*:refs/tags/*'
+          git checkout --quiet --detach "$CHECKOUT_REF"
 
       - name: Advance the latest-release branch
         env:
