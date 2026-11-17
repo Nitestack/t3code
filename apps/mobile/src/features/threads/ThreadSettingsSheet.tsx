@@ -908,22 +908,25 @@ function ThreadSettingsAixCatalogRefreshButton(props: {
   );
 }
 
-function buildThreadSettingsCatalogItems(
-  session: ThreadSettingsSessionValue,
-): ReadonlyArray<ThreadSettingsCatalogItem> {
-  const selectedModelProfileId = session.displayedModelSelection
-    ? session.providerGroups
-        .flatMap((group) => group.models)
-        .find((model) => model.selection.instanceId === session.displayedModelSelection?.instanceId)
-        ?.aixProfile
-    : undefined;
-  const hierarchy = resolvePickerHierarchy({
+function resolveSessionPickerHierarchy(session: ThreadSettingsSessionValue) {
+  const selectedInstanceId = session.displayedModelSelection?.instanceId;
+  return resolvePickerHierarchy({
     entries: pickerInstancesFromModelGroups(session.providerGroups),
     scope: session.projectScope,
     rememberedProfileId: pickerFilterProfileId(session.providerFilter),
-    selectedModelProfileId,
-    selectedInstanceId: session.displayedModelSelection?.instanceId,
+    selectedModelProfileId: selectedInstanceId
+      ? session.providerGroups
+          .flatMap((group) => group.models)
+          .find((model) => model.selection.instanceId === selectedInstanceId)?.aixProfile
+      : undefined,
+    selectedInstanceId,
   });
+}
+
+function buildThreadSettingsCatalogItems(
+  session: ThreadSettingsSessionValue,
+): ReadonlyArray<ThreadSettingsCatalogItem> {
+  const hierarchy = resolveSessionPickerHierarchy(session);
   const { profileId: aixProfileFilter } = hierarchy;
   const visibleEntrySet = new Set(hierarchy.visibleEntries.map((entry) => entry.providerKey));
   return session.providerGroups.flatMap((group) => {
@@ -1041,19 +1044,7 @@ function ThreadSettingsOptionsItem(props: {
         .get(session.environmentId)
         ?.providers.find((provider) => provider.instanceId === session.providerInstanceId) ?? null)
     : null;
-  const selectedModelProfileId = session.displayedModelSelection
-    ? session.providerGroups
-        .flatMap((group) => group.models)
-        .find((model) => model.selection.instanceId === session.displayedModelSelection?.instanceId)
-        ?.aixProfile
-    : undefined;
-  const hierarchy = resolvePickerHierarchy({
-    entries: pickerInstancesFromModelGroups(session.providerGroups),
-    scope: session.projectScope,
-    rememberedProfileId: pickerFilterProfileId(session.providerFilter),
-    selectedModelProfileId,
-    selectedInstanceId: session.displayedModelSelection?.instanceId,
-  });
+  const hierarchy = resolveSessionPickerHierarchy(session);
   const hasAixProfiles = session.projectScope === "work" && hierarchy.profiles.length > 0;
 
   return (
@@ -1292,19 +1283,7 @@ function ThreadSettingsChoiceContent(props: {
   const insets = useSafeAreaInsets();
   const session = useThreadSettingsSession();
   const descriptorId = props.submenu.kind === "descriptor" ? props.submenu.id : null;
-  const selectedModelProfileId = session.displayedModelSelection
-    ? session.providerGroups
-        .flatMap((group) => group.models)
-        .find((model) => model.selection.instanceId === session.displayedModelSelection?.instanceId)
-        ?.aixProfile
-    : undefined;
-  const hierarchy = resolvePickerHierarchy({
-    entries: pickerInstancesFromModelGroups(session.providerGroups),
-    scope: session.projectScope,
-    rememberedProfileId: pickerFilterProfileId(session.providerFilter),
-    selectedModelProfileId,
-    selectedInstanceId: session.displayedModelSelection?.instanceId,
-  });
+  const hierarchy = resolveSessionPickerHierarchy(session);
 
   const activeDescriptor =
     descriptorId !== null
@@ -1457,19 +1436,7 @@ function ThreadSettingsModelsScreen() {
   const searchToolbarInset = useSearchToolbarInset(search);
   const aixHarnessFilter =
     session.providerFilter?.tag === "aix-harness" ? session.providerFilter.providerKey : undefined;
-  const selectedModelProfileId = session.displayedModelSelection
-    ? session.providerGroups
-        .flatMap((group) => group.models)
-        .find((model) => model.selection.instanceId === session.displayedModelSelection?.instanceId)
-        ?.aixProfile
-    : undefined;
-  const hierarchy = resolvePickerHierarchy({
-    entries: pickerInstancesFromModelGroups(session.providerGroups),
-    scope: session.projectScope,
-    rememberedProfileId: pickerFilterProfileId(session.providerFilter),
-    selectedModelProfileId,
-    selectedInstanceId: session.displayedModelSelection?.instanceId,
-  });
+  const hierarchy = resolveSessionPickerHierarchy(session);
   const { profiles: aixProfiles, profileId: aixProfileFilter } = hierarchy;
   const visibleEntrySet = new Set(hierarchy.visibleEntries.map((entry) => entry.providerKey));
   const visibleProviderGroups = session.providerGroups.filter((group) =>
