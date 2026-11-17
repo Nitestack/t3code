@@ -282,7 +282,8 @@ function SwitchRow(props: {
 
 type ThreadSettingsSubmenuPage =
   | { readonly kind: "descriptor"; readonly id: string }
-  | { readonly kind: "runtime" };
+  | { readonly kind: "runtime" }
+  | { readonly kind: "aix-profile" };
 
 type ThreadSettingsSessionProps = {
   readonly environmentId: EnvironmentId | null;
@@ -907,22 +908,25 @@ function ThreadSettingsAixCatalogRefreshButton(props: {
   );
 }
 
-function buildThreadSettingsCatalogItems(
-  session: ThreadSettingsSessionValue,
-): ReadonlyArray<ThreadSettingsCatalogItem> {
-  const selectedModelProfileId = session.displayedModelSelection
-    ? session.providerGroups
-        .flatMap((group) => group.models)
-        .find((model) => model.selection.instanceId === session.displayedModelSelection?.instanceId)
-        ?.aixProfile
-    : undefined;
-  const hierarchy = resolvePickerHierarchy({
+function resolveSessionPickerHierarchy(session: ThreadSettingsSessionValue) {
+  const selectedInstanceId = session.displayedModelSelection?.instanceId;
+  return resolvePickerHierarchy({
     entries: pickerInstancesFromModelGroups(session.providerGroups),
     scope: session.projectScope,
     rememberedProfileId: pickerFilterProfileId(session.providerFilter),
-    selectedModelProfileId,
-    selectedInstanceId: session.displayedModelSelection?.instanceId,
+    selectedModelProfileId: selectedInstanceId
+      ? session.providerGroups
+          .flatMap((group) => group.models)
+          .find((model) => model.selection.instanceId === selectedInstanceId)?.aixProfile
+      : undefined,
+    selectedInstanceId,
   });
+}
+
+function buildThreadSettingsCatalogItems(
+  session: ThreadSettingsSessionValue,
+): ReadonlyArray<ThreadSettingsCatalogItem> {
+  const hierarchy = resolveSessionPickerHierarchy(session);
   const { profileId: aixProfileFilter } = hierarchy;
   const visibleEntrySet = new Set(hierarchy.visibleEntries.map((entry) => entry.providerKey));
   return session.providerGroups.flatMap((group) => {
@@ -1040,6 +1044,8 @@ function ThreadSettingsOptionsItem(props: {
         .get(session.environmentId)
         ?.providers.find((provider) => provider.instanceId === session.providerInstanceId) ?? null)
     : null;
+  const hierarchy = resolveSessionPickerHierarchy(session);
+  const hasAixProfiles = session.projectScope === "work" && hierarchy.profiles.length > 0;
 
   return (
     <View style={{ paddingBottom: insets.bottom + props.bottomInset + 12 }}>
@@ -1094,7 +1100,7 @@ function ThreadSettingsOptionsItem(props: {
         })}
         <Animated.View layout={THREAD_SETTINGS_OPTIONS_LAYOUT_TRANSITION}>
           <DisclosureRow
-            isLast
+            isLast={!hasAixProfiles}
             label="Runtime"
             value={
               session.runtimeModeChoices.find((choice) => choice.mode === session.runtimeMode)
@@ -1103,6 +1109,18 @@ function ThreadSettingsOptionsItem(props: {
             onPress={() => props.onOpenSubmenu({ kind: "runtime" })}
           />
         </Animated.View>
+        {hasAixProfiles ? (
+          <Animated.View layout={THREAD_SETTINGS_OPTIONS_LAYOUT_TRANSITION}>
+            <DisclosureRow
+              isLast
+              label="Work profile"
+              value={
+                hierarchy.profiles.find((profile) => profile.id === hierarchy.profileId)?.label
+              }
+              onPress={() => props.onOpenSubmenu({ kind: "aix-profile" })}
+            />
+          </Animated.View>
+        ) : null}
       </Animated.View>
 
       <Text className="px-5 pb-2 pt-7 text-sm font-t3-medium text-foreground-muted">Catalog</Text>
@@ -1265,6 +1283,7 @@ function ThreadSettingsChoiceContent(props: {
   const insets = useSafeAreaInsets();
   const session = useThreadSettingsSession();
   const descriptorId = props.submenu.kind === "descriptor" ? props.submenu.id : null;
+  const hierarchy = resolveSessionPickerHierarchy(session);
 
   const activeDescriptor =
     descriptorId !== null
@@ -1289,41 +1308,56 @@ function ThreadSettingsChoiceContent(props: {
             },
           })),
         }
-      : activeDescriptor?.type === "select"
+      : props.submenu.kind === "aix-profile"
         ? {
-            rows: selectableChoices(activeDescriptor).map((choice) => ({
-              id: choice.id,
-              label: choice.label,
-              description: choice.description,
+            rows: hierarchy.profiles.map((profile) => ({
+              id: profile.id,
+              label: profile.label,
+              description: undefined,
               disabled: false,
-              selected:
-                choice.id ===
-                (session.promptTraits.ultrathinkPromptControlled &&
-                activeDescriptor.id === session.promptTraits.primarySelectDescriptor?.id
-                  ? "ultrathink"
-                  : getProviderOptionCurrentValue(
-                      activeDescriptor,
-                      session.displayedModelSelection,
-                      session.reportedModelSelection,
-                    )),
+              selected: profile.id === hierarchy.profileId,
               onPress: () => {
                 void Haptics.selectionAsync();
-                if (
-                  session.promptTraits.ultrathinkInBodyText &&
-                  activeDescriptor.id === session.promptTraits.primarySelectDescriptor?.id
-                ) {
-                  Dialog.alert(
-                    "Reasoning controlled by prompt",
-                    'Your prompt contains "ultrathink" in the text. Remove it to change this option.',
-                  );
-                  return;
-                }
-                session.applyOptionChange(activeDescriptor.id, choice.id);
+                session.setProviderFilter({ tag: "aix-profile", profileId: profile.id });
                 props.onSelected();
               },
             })),
           }
-        : null;
+        : activeDescriptor?.type === "select"
+          ? {
+              rows: selectableChoices(activeDescriptor).map((choice) => ({
+                id: choice.id,
+                label: choice.label,
+                description: choice.description,
+                disabled: false,
+                selected:
+                  choice.id ===
+                  (session.promptTraits.ultrathinkPromptControlled &&
+                  activeDescriptor.id === session.promptTraits.primarySelectDescriptor?.id
+                    ? "ultrathink"
+                    : getProviderOptionCurrentValue(
+                        activeDescriptor,
+                        session.displayedModelSelection,
+                        session.reportedModelSelection,
+                      )),
+                onPress: () => {
+                  void Haptics.selectionAsync();
+                  if (
+                    session.promptTraits.ultrathinkInBodyText &&
+                    activeDescriptor.id === session.promptTraits.primarySelectDescriptor?.id
+                  ) {
+                    Dialog.alert(
+                      "Reasoning controlled by prompt",
+                      'Your prompt contains "ultrathink" in the text. Remove it to change this option.',
+                    );
+                    return;
+                  }
+                  session.applyOptionChange(activeDescriptor.id, choice.id);
+                  props.onSelected();
+                },
+              })),
+            }
+          : null;
 
   if (!submenuContent) {
     return <View className="flex-1 bg-sheet" />;
@@ -1402,19 +1436,7 @@ function ThreadSettingsModelsScreen() {
   const searchToolbarInset = useSearchToolbarInset(search);
   const aixHarnessFilter =
     session.providerFilter?.tag === "aix-harness" ? session.providerFilter.providerKey : undefined;
-  const selectedModelProfileId = session.displayedModelSelection
-    ? session.providerGroups
-        .flatMap((group) => group.models)
-        .find((model) => model.selection.instanceId === session.displayedModelSelection?.instanceId)
-        ?.aixProfile
-    : undefined;
-  const hierarchy = resolvePickerHierarchy({
-    entries: pickerInstancesFromModelGroups(session.providerGroups),
-    scope: session.projectScope,
-    rememberedProfileId: pickerFilterProfileId(session.providerFilter),
-    selectedModelProfileId,
-    selectedInstanceId: session.displayedModelSelection?.instanceId,
-  });
+  const hierarchy = resolveSessionPickerHierarchy(session);
   const { profiles: aixProfiles, profileId: aixProfileFilter } = hierarchy;
   const visibleEntrySet = new Set(hierarchy.visibleEntries.map((entry) => entry.providerKey));
   const visibleProviderGroups = session.providerGroups.filter((group) =>
@@ -1523,30 +1545,32 @@ function ThreadSettingsModelsScreen() {
         }}
         hideBottomBorder
       />
-      {aixProfiles.length > 0 ? (
-        <View className="px-4 py-2">
-          <SegmentedControl
-            size="compact"
-            className="w-full"
-            options={[
-              { value: "personal", label: "Personal" },
-              { value: "work", label: "Work" },
-            ]}
-            selected={session.projectScope}
-            onSelect={session.setProjectScope}
-          />
-        </View>
-      ) : null}
       <ScreenContent>
+        {aixProfiles.length > 0 ? (
+          <View className="px-4 py-2">
+            <SegmentedControl
+              size="compact"
+              className="w-full"
+              options={[
+                { value: "personal", label: "Personal" },
+                { value: "work", label: "Work" },
+              ]}
+              selected={session.projectScope}
+              onSelect={session.setProjectScope}
+            />
+          </View>
+        ) : null}
         <ThreadSettingsMainContent
           bottomInset={searchToolbarInset}
           onOpenSubmenu={(submenu) => {
             const title =
               submenu.kind === "runtime"
                 ? "Runtime"
-                : (session.displayedDescriptors.find(
-                    (descriptor) => descriptor.type === "select" && descriptor.id === submenu.id,
-                  )?.label ?? "Option");
+                : submenu.kind === "aix-profile"
+                  ? "Work profile"
+                  : (session.displayedDescriptors.find(
+                      (descriptor) => descriptor.type === "select" && descriptor.id === submenu.id,
+                    )?.label ?? "Option");
             navigation.navigate("ThreadSettingsChoice", { ...submenu, title });
           }}
         />
