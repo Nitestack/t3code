@@ -24,6 +24,7 @@ import type {
 import type { LegendListRenderItemProps } from "@legendapp/list/react-native";
 import { RegistryContext, useAtomMount, useAtomValue } from "@effect/atom-react";
 import { AnimatedLegendList } from "@legendapp/list/reanimated";
+import { isAtomCommandInterrupted } from "@t3tools/client-runtime/state/runtime";
 import {
   getProviderOptionCurrentLabel,
   getProviderOptionCurrentValue,
@@ -58,6 +59,7 @@ import Animated, {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { SymbolView } from "../../components/ui/AppSymbol";
+import { AppActivityIndicator } from "../../components/ui/AppActivityIndicator";
 import { AppText as Text } from "../../components/ui/AppText";
 import { SegmentedControl } from "../../components/ui/SegmentedControl";
 import { AppBar } from "../../components/ui/AppBar";
@@ -117,6 +119,7 @@ import {
   selectableChoices,
 } from "./thread-settings-options";
 import {
+  aixCatalogRefreshInstanceId,
   canCommitPendingModel,
   favoritesFirst,
   modelFavoriteKey,
@@ -168,6 +171,7 @@ function ProviderHeader(props: {
   readonly collapsed: boolean;
   readonly modelCount: number;
   readonly onToggle: () => void;
+  readonly action?: ReactNode;
 }) {
   const content = (
     <>
@@ -194,22 +198,28 @@ function ProviderHeader(props: {
 
   if (props.collapsible) {
     return (
-      <Pressable
-        accessibilityLabel={`${props.label}, ${props.modelCount} models`}
-        accessibilityRole="button"
-        accessibilityState={{ expanded: !props.collapsed }}
-        className="mx-4 mt-1 flex-row items-center gap-2 rounded-xl px-1 pt-2 active:opacity-60"
-        style={{ minHeight: ROW_MIN_HEIGHT.control }}
-        onPress={props.onToggle}
-      >
-        {content}
-      </Pressable>
+      <View className="mx-4 mt-1 flex-row items-center gap-1 rounded-xl pt-2">
+        <Pressable
+          accessibilityLabel={`${props.label}, ${props.modelCount} models`}
+          accessibilityRole="button"
+          accessibilityState={{ expanded: !props.collapsed }}
+          className="min-w-0 flex-1 flex-row items-center gap-2 px-1 active:opacity-60"
+          style={{ minHeight: ROW_MIN_HEIGHT.control }}
+          onPress={props.onToggle}
+        >
+          {content}
+        </Pressable>
+        {props.action}
+      </View>
     );
   }
 
   return (
-    <View accessibilityRole="header" className="mx-4 min-h-9 flex-row items-center gap-2 px-1 pt-1">
-      {content}
+    <View className="mx-4 min-h-9 flex-row items-center gap-1 pt-1">
+      <View accessibilityRole="header" className="min-w-0 flex-1 flex-row items-center gap-2 px-1">
+        {content}
+      </View>
+      {props.action}
     </View>
   );
 }
@@ -336,6 +346,8 @@ type ThreadSettingsSessionValue = {
   readonly setSearchQuery: (query: string) => void;
   readonly setShowLegacy: (showLegacy: boolean) => void;
   readonly toggleProvider: (providerKey: string) => void;
+  readonly refreshingAixInstanceId: ProviderInstanceId | null;
+  readonly refreshAixCatalog: (instanceId: ProviderInstanceId) => void;
   /** The provider whose catalog for this folder the picker keeps fresh. */
   readonly workspaceScan: { readonly instanceId: ProviderInstanceId; readonly cwd: string } | null;
 };
@@ -368,6 +380,9 @@ function ThreadSettingsSessionProvider(
   ).data;
   const connectionGeneration = connection?.phase === "connected" ? connection.generation : null;
   const [manageHidden, setManageHidden] = useState(false);
+  const [refreshingAixInstanceId, setRefreshingAixInstanceId] = useState<ProviderInstanceId | null>(
+    null,
+  );
   const pendingHidden = useRef(new Set<string>());
   const pendingFavorites = useRef(
     new Map<string, { favorite: boolean; settings: ServerSettings; pending: boolean }>(),
@@ -394,6 +409,29 @@ function ThreadSettingsSessionProvider(
     favorites: legacyFavorites,
   }).favorites;
   const saveSettings = useAtomCommand(serverEnvironment.updateSettings, "model favorites update");
+  const refreshProvidersCommand = useAtomCommand(serverEnvironment.refreshProviders, {
+    reportFailure: false,
+  });
+  const refreshAixCatalog = (instanceId: ProviderInstanceId) => {
+    const environmentId = props.environmentId;
+    if (!environmentId || refreshingAixInstanceId !== null) return;
+    setRefreshingAixInstanceId(instanceId);
+    void refreshProvidersCommand({
+      environmentId,
+      input: { instanceId, refreshModels: true },
+    }).then(
+      (result) => {
+        setRefreshingAixInstanceId(null);
+        if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+          Dialog.alert("Could not refresh aix catalogs", "Try again.");
+        }
+      },
+      () => {
+        setRefreshingAixInstanceId(null);
+        Dialog.alert("Could not refresh aix catalogs", "Try again.");
+      },
+    );
+  };
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- writes the one-time legacy model favorites migration to server settings once per connection
   useEffect(() => {
     if (
@@ -701,6 +739,8 @@ function ThreadSettingsSessionProvider(
     setSearchQuery,
     setShowLegacy: setShowLegacyToggle,
     toggleProvider,
+    refreshingAixInstanceId,
+    refreshAixCatalog,
     toggleFavorite,
     workspaceScan,
   } satisfies ThreadSettingsSessionValue;
@@ -747,6 +787,7 @@ type ThreadSettingsProviderCatalog = {
   readonly collapsed: boolean;
   readonly modelCount: number;
   readonly models: ReadonlyArray<ModelOption>;
+  readonly aixInstanceId?: ProviderInstanceId;
 };
 
 type ThreadSettingsCatalogItem =
@@ -812,6 +853,18 @@ function ThreadSettingsProviderListHeader(props: {
 
   return (
     <ProviderHeader
+      action={
+        props.provider.aixInstanceId && session.environmentId ? (
+          <ThreadSettingsAixCatalogRefreshButton
+            environmentId={session.environmentId}
+            instanceId={props.provider.aixInstanceId}
+            providerLabel={props.provider.label}
+            refreshing={session.refreshingAixInstanceId === props.provider.aixInstanceId}
+            disabled={session.refreshingAixInstanceId !== null}
+            onRefresh={session.refreshAixCatalog}
+          />
+        ) : undefined
+      }
       collapsible={props.provider.collapsible}
       collapsed={props.provider.collapsed}
       driver={props.provider.driver}
@@ -820,6 +873,37 @@ function ThreadSettingsProviderListHeader(props: {
       modelCount={props.provider.modelCount}
       onToggle={onToggle}
     />
+  );
+}
+
+function ThreadSettingsAixCatalogRefreshButton(props: {
+  readonly environmentId: EnvironmentId;
+  readonly instanceId: ProviderInstanceId;
+  readonly providerLabel: string;
+  readonly refreshing: boolean;
+  readonly disabled: boolean;
+  readonly onRefresh: (instanceId: ProviderInstanceId) => void;
+}) {
+  const canRefresh = useAtomValue(
+    serverEnvironment.refreshProviders.permissionAtom(props.environmentId),
+  );
+  if (!canRefresh) return null;
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`Refresh ${props.providerLabel} AIX catalog`}
+      accessibilityState={{ disabled: props.disabled, busy: props.refreshing }}
+      className="size-10 items-center justify-center rounded-full active:bg-subtle"
+      disabled={props.disabled}
+      onPress={() => props.onRefresh(props.instanceId)}
+    >
+      {props.refreshing ? (
+        <AppActivityIndicator size="small" />
+      ) : (
+        <SymbolView name="arrow.clockwise" size={16} tintColorClassName="accent-icon-muted" />
+      )}
+    </Pressable>
   );
 }
 
@@ -905,6 +989,7 @@ function buildThreadSettingsCatalogItems(
       hasExpansionOverride: session.providerExpansionOverrides.has(group.providerKey),
       isNarrowed,
     });
+    const aixInstanceId = aixCatalogRefreshInstanceId(group);
     const provider: ThreadSettingsProviderCatalog = {
       key: group.providerKey,
       driver,
@@ -914,6 +999,7 @@ function buildThreadSettingsCatalogItems(
       collapsed,
       modelCount: visibleModels.length,
       models: collapsed ? [] : visibleModels,
+      ...(aixInstanceId ? { aixInstanceId } : {}),
     };
     return [
       {

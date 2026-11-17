@@ -5,6 +5,12 @@ export function modelFavoriteKey(provider: ProviderInstanceId, model: string): s
   return `${provider}:${model}`;
 }
 
+export function aixCatalogRefreshInstanceId(
+  group: Pick<ProviderGroup, "models">,
+): ProviderInstanceId | undefined {
+  return group.models.find((model) => model.aixProfile)?.selection.instanceId;
+}
+
 export function favoritesFirst(
   models: ReadonlyArray<ModelOption>,
   favoriteKeys: ReadonlySet<string>,
