@@ -1469,8 +1469,9 @@ export function ProviderInstanceCard({
         <SettingsSection title="Models">
           <div className="px-3 py-3 sm:px-4">
             <p className="mb-3 text-xs text-muted-foreground">
-              Model preferences and custom models are saved on the selected environment and shared
-              across connected devices.
+              {aixProfile === undefined
+                ? "Model preferences and custom models are saved on the selected environment and shared across connected devices."
+                : "aix supplies these models. Favorites, order, and hidden models are saved on the selected environment."}
             </p>
             <ProviderModelsSection
               canManageCustomModels={!readOnly && aixProfile === undefined}
