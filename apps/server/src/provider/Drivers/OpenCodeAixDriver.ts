@@ -5,6 +5,7 @@ import * as Path from "effect/Path";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import { ChildProcessSpawner } from "effect/process";
 import * as Stream from "effect/Stream";
+import type { ServerProvider } from "@t3tools/contracts";
 import type { ProviderDriver, ProviderUsageReaderEnv } from "@t3tools/provider-core/server/driver";
 import { OpenCodeAixUsageLimits, OpenCodeDriver } from "@t3tools/provider-opencode/server";
 import * as OpenCodeRuntime from "@t3tools/provider-opencode/server/OpenCodeRuntime";
@@ -35,6 +36,12 @@ const aixModels = (
     const id = slug.startsWith(AIX_SLUG_PREFIX) ? slug.slice(AIX_SLUG_PREFIX.length) : slug;
     return { id, name: typeof model === "string" ? id : (model.name ?? id) };
   });
+
+// OpenCode labels each model with its provider name, which is always "aix" here.
+const withoutAixSubProvider = (provider: ServerProvider): ServerProvider => ({
+  ...provider,
+  models: provider.models.map(({ subProvider: _subProvider, ...model }) => model),
+});
 
 type OpenCodeAixLaunchEnv =
   | ChildProcessSpawner.ChildProcessSpawner
@@ -101,7 +108,7 @@ export const makeOpenCodeAixDriver = <R>(
           );
           const withCatalogStatus = (provider: Parameters<typeof withAixCatalogStatus>[0]) =>
             getAixProfileStatus(profileReference.profile).pipe(
-              Effect.map((stale) => withAixCatalogStatus(provider, stale)),
+              Effect.map((stale) => withAixCatalogStatus(withoutAixSubProvider(provider), stale)),
             );
           const snapshot = instance.snapshot;
           return {

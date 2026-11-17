@@ -290,13 +290,13 @@ function AixCatalogControls(props: {
         )}
       >
         {status.kind === "stale"
-          ? `Stale catalog: ${status.message}`
+          ? `Stale catalog: ${status.message} `
           : status.kind === "warning"
-            ? status.message
+            ? `${status.message} `
             : status.kind === "unavailable"
-              ? `Catalog unavailable: ${status.message}`
-              : status.message}
-        {props.refreshing ? " Refreshing…" : ""}
+              ? `Catalog unavailable: ${status.message} `
+              : ""}
+        {props.refreshing ? "Refreshing…" : ""}
       </p>
       {canRefresh ? (
         <Button
