@@ -115,7 +115,11 @@ const WSL_FORWARDED_ENV_NAMES = [
   "OTEL_METRICS_EXPORTER",
   "OTEL_LOGS_EXPORTER",
   "OTEL_RESOURCE_ATTRIBUTES",
+  "T3CODE_AIX",
 ] as const;
+
+// Like the Nix wrapper, the fork turns aix on by default; T3CODE_AIX=0 still turns it off.
+const WSL_FORWARDED_ENV_DEFAULTS: Partial<Record<string, string>> = { T3CODE_AIX: "1" };
 
 const WSL_SERVER_SYSTEM_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 
@@ -670,7 +674,7 @@ const resolveWslStartConfig = Effect.fn("desktop.backendConfiguration.resolveWsl
   const forwardedEnv: Record<string, string> = { [DESKTOP_HOST_SCOPE_ENV]: input.hostScope };
   const forwardedEnvNames: string[] = [DESKTOP_HOST_SCOPE_ENV];
   for (const name of WSL_FORWARDED_ENV_NAMES) {
-    const value = env[name];
+    const value = env[name] || WSL_FORWARDED_ENV_DEFAULTS[name];
     if (value !== undefined && value.length > 0) {
       forwardedEnv[name] = value;
       forwardedEnvNames.push(name);

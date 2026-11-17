@@ -15,6 +15,8 @@ Configure aix itself with the [aix setup and profile guide](https://github.com/N
 To use its profiles in T3, start the fork's server with `aix` on its `PATH` and `T3CODE_AIX=1` in
 its environment. Without that variable the server behaves like upstream T3, and instances it created
 for aix earlier are disabled. Your own Codex, Claude, and other provider sign-ins are not changed.
+The Nix build and the Windows desktop app's WSL backend set `T3CODE_AIX=1` for you; set
+`T3CODE_AIX=0` to turn it off.
 
 T3 reads the profile list from aix and asks aix for each profile's endpoint and key inside the server
 process. Keys are never written to T3 settings or sent to clients. ChatGPT sign-in profiles are not
