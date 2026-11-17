@@ -35,6 +35,7 @@ import {
   resolveProviderSettingsHierarchy,
 } from "@t3tools/client-runtime/provider-settings-hierarchy";
 import { ListActionRow as SettingsActionRow } from "../../components/ui/ListActionRow";
+import { ListRowLayout } from "../../components/ui/ListRowLayout";
 import { useSettingsEnvironmentMenu } from "./components/SettingsEnvironmentFilterHeader";
 import { SettingsScreen } from "./components/SettingsScreen";
 import { SettingsSection } from "./components/SettingsSection";
@@ -117,6 +118,8 @@ function EnvironmentProviders({
   const visibleClaudeAccounts = claudeAccounts.filter((provider) =>
     visibleIds.has(provider.instanceId),
   );
+  // aix owns sign-in for its instances, so Work lists them without account controls.
+  const aixProviders = providers.filter((provider) => visibleIds.has(provider.instanceId));
   const selectedProfile = hierarchy.profiles.find((profile) => profile.id === hierarchy.profileId);
   return (
     <>
@@ -141,33 +144,77 @@ function EnvironmentProviders({
               }))}
               onPressAction={({ nativeEvent }) => setProfileId(nativeEvent.event)}
             >
-              <ControlPill label={selectedProfile?.label ?? "Select profile"} />
+              <ControlPill variant="pill" label={selectedProfile?.label ?? "Select profile"} />
             </Menu>
           ) : null}
         </View>
       ) : null}
-      {visibleAccounts.map((provider, index) => (
-        <ProviderAccount
-          key={provider.instanceId}
-          environment={environment}
-          provider={provider}
-          divider={index > 0}
-        />
-      ))}
-      {visibleAccounts.length === 0 && visibleClaudeAccounts.length === 0 ? (
+      {hierarchy.scope === "work"
+        ? aixProviders.map((provider, index) => (
+            <AixProviderRow key={provider.instanceId} provider={provider} divider={index > 0} />
+          ))
+        : null}
+      {hierarchy.scope === "work"
+        ? null
+        : visibleAccounts.map((provider, index) => (
+            <ProviderAccount
+              key={provider.instanceId}
+              environment={environment}
+              provider={provider}
+              divider={index > 0}
+            />
+          ))}
+      {(
+        hierarchy.scope === "work"
+          ? aixProviders.length === 0
+          : visibleAccounts.length === 0 && visibleClaudeAccounts.length === 0
+      ) ? (
         <Text className="p-4 text-foreground-muted">
           {hierarchy.scope === "work"
             ? "No providers in this profile."
             : "Configure a provider with in-app sign-in in web or desktop Settings."}
         </Text>
       ) : null}
-      {visibleClaudeAccounts.map((provider) => (
-        <ClaudeAccount key={provider.instanceId} environment={environment} provider={provider} />
-      ))}
+      {hierarchy.scope === "work"
+        ? null
+        : visibleClaudeAccounts.map((provider) => (
+            <ClaudeAccount
+              key={provider.instanceId}
+              environment={environment}
+              provider={provider}
+            />
+          ))}
       {canAddClaude && hierarchy.scope === "personal" ? (
         <AddClaudeAccount environment={environment} />
       ) : null}
     </>
+  );
+}
+
+function AixProviderRow({
+  provider,
+  divider,
+}: {
+  readonly provider: ServerProvider;
+  readonly divider: boolean;
+}) {
+  const rowLabels = providerSettingsRowLabels({
+    driverLabel: PROVIDER_DISPLAY_NAMES[provider.driver] ?? String(provider.driver),
+    isAix: true,
+    version: provider.version,
+    status: !provider.enabled
+      ? "Turned off"
+      : provider.status === "ready"
+        ? "Ready"
+        : (provider.message ?? "Checking provider status"),
+  });
+  return (
+    <View className={divider ? "border-t border-border-subtle" : undefined}>
+      <ListRowLayout
+        label={`${rowLabels.title}${rowLabels.version ? ` ${rowLabels.version}` : ""}`}
+        description={rowLabels.detail}
+      />
+    </View>
   );
 }
 
