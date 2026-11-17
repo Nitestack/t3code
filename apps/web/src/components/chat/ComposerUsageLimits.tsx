@@ -56,10 +56,18 @@ export function usageLimitsBannerItem(
   selectedScope: UsageScope,
   onDismiss: () => void,
 ): ComposerBannerStackItem {
-  const { accounts } = resolveUsageLimitAccountsScope(report.accounts, null, selectedScope);
+  // The body owns the scope toggle, so a split report gets a summary that holds for both scopes.
+  const { accounts, groups } = resolveUsageLimitAccountsScope(report.accounts, null, selectedScope);
   const [first] = accounts;
   const single = accounts.length === 1 && first ? first : null;
-  const summary = single ? <AccountSummary account={single} /> : `${accounts.length} accounts`;
+  const summary =
+    groups.size > 1 ? (
+      "Personal and Work"
+    ) : single ? (
+      <AccountSummary account={single} />
+    ) : (
+      `${accounts.length} accounts`
+    );
   return {
     id,
     variant: "info",

@@ -267,7 +267,12 @@ export function LimitWindows({
                 {remainingLabel(window)}
               </span>
             </span>
-            <WindowBar color={color} window={window} now={now} />
+            <WindowBar
+              // Profile budgets are shared across harnesses, matching the neutral pooled bars.
+              color={aixProfileNameFromWindowId(window.id) ? "var(--foreground)" : color}
+              window={window}
+              now={now}
+            />
             <span className="flex items-center gap-2 text-xs whitespace-nowrap text-muted-foreground tabular-nums">
               {pace ? <PaceIcon pace={pace} /> : null}
               <span className="ms-auto shrink-0">{resetsIn ?? ""}</span>

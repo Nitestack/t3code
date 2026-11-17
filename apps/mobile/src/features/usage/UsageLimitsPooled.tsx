@@ -19,6 +19,7 @@ import {
   paceRemainingPercent,
   remainingPercent,
   remainingLabel,
+  remainingValue,
   type LimitAccount,
   type LimitPoolWindow,
   budgetLeftUsd,
@@ -302,7 +303,7 @@ function PoolWindowCard({
                     </Text>
                   )}
                   <Text className="text-sm font-t3-bold tabular-nums text-foreground">
-                    {remainingPercent(window)}%
+                    {remainingValue(window)}
                   </Text>
                 </View>
                 {inlineReset && (resetsIn || credits) ? (
@@ -381,7 +382,7 @@ function PoolWindowCard({
               {accountName(account)}
             </Text>
             <Text className="text-sm font-t3-medium tabular-nums text-foreground">
-              {remainingPercent(window)}%
+              {remainingValue(window)}
             </Text>
             <View className="flex-row items-center gap-1">
               {resetsIn ? (

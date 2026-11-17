@@ -872,10 +872,14 @@ export function remainingPercent(window: ServerProviderUsageWindow): number {
   return Math.round(100 - Math.max(0, Math.min(100, window.usedPercent)));
 }
 
-/** "$26.10 left" for a budget the server priced, otherwise "17% left". */
-export function remainingLabel(window: ServerProviderUsageWindow): string {
+/** "$26.10" for a budget the server priced, otherwise "17%". */
+export function remainingValue(window: ServerProviderUsageWindow): string {
   const usd = budgetLeftUsd(window);
-  return usd === undefined ? `${remainingPercent(window)}% left` : `${formatUsd(usd)} left`;
+  return usd === undefined ? `${remainingPercent(window)}%` : formatUsd(usd);
+}
+
+export function remainingLabel(window: ServerProviderUsageWindow): string {
+  return `${remainingValue(window)} left`;
 }
 
 function resetMillis(window: ServerProviderUsageWindow): number | null {
