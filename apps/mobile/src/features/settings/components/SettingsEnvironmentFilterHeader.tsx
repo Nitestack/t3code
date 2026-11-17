@@ -16,6 +16,10 @@ export function useSettingsEnvironmentMenu(): AppBarMenu {
     selectedProjectKey,
     selectProject,
   } = useSettingsEnvironmentFilter();
+  const projectScope = (group: (typeof selectableProjectGroups)[number]) =>
+    group.members.some((member) => member.project.scope === "work") ? "Work" : "Personal";
+  // Label scopes only once a project is Work; until then every project is Personal.
+  const showProjectScope = selectableProjectGroups.some((group) => projectScope(group) === "Work");
   return {
     title: "Filter settings environments and projects",
     icon:
@@ -61,6 +65,7 @@ export function useSettingsEnvironmentMenu(): AppBarMenu {
           ...selectableProjectGroups.map((group) => ({
             id: `project:${group.key}`,
             title: projectMenuLabel(group),
+            subtitle: showProjectScope ? projectScope(group) : undefined,
             selected: selectedProjectKey === group.key,
             onPress: () => selectProject(group.key),
           })),

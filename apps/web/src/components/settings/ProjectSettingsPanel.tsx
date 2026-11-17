@@ -630,7 +630,7 @@ function ProjectDetail({
           {canMoveProjectScope ? (
             <SettingsRow
               title="Project scope"
-              description="Controls whether this project appears in Personal or Work."
+              description={`In ${group.scope === "work" ? "Work" : "Personal"}. Controls whether this project appears in Personal or Work.`}
               control={
                 <Button
                   size="sm"

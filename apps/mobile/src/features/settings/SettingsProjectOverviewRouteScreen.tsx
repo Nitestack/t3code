@@ -380,7 +380,7 @@ function ProjectOverviewContent(props: {
             description={
               offline
                 ? "Connect every machine with this project to change its scope."
-                : "Moves every checkout of this project between Personal and Work."
+                : `In ${representative.scope === "work" ? "Work" : "Personal"}. Moves every checkout of this project between Personal and Work.`
             }
             disabled={isOrganizing || offline}
             loading={isOrganizing}

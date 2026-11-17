@@ -20,6 +20,7 @@ import {
   settingsScopeEnvironmentAddress,
   settingsScopeEnvironmentLabels,
   settingsScopeProjectMachines,
+  settingsScopeProjectScopeLabels,
 } from "./settingsScopeAxis";
 
 interface ScopeChoice {
@@ -60,6 +61,7 @@ export function SettingsScopeNotice({
       ? groups.filter((group) => !search.project || group.projectKey === search.project)
       : [null];
   const projectGroups = projectScopeMenuGroups(groups, search);
+  const projectScopeLabel = settingsScopeProjectScopeLabels(projectGroups);
   const renderChoices = (group: SidebarProjectSnapshot | null) => {
     const choices: ScopeChoice[] = group
       ? group.memberProjects.map((member) => {
@@ -87,6 +89,7 @@ export function SettingsScopeNotice({
         ? projectGroups.map((group) => ({
             label: group.displayName,
             secondary: [
+              ...[projectScopeLabel(group)].filter((label) => label !== null),
               ...(group.archived ? ["Archived"] : []),
               ...(projectGroups.some(
                 (other) =>
