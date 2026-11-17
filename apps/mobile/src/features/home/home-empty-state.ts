@@ -57,6 +57,15 @@ function deriveEmptyState(
     };
   }
 
+  const retryingLabels = retryingAfterFailureLabels(catalogState);
+  if (retryingLabels !== null) {
+    return {
+      title: projectCount === 0 ? "No projects found" : "No threads yet",
+      detail: `${retryingLabels} did not respond and is still retrying. Its projects and threads appear once it connects.`,
+      loading: false,
+    };
+  }
+
   if (isWorkspaceCatalogPending(catalogState)) {
     return {
       title: catalogState.hasReadyEnvironment ? "Loading threads" : "Connecting to environment",
@@ -78,4 +87,19 @@ function deriveEmptyState(
     detail: "Create a task to start a new coding runtime in one of your connected projects.",
     loading: false,
   };
+}
+
+// An environment that already failed can retry forever; once another one loaded, waiting on it
+// would leave the empty list on a spinner that never ends.
+function retryingAfterFailureLabels(catalogState: WorkspaceState): string | null {
+  const retrying = catalogState.connectingEnvironments;
+  if (
+    !catalogState.hasLoadedShellSnapshot ||
+    catalogState.hasSyncingConnectedEnvironment ||
+    retrying.length === 0 ||
+    retrying.some((environment) => environment.connectionError === null)
+  ) {
+    return null;
+  }
+  return retrying.map((environment) => environment.environmentLabel).join(", ");
 }

@@ -68,15 +68,25 @@ describe("home empty state", () => {
       { title: "Loading threads", loading: true, showsAddEnvironment: false },
     ],
     [
-      "waits while another environment is still connecting after one loaded empty",
+      "waits while another environment makes its first connection after one loaded empty",
+      workspaceState({
+        hasPendingShellSnapshot: true,
+        hasConnectingEnvironment: true,
+        connectingEnvironments: [connectingEnvironment("connecting", null)],
+      }),
+      0,
+      { title: "Loading threads", loading: true, showsAddEnvironment: false },
+    ],
+    [
+      "stops waiting on an environment that failed and keeps retrying after one loaded",
       workspaceState({
         hasPendingShellSnapshot: true,
         hasConnectingEnvironment: true,
         connectingEnvironments: [reconnecting],
         connectionError: RETAINED_FAILURE,
       }),
-      0,
-      { title: "Loading threads", loading: true, showsAddEnvironment: false },
+      1,
+      { title: "No threads yet", loading: false, showsAddEnvironment: false },
     ],
     [
       "reports no threads once every environment has resolved",
