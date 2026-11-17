@@ -1,6 +1,7 @@
 import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@t3tools/contracts";
 import { expect, it } from "@effect/vitest";
 import * as Cause from "effect/Cause";
+import * as Digest from "effect/crypto/Digest";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Logger from "effect/Logger";
@@ -62,6 +63,7 @@ const budgetFor = (
     },
   }).pipe(
     Effect.provideService(HttpClient.HttpClient, http.client),
+    Effect.provide(Digest.layerWebCrypto),
     Effect.map((service) => ({ service, resolves: () => resolves })),
   );
 };
@@ -125,7 +127,7 @@ it.each([
       {
         id: "aix-budget:ac",
         kind: "other",
-        label: "Gateway budget",
+        label: "Gateway budget · ac",
         usedPercent: expect.closeTo(usedPercent, 6),
         ...expected,
       },
@@ -179,9 +181,9 @@ it.effect.each([
     );
     const limits = yield* service.usageLimits("p");
 
-    expect(limits.windows.map(({ id, usedPercent }) => [id, usedPercent])).toEqual([
-      ["aix-budget:p", 50],
-    ]);
+    expect(limits.windows).toHaveLength(1);
+    expect(limits.windows[0]?.id).toMatch(/^aix-budget:p#credential:[a-f0-9]{64}$/u);
+    expect(limits.windows[0]?.usedPercent).toBe(50);
     expect(
       http.requests.map((request) => Option.getOrThrow(HttpClientRequest.toUrl(request)).href),
     ).toEqual([expected]);
@@ -379,29 +381,48 @@ const provider = (overrides: Partial<ServerProvider> = {}): ServerProvider =>
     ...overrides,
   }) as ServerProvider;
 
-it.effect("replaces only an enabled aix-managed instance's usage limits", () =>
+it.effect("replaces usage limits only on an enabled Claude budget owner", () =>
   Effect.gen(function* () {
     const http = fakeHttp(() => Response.json({ info: { spend: 199.1, max_budget: 200 } }));
     const { service } = yield* budgetFor(http);
-    const run = (profileName: string | undefined, snapshot: ServerProvider) =>
-      ProfileBudget.withAixProfileBudget(profileName)(snapshot).pipe(
-        Effect.provideService(ProfileBudget.AixProfileBudget, service),
-      );
+    const run = (
+      profileName: string | undefined,
+      isBudgetOwner: boolean,
+      snapshot: ServerProvider,
+    ) =>
+      ProfileBudget.withAixProfileBudget(
+        profileName,
+        isBudgetOwner,
+      )(snapshot).pipe(Effect.provideService(ProfileBudget.AixProfileBudget, service));
 
     const manual = provider();
-    expect(yield* run(undefined, manual)).toBe(manual);
+    expect(yield* run(undefined, false, manual)).toBe(manual);
     const disabled = provider({ enabled: false });
-    expect(yield* run("nim4", disabled)).toBe(disabled);
+    expect(yield* run("nim4", true, disabled)).toBe(disabled);
     expect(http.requests).toEqual([]);
 
-    const managed = yield* run("nim4", provider());
+    const codex = provider();
+    expect(yield* run("nim4", true, codex)).toBe(codex);
+    const notOwner = provider({ driver: ProviderDriverKind.make("claudeAgent") });
+    expect(yield* run("nim4", false, notOwner)).toBe(notOwner);
+
+    const managed = yield* run(
+      "nim4",
+      true,
+      provider({ driver: ProviderDriverKind.make("claudeAgent") }),
+    );
     expect(managed.usageLimits?.profileName).toBe("nim4");
-    expect(managed.usageLimits?.windows.map(({ id }) => id)).toEqual(["aix-budget:nim4"]);
+    expect(managed.usageLimits?.windows[0]?.id).toMatch(
+      /^aix-budget:nim4#credential:[a-f0-9]{64}$/u,
+    );
     expect(managed.usageLimits?.windows[0]?.usedPercent).toBeCloseTo(99.55, 6);
 
     const failedHttp = fakeHttp(() => new Response(null, { status: 500 }));
     const failedBudget = yield* budgetFor(failedHttp);
-    const failed = yield* ProfileBudget.withAixProfileBudget("home")(provider()).pipe(
+    const failed = yield* ProfileBudget.withAixProfileBudget(
+      "home",
+      true,
+    )(provider({ driver: ProviderDriverKind.make("claudeAgent") })).pipe(
       Effect.provideService(ProfileBudget.AixProfileBudget, failedBudget.service),
     );
     expect(failed.usageLimits).toMatchObject({
@@ -410,4 +431,64 @@ it.effect("replaces only an enabled aix-managed instance's usage limits", () =>
       unavailable: { reason: "probeFailed" },
     });
   }),
+);
+
+it.effect("applies the fallback budget only to the designated Claude instance", () =>
+  Effect.gen(function* () {
+    const http = fakeHttp(() => Response.json({ info: { spend: 16, max_budget: 100 } }));
+    const { service } = yield* budgetFor(http);
+    const run = (snapshot: ServerProvider) =>
+      ProfileBudget.withAixProfileBudget(
+        "adCare",
+        true,
+      )(snapshot).pipe(Effect.provideService(ProfileBudget.AixProfileBudget, service));
+
+    const codex = provider({ driver: ProviderDriverKind.make("codex") });
+    const claude = provider({ driver: ProviderDriverKind.make("claudeAgent") });
+    expect(yield* run(codex)).toBe(codex);
+    const claudeBudget = yield* run(claude);
+    expect(claudeBudget.usageLimits?.profileName).toBe("adCare");
+    expect(claudeBudget.usageLimits?.windows[0]).toMatchObject({
+      label: "Gateway budget · adCare",
+      usedPercent: 16,
+    });
+
+    const opencode = provider({ driver: ProviderDriverKind.make("opencode") });
+    expect(yield* run(opencode)).toBe(opencode);
+    expect(http.requests).toHaveLength(1);
+  }),
+);
+
+it.effect(
+  "uses a stable credential fingerprint to merge the same profile across environments",
+  () =>
+    Effect.gen(function* () {
+      const respond = () => Response.json({ info: { spend: 16, max_budget: 100 } });
+      const first = yield* budgetFor(fakeHttp(respond));
+      const sameCredential = yield* budgetFor(fakeHttp(respond));
+      const equivalentEndpoint = yield* budgetFor(fakeHttp(respond), (profileName) =>
+        Effect.succeed(litellm(profileName, "https://gateway.test/v1/")),
+      );
+      const otherProfile = yield* budgetFor(fakeHttp(respond));
+      const otherCredential = yield* budgetFor(fakeHttp(respond), (profileName) =>
+        Effect.succeed({ ...litellm(profileName), apiKey: "different-key" }),
+      );
+
+      const fingerprint = (yield* first.service.usageLimits("adCare")).credentialFingerprint;
+      const matchingFingerprint = (yield* sameCredential.service.usageLimits("adCare"))
+        .credentialFingerprint;
+      const equivalentEndpointFingerprint = (yield* equivalentEndpoint.service.usageLimits(
+        "adCare",
+      )).credentialFingerprint;
+      const otherProfileFingerprint = (yield* otherProfile.service.usageLimits("nim4"))
+        .credentialFingerprint;
+      const otherCredentialFingerprint = (yield* otherCredential.service.usageLimits("adCare"))
+        .credentialFingerprint;
+
+      expect(fingerprint).toMatch(/^[a-f0-9]{64}$/u);
+      expect(matchingFingerprint).toBe(fingerprint);
+      expect(equivalentEndpointFingerprint).toBe(fingerprint);
+      expect(otherProfileFingerprint).not.toBe(fingerprint);
+      expect(otherCredentialFingerprint).not.toBe(fingerprint);
+    }),
 );

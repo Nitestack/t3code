@@ -374,7 +374,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
               : Effect.void,
           ),
           Effect.map(stampIdentity),
-          Effect.flatMap(withAixProfileBudget(config.aixProfile)),
+          Effect.flatMap(withAixProfileBudget(config.aixProfile, config.aixBudgetOwner)),
         ),
       ),
       // Disabled, failed version checks and interruption never reach the probe.

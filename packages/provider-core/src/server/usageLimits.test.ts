@@ -103,14 +103,18 @@ describe("applyUsageLimitsUpdate", () => {
   });
 
   it("preserves AIX profile identity through streamed window updates", () => {
-    const previous = { ...published, profileName: "work" };
-    expect(
-      applyUsageLimitsUpdate({
-        previous,
-        checkedAt: "2026-09-03T12:00:05.000Z",
-        update: { windows: [{ ...session, usedPercent: 55 }] },
-      })?.profileName,
-    ).toBe("work");
+    const previous = {
+      ...published,
+      profileName: "work",
+      credentialFingerprint: "aix-credential-fingerprint",
+    };
+    const next = applyUsageLimitsUpdate({
+      previous,
+      checkedAt: "2026-09-03T12:00:05.000Z",
+      update: { windows: [{ ...session, usedPercent: 55 }] },
+    });
+    expect(next?.profileName).toBe("work");
+    expect(next?.credentialFingerprint).toBe("aix-credential-fingerprint");
   });
 
   it("preserves reset credits and a $0 cap when a streamed window update changes usage", () => {

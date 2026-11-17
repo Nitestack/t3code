@@ -1,8 +1,11 @@
 import { providerClients } from "@t3tools/client-runtime/provider-clients";
-import type { EnvironmentId, UsageLimitsReport } from "@t3tools/contracts";
+import { resolveUsageLimitAccountsScope } from "@t3tools/shared/usageLimits";
+import type { EnvironmentId, UsageLimitsReport, UsageScope } from "@t3tools/contracts";
 import { Pressable, ScrollView, View } from "react-native";
+import { useState } from "react";
 
 import { SymbolView } from "../../components/ui/AppSymbol";
+import { SegmentedControl } from "../../components/ui/SegmentedControl";
 import { AppText as Text } from "../../components/ui/AppText";
 import { AccountLimits, ResetCredits } from "../usage/UsageLimitsSection";
 
@@ -10,13 +13,21 @@ export function ComposerUsageLimits({
   report,
   environmentId,
   maxHeight,
+  selectedScope,
   onClose,
 }: {
   readonly report: UsageLimitsReport;
   readonly environmentId: EnvironmentId;
   readonly maxHeight: number;
+  readonly selectedScope: UsageScope;
   readonly onClose: () => void;
 }) {
+  const [requestedScope, setRequestedScope] = useState<UsageScope | null>(null);
+  const { accounts, groups, scope } = resolveUsageLimitAccountsScope(
+    report.accounts,
+    requestedScope,
+    selectedScope,
+  );
   const now = Date.parse(report.createdAt);
   const close = (
     <Pressable
@@ -32,7 +43,20 @@ export function ComposerUsageLimits({
   return (
     <View className="overflow-hidden rounded-[20px] border-continuous bg-card">
       <ScrollView bounces={false} showsVerticalScrollIndicator={false} style={{ maxHeight }}>
-        {report.accounts.map((account, index) => {
+        {groups.size > 1 ? (
+          <View className="px-4 pt-3">
+            <SegmentedControl
+              size="compact"
+              selected={scope}
+              onSelect={setRequestedScope}
+              options={[
+                { value: "personal", label: "Personal" },
+                { value: "work", label: "Work" },
+              ]}
+            />
+          </View>
+        ) : null}
+        {accounts.map((account, index) => {
           const resetCreditInput =
             account.resetCreditInput ??
             (account.instanceId ? { instanceId: account.instanceId } : undefined);
@@ -71,7 +95,7 @@ export function ComposerUsageLimits({
             />
           );
         })}
-        {report.accounts.length === 0 ? (
+        {accounts.length === 0 ? (
           <View className="flex-row items-center gap-3 px-4 pt-3">
             <Text className="min-w-0 flex-1 text-base text-foreground">Usage limits</Text>
             {close}
@@ -81,7 +105,7 @@ export function ComposerUsageLimits({
           <Text
             key={notice}
             className={
-              report.accounts.length === 0
+              accounts.length === 0
                 ? "px-4 py-3 text-xs text-foreground-muted"
                 : "border-t border-border-subtle px-4 py-3 text-xs text-foreground-muted"
             }

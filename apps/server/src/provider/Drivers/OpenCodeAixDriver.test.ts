@@ -1,7 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
-import { ProviderInstanceId } from "@t3tools/contracts";
+import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -18,11 +18,12 @@ import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 
 import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
-import { OpenCodeDriver } from "@t3tools/provider-opencode/server";
+import { OpenCodeAixUsageLimits, OpenCodeDriver } from "@t3tools/provider-opencode/server";
 import * as OpenCodeRuntime from "@t3tools/provider-opencode/server/OpenCodeRuntime";
 import type { OpenCodeSettings } from "@t3tools/provider-opencode/settings";
 
 import * as ServerConfig from "../../config.ts";
+import { AixProfileBudget } from "../../aix/ProfileBudget.ts";
 import { AixProviderInstanceSync } from "../../aix/ProviderInstanceSync.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeOpenCodeAixDriver } from "./OpenCodeAixDriver.ts";
@@ -94,6 +95,9 @@ const testServices = (runtime: OpenCodeRuntime.OpenCodeRuntime["Service"]) =>
       Layer.provideMerge(Layer.mergeAll(NodeServices.layer, SecureRandom.layerWebCrypto)),
     ),
     Layer.succeed(OpenCodeRuntime.OpenCodeRuntime, runtime),
+    Layer.succeed(OpenCodeAixUsageLimits, {
+      read: Effect.succeed({ checkedAt: "2026-11-15T12:00:00.000Z", windows: [] }),
+    }),
     Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, aixSpawner),
     Layer.succeed(
       AixProviderInstanceSync,
@@ -111,6 +115,7 @@ type TestEnv =
   | Path.Path
   | SecureRandom.SecureRandom
   | OpenCodeRuntime.OpenCodeRuntime
+  | OpenCodeAixUsageLimits
   | ServerConfig.ServerConfig;
 
 const run = <A, E>(
@@ -158,6 +163,64 @@ it.effect("marks aix OpenCode snapshots stale after a failed catalog refresh", (
         status: "warning",
         message: "aix catalog stale since 1970-01-01T00:00:00.000Z (request-503).",
       });
+    }),
+    unusedRuntime,
+  ),
+);
+
+it.effect("keeps aix budgets on the OpenCode instance and identifies the profile", () =>
+  run(
+    Effect.gen(function* () {
+      const budget = {
+        checkedAt: "2026-11-15T12:00:00.000Z",
+        profileName: "work",
+        credentialFingerprint: "profile-key-fingerprint",
+        windows: [
+          {
+            id: "aix-budget:work#credential:profile-key-fingerprint",
+            kind: "other" as const,
+            label: "Gateway budget · work",
+            usedPercent: 16,
+            amounts: { currency: "USD" as const, spent: 16, total: 100 },
+          },
+        ],
+      };
+      const driver = makeOpenCodeAixDriver(() =>
+        Effect.gen(function* () {
+          const aixLimits = yield* OpenCodeAixUsageLimits;
+          const usageLimits = yield* aixLimits.read;
+          const provider = {
+            instanceId: ProviderInstanceId.make("aix-opencode-work"),
+            driver: ProviderDriverKind.make("opencode"),
+            status: "ready",
+            enabled: true,
+            usageLimits,
+          } as ServerProvider;
+          const snapshot = {
+            resolveMaintenance: () => Effect.succeed({} as never),
+            getSnapshot: Effect.succeed(provider),
+            refresh: Effect.succeed(provider),
+            streamChanges: Stream.make(provider),
+            applyUsageLimits: () => Effect.void,
+          } as ProviderInstance["snapshot"];
+          return { snapshot } as ProviderInstance;
+        }),
+      );
+      const instance = yield* driver
+        .create(
+          input({ aixProfile: "work" }, [
+            { name: "T3_AIX_PROFILE", value: "work", sensitive: false },
+          ]),
+        )
+        .pipe(
+          Effect.provideService(
+            AixProfileBudget,
+            AixProfileBudget.of({ usageLimits: () => Effect.succeed(budget) }),
+          ),
+        );
+      const provider = yield* instance.snapshot.getSnapshot;
+
+      expect(provider.usageLimits).toEqual(budget);
     }),
     unusedRuntime,
   ),

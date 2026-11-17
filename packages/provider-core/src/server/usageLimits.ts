@@ -84,6 +84,9 @@ export function applyUsageLimitsUpdate(input: {
   return {
     ...makeUsageLimits({ checkedAt: input.checkedAt, windows: merged.values() }),
     ...(previous?.profileName ? { profileName: previous.profileName } : {}),
+    ...(previous?.credentialFingerprint
+      ? { credentialFingerprint: previous.credentialFingerprint }
+      : {}),
     ...(previous?.resetCredits !== undefined ? { resetCredits: previous.resetCredits } : {}),
     ...(previous?.zeroSpendCap ? { zeroSpendCap: true } : {}),
     ...(unavailable !== undefined ? { unavailable } : {}),

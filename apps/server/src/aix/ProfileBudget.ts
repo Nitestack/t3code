@@ -6,9 +6,11 @@ import {
 } from "@t3tools/provider-core/server/usageLimits";
 import * as Cache from "effect/Cache";
 import * as Context from "effect/Context";
+import * as Digest from "effect/crypto/Digest";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Hex from "effect/encoding/Hex";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
@@ -49,12 +51,14 @@ const isoTime = (value: string | null | undefined): string | undefined =>
     ? undefined
     : Option.getOrUndefined(Option.map(DateTime.make(value), DateTime.formatIso));
 
-const budgetWindowId = (profileName: string) => `aix-budget:${profileName}`;
+const budgetWindowId = (profileName: string, credentialFingerprint?: string) =>
+  `aix-budget:${profileName}${credentialFingerprint ? `#credential:${credentialFingerprint}` : ""}`;
 
 export function keyInfoUsageLimits(input: {
   readonly profileName: string;
   readonly keyInfo: KeyInfo;
   readonly checkedAt: string;
+  readonly credentialFingerprint?: string;
 }): ServerProviderUsageLimits {
   const { spend, max_budget: maxBudget, budget_duration, budget_reset_at } = input.keyInfo.info;
   if (maxBudget == null) {
@@ -81,20 +85,25 @@ export function keyInfoUsageLimits(input: {
   }
   const resetsAt = isoTime(budget_reset_at);
   const windowDurationMins = durationMinutes(budget_duration);
-  return makeUsageLimits({
-    checkedAt: input.checkedAt,
-    windows: [
-      {
-        id: budgetWindowId(input.profileName),
-        kind: "other",
-        label: "Gateway budget",
-        usedPercent: clampPercent((spend / maxBudget) * 100),
-        amounts: { currency: "USD", spent: spend, total: maxBudget },
-        ...(resetsAt === undefined ? {} : { resetsAt }),
-        ...(windowDurationMins === undefined ? {} : { windowDurationMins }),
-      },
-    ],
-  });
+  return {
+    ...makeUsageLimits({
+      checkedAt: input.checkedAt,
+      windows: [
+        {
+          id: budgetWindowId(input.profileName, input.credentialFingerprint),
+          kind: "other",
+          label: `Gateway budget · ${input.profileName}`,
+          usedPercent: clampPercent((spend / maxBudget) * 100),
+          amounts: { currency: "USD", spent: spend, total: maxBudget },
+          ...(resetsAt === undefined ? {} : { resetsAt }),
+          ...(windowDurationMins === undefined ? {} : { windowDurationMins }),
+        },
+      ],
+    }),
+    ...(input.credentialFingerprint === undefined
+      ? {}
+      : { credentialFingerprint: input.credentialFingerprint }),
+  };
 }
 
 const keyInfoUrl = (endpoint: string) => {
@@ -163,6 +172,7 @@ export interface AixBudgetSource {
 const readProfileBudget = Effect.fn("AixProfileBudget.read")(function* (
   source: AixBudgetSource,
   profileName: string,
+  digest: Digest.Digest["Service"],
 ) {
   const checkedAt = DateTime.formatIso(yield* DateTime.now);
   const environment = yield* source.resolveEnvironment(profileName).pipe(Effect.option);
@@ -182,7 +192,20 @@ const readProfileBudget = Effect.fn("AixProfileBudget.read")(function* (
   }
   const keyInfo = yield* readKeyInfo(environment.value).pipe(Effect.result);
   if (Result.isSuccess(keyInfo)) {
-    return keyInfoUsageLimits({ profileName, keyInfo: keyInfo.success, checkedAt });
+    const credentialFingerprint = yield* digest
+      .digest(
+        Digest.sha256,
+        new TextEncoder().encode(
+          `aix-profile-budget\0${profileName}\0${keyInfoUrl(environment.value.endpoint)}\0${environment.value.apiKey}`,
+        ),
+      )
+      .pipe(Effect.map(Hex.encode), Effect.orDie);
+    return keyInfoUsageLimits({
+      profileName,
+      keyInfo: keyInfo.success,
+      checkedAt,
+      credentialFingerprint,
+    });
   }
   const failure = keyInfo.failure;
   return makeUnavailableUsageLimits({
@@ -204,9 +227,10 @@ export class AixProfileBudget extends Context.Service<
 
 export const make = Effect.fn("AixProfileBudget.make")(function* (source: AixBudgetSource) {
   const http = yield* HttpClient.HttpClient;
+  const digest = yield* Digest.Digest;
   const cache = yield* Cache.make({
     lookup: (profileName: string) =>
-      readProfileBudget(source, profileName).pipe(
+      readProfileBudget(source, profileName, digest).pipe(
         Effect.provideService(HttpClient.HttpClient, http),
       ),
     capacity: 64,
@@ -232,11 +256,14 @@ export const layer = Layer.effect(
   }),
 );
 
-/** Replaces an aix-managed instance's usage limits with its profile's gateway budget. */
+/** Attaches a profile budget to its designated Claude fallback instance when OpenCode is absent. */
 export const withAixProfileBudget =
-  (profileName: string | undefined) =>
+  (profileName: string | undefined, isBudgetOwner = false) =>
   (provider: ServerProvider): Effect.Effect<ServerProvider> =>
-    profileName === undefined || !provider.enabled
+    profileName === undefined ||
+    !isBudgetOwner ||
+    !provider.enabled ||
+    provider.driver !== "claudeAgent"
       ? Effect.succeed(provider)
       : Effect.serviceOption(AixProfileBudget).pipe(
           Effect.flatMap((service) =>

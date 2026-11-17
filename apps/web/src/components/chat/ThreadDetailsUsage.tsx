@@ -7,6 +7,7 @@ import type {
 import {
   aixProfileNameFromWindowId,
   collectProviderUsageLimits,
+  usageLimitsForProviderInstance,
   formatDuration,
   type LimitPace,
   limitsNotice,
@@ -55,11 +56,10 @@ export function ThreadDetailsUsage({
     providerInstanceId !== null
       ? collectProviderUsageLimits(providerInstanceId, providers, sources, now)
       : null;
-  // Only this instance's data: the report keeps one instance per login, and any other entry may be
-  // a different login or workspace, so fall back to the instance's own snapshot.
+  const selected = providers.find((provider) => provider.instanceId === providerInstanceId);
   const limits =
-    report?.accounts.find((entry) => entry.instanceId === providerInstanceId)?.limits ??
-    providers.find((provider) => provider.instanceId === providerInstanceId)?.usageLimits;
+    (selected ? usageLimitsForProviderInstance(report, selected) : undefined) ??
+    selected?.usageLimits;
   if (!limits) return null;
   const notice = limitsNotice(limits);
 

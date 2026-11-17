@@ -547,6 +547,7 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
       selectedProviderStatus.driver,
       props.serverConfig?.providers ?? [],
       props.serverConfig?.usageLimitSources ?? [],
+      selectedProviderStatus.aixProfile,
     );
   const openUsageLimits = () => {
     const report = collectProviderUsageLimits(

@@ -264,6 +264,25 @@ describe("aixDesiredInstances", () => {
     ).toHaveLength(1);
   });
 
+  it("assigns the profile budget to Claude when no OpenCode route exists", () => {
+    const desired = aixDesiredInstances([
+      {
+        name: "work",
+        label: "Work",
+        routes: routeAixModels("litellm", [
+          { id: "claude-sonnet-5-5", displayName: "Claude Sonnet" },
+          { id: "gpt-6.1-sol", displayName: "GPT-6.1 Sol" },
+        ]),
+      },
+    ]);
+    const claude = must(desired.get(ProviderInstanceId.make("aix-claudeAgent-work")));
+    const codex = must(desired.get(ProviderInstanceId.make("aix-codex-work")));
+
+    expect(claude.config).toMatchObject({ aixProfile: "work", aixBudgetOwner: true });
+    expect(codex.config).not.toHaveProperty("aixBudgetOwner");
+    expect(desired.has(ProviderInstanceId.make("aix-opencode-work"))).toBe(false);
+  });
+
   it("gives OpenCode instances provider-qualified slugs that keep the upstream model id", () => {
     const opencode = must(desiredFor("work").get(ProviderInstanceId.make("aix-opencode-work")));
 

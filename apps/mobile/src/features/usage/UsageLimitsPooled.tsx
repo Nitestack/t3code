@@ -18,6 +18,8 @@ import {
   formatResetsIn,
   paceRemainingPercent,
   remainingPercent,
+  remainingLabel,
+  remainingValue,
   type LimitAccount,
   type LimitPoolWindow,
   budgetLeftUsd,
@@ -186,6 +188,7 @@ function PoolWindowCard({
 }) {
   const navigation = useNavigation();
   const [barWidth, setBarWidth] = useState(0);
+  const profileName = pool.members[0]?.account.profileName;
   const budgetWindow = pool.members.length === 1 ? pool.members[0]?.window : undefined;
   const amounts = budgetWindow?.amounts;
   const leftUsd = budgetWindow ? budgetLeftUsd(budgetWindow) : undefined;
@@ -208,7 +211,9 @@ function PoolWindowCard({
       <View className={wide ? "gap-1" : "flex-row items-start justify-between gap-3"}>
         <View className="gap-1">
           {label !== null ? (
-            <Text className="text-sm font-t3-medium text-foreground">{label ?? pool.label}</Text>
+            <Text className="text-sm font-t3-medium text-foreground">
+              {profileName ? (label ?? "Budget") : (label ?? pool.label)}
+            </Text>
           ) : null}
           {amounts && leftUsd !== undefined ? (
             <>
@@ -267,7 +272,7 @@ function PoolWindowCard({
           <Pressable
             key={account.key}
             accessibilityRole="button"
-            accessibilityLabel={`Segment ${index + 1}, ${accountName(account)}, ${remainingPercent(window)}% left${timeLeft === null ? "" : `, ${timeLeft}% of the window left`}`}
+            accessibilityLabel={`Segment ${index + 1}, ${accountName(account)}, ${remainingLabel(window)}${timeLeft === null ? "" : `, ${timeLeft}% of the window left`}`}
             accessibilityHint="Show account details"
             onPress={() => openAccount(account)}
             className={wide ? "h-9 min-w-0 flex-1 rounded-md" : "h-7 min-w-0 flex-1 rounded-md"}
@@ -298,7 +303,7 @@ function PoolWindowCard({
                     </Text>
                   )}
                   <Text className="text-sm font-t3-bold tabular-nums text-foreground">
-                    {remainingPercent(window)}%
+                    {remainingValue(window)}
                   </Text>
                 </View>
                 {inlineReset && (resetsIn || credits) ? (
@@ -355,7 +360,7 @@ function PoolWindowCard({
           <Pressable
             key={account.key}
             accessibilityRole="button"
-            accessibilityLabel={`Segment ${index + 1}, ${accountName(account)}, ${remainingPercent(window)}% left${resetsIn ? `, ${resetsIn}` : ""}${credits ? `, ${credits} reset credits banked` : ""}`}
+            accessibilityLabel={`Segment ${index + 1}, ${accountName(account)}, ${remainingLabel(window)}${resetsIn ? `, ${resetsIn}` : ""}${credits ? `, ${credits} reset credits banked` : ""}`}
             accessibilityHint="Show account details"
             onPress={() => openAccount(account)}
             className="min-h-[44px] flex-row items-center gap-2 active:opacity-60"
@@ -377,7 +382,7 @@ function PoolWindowCard({
               {accountName(account)}
             </Text>
             <Text className="text-sm font-t3-medium tabular-nums text-foreground">
-              {remainingPercent(window)}%
+              {remainingValue(window)}
             </Text>
             <View className="flex-row items-center gap-1">
               {resetsIn ? (
@@ -627,9 +632,11 @@ export function UsageLimitAccountScreen({ route }: AccountScreenProps) {
               ) : null}
             </View>
             <View className="gap-3 rounded-[24px] border-continuous bg-grouped-card p-4">
-              <Text className="text-sm font-t3-medium text-foreground">{window.label}</Text>
+              <Text className="text-sm font-t3-medium text-foreground">
+                {account.profileName ? "Budget" : window.label}
+              </Text>
               <Text className="text-3xl font-t3-bold tabular-nums text-foreground">
-                {remainingPercent(window)}% left
+                {remainingLabel(window)}
               </Text>
               {window.resetsAt ? (
                 <Text selectable className="text-sm text-foreground-muted">

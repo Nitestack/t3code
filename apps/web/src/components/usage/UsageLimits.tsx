@@ -17,6 +17,7 @@ import {
   usageLimitEmptyMessage,
 } from "@t3tools/client-runtime/state/usage-grouping";
 import {
+  aixProfileNameFromWindowId,
   formatResetsIn,
   type LimitPresentations,
   type LimitPace,
@@ -56,6 +57,9 @@ const PACE: Record<LimitPace, { readonly label: string; readonly icon: typeof Ga
   on: { label: "On pace with the window", icon: GaugeIcon },
   under: { label: "Under pace: headroom left for the rest of the window", icon: TrendingDownIcon },
 };
+
+const windowLabel = (window: ServerProviderUsageWindow) =>
+  aixProfileNameFromWindowId(window.id) === undefined ? window.label : "Budget";
 
 export function usageLimitPresentationsForSelection(
   presentations: LimitPresentations,
@@ -175,7 +179,7 @@ function WindowBar({
   const resetsAt = window.resetsAt
     ? formatUpcomingTimestamp(window.resetsAt, timestampFormat, now)
     : null;
-  const summary = `${window.label}: ${remaining}% left${
+  const summary = `${windowLabel(window)}: ${remaining}% left${
     timeLeft === null ? "" : `, ${timeLeft}% of the window left`
   }${resetsIn ? `, ${resetsIn}` : ""}`;
 
@@ -258,12 +262,17 @@ export function LimitWindows({
         return (
           <Fragment key={window.id}>
             <span className="flex min-w-0 items-center gap-2 text-xs">
-              <span className="truncate text-muted-foreground">{window.label}</span>
+              <span className="truncate text-muted-foreground">{windowLabel(window)}</span>
               <span className="ms-auto shrink-0 font-medium text-foreground tabular-nums">
                 {remainingLabel(window)}
               </span>
             </span>
-            <WindowBar color={color} window={window} now={now} />
+            <WindowBar
+              // Profile budgets are shared across harnesses, matching the neutral pooled bars.
+              color={aixProfileNameFromWindowId(window.id) ? "var(--foreground)" : color}
+              window={window}
+              now={now}
+            />
             <span className="flex items-center gap-2 text-xs whitespace-nowrap text-muted-foreground tabular-nums">
               {pace ? <PaceIcon pace={pace} /> : null}
               <span className="ms-auto shrink-0">{resetsIn ?? ""}</span>

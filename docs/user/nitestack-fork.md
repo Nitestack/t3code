@@ -40,9 +40,9 @@ Each model runs in the agent that matches its family:
 If a selected model or profile stops working, the turn fails with an error. T3 never switches to a
 different model or agent for you.
 
-When a profile's LiteLLM key has a budget, the usage limits panel shows it as a Gateway budget bar
-for each of that profile's instances, with its reset time when the gateway reports one. A key
-without a budget, or a direct Anthropic profile, shows no bar.
+When a profile's LiteLLM key has a budget, the usage limits panel shows one Gateway budget bar for
+that profile, with its reset time when the gateway reports one. A key without a budget, or a direct
+Anthropic profile, shows no bar.
 
 ### Refresh and key rotation
 

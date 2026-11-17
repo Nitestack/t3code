@@ -795,6 +795,9 @@ export const ClaudeSettings = makeProviderSettingsSchema(
     aixProfile: Schema.optionalKey(Schema.String).pipe(
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
+    aixBudgetOwner: Schema.optionalKey(Schema.Boolean).pipe(
+      Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+    ),
     enabled: Schema.Boolean.pipe(
       Schema.withDecodingDefault(Effect.succeed(true)),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),

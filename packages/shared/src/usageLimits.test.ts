@@ -26,9 +26,19 @@ import {
   paceRemainingPercent,
   usesChatGptSharing,
   resolveNewThreadModelSelection,
+  aixProfileNameFromWindowId,
+  usageLimitsForProviderInstance,
+  resolveUsageLimitAccountsScope,
 } from "./usageLimits.ts";
 
 const now = Date.parse("2026-09-03T12:00:00.000Z");
+
+it.each([
+  [`aix-budget:adCare#credential:${"a".repeat(64)}`, "adCare"],
+  ["aix-budget:Personal", "Personal"],
+])("reads the aix profile name from window id %s", (id, profileName) => {
+  expect(aixProfileNameFromWindowId(id)).toBe(profileName);
+});
 
 const window = {
   id: "five_hour",
@@ -82,6 +92,26 @@ describe("new thread model fallback", () => {
     ["missing default", { defaultSelection: null }, null],
     ["no fallback", { fallbackSelection: null }, selection],
     ["expired window", { now: Date.parse("2026-09-04T00:00:00Z") }, selection],
+    [
+      "exhausted profile budget on another driver",
+      {
+        providers: [
+          provider({ instanceId: selection.instanceId, aixProfile: "work" }),
+          available,
+          provider({
+            instanceId: ProviderInstanceId.make("aix-claudeAgent-work"),
+            driver: ProviderDriverKind.make("claudeAgent"),
+            aixProfile: "work",
+            usageLimits: {
+              checkedAt: "2026-09-03T11:30:00.000Z",
+              profileName: "work",
+              windows: [{ ...window, id: "aix-budget:work", usedPercent: 100 }],
+            },
+          }),
+        ],
+      },
+      fallback,
+    ],
     [
       "environment disabled",
       {
@@ -209,6 +239,38 @@ describe("new thread model fallback", () => {
       ).toEqual(usesFallback ? fallback : defaultSelection);
     },
   );
+});
+
+describe("usage limit account scopes", () => {
+  const personal = {
+    id: "native",
+    driver: ProviderDriverKind.make("claudeAgent"),
+    label: "Claude",
+    instanceId: ProviderInstanceId.make("claude"),
+    limits: { checkedAt: window.resetsAt, windows: [window] },
+  } as const;
+  const work = {
+    id: "aix-claude-work",
+    driver: ProviderDriverKind.make("claudeAgent"),
+    label: "Work",
+    instanceId: ProviderInstanceId.make("aix-claude-work"),
+    limits: { checkedAt: window.resetsAt, profileName: "work", windows: [window] },
+  } as const;
+
+  it("shows the selected scope and switches only to available accounts", () => {
+    expect(resolveUsageLimitAccountsScope([personal, work], null, "work")).toEqual({
+      accounts: [work],
+      groups: new Set(["personal", "work"]),
+      scope: "work",
+    });
+    expect(resolveUsageLimitAccountsScope([personal, work], "personal", "work").accounts).toEqual([
+      personal,
+    ]);
+    expect(resolveUsageLimitAccountsScope([work], null, "personal")).toMatchObject({
+      accounts: [work],
+      scope: "work",
+    });
+  });
 });
 
 describe("pace", () => {
@@ -1667,20 +1729,23 @@ describe("/usage-limits", () => {
     const selected = provider({
       instanceId: ProviderInstanceId.make("codex-work"),
       driver: ProviderDriverKind.make("codex"),
-      usageLimits: {
-        checkedAt: "2026-09-03T11:00:00.000Z",
-        profileName: "work",
-        windows: [{ ...window, id: "aix-budget:work", label: "Gateway budget", usedPercent: 40 }],
-      },
+      aixProfile: "work",
     });
-    const latestFailure = provider({
+    const latestBudget = provider({
       instanceId: ProviderInstanceId.make("claude-work"),
       driver: ProviderDriverKind.make("claudeAgent"),
+      aixProfile: "work",
       usageLimits: {
-        checkedAt: "2026-09-03T11:45:00.000Z",
+        checkedAt: "2026-09-03T11:30:00.000Z",
         profileName: "work",
-        windows: [],
-        unavailable: { reason: "probeFailed", message: "Gateway budget unavailable." },
+        windows: [
+          {
+            ...window,
+            id: `aix-budget:work#credential:${"a".repeat(64)}`,
+            label: "Gateway budget · work",
+            amounts: { currency: "USD" as const, spent: 16, total: 100 },
+          },
+        ],
       },
     });
     const nativeCodex = provider({
@@ -1691,6 +1756,38 @@ describe("/usage-limits", () => {
       },
     });
 
+    const offlineBudgetOwner = {
+      ...latestBudget,
+      installed: false,
+      availability: "unavailable" as const,
+    };
+    const budgetReport = collectProviderUsageLimits(
+      selected.instanceId,
+      [selected, offlineBudgetOwner, nativeCodex],
+      [],
+      now,
+    );
+    expect(usageLimitsForProviderInstance(budgetReport, selected)?.windows[0]?.id).toBe(
+      `aix-budget:work#credential:${"a".repeat(64)}`,
+    );
+    expect(
+      budgetReport?.accounts.find((account) => account.id === "claude-work")?.limits.windows[0],
+    ).toMatchObject({
+      id: `aix-budget:work#credential:${"a".repeat(64)}`,
+      amounts: { currency: "USD", spent: 16, total: 100 },
+    });
+
+    const latestFailure = provider({
+      instanceId: ProviderInstanceId.make("claude-work"),
+      driver: ProviderDriverKind.make("claudeAgent"),
+      aixProfile: "work",
+      usageLimits: {
+        checkedAt: "2026-09-03T11:45:00.000Z",
+        profileName: "work",
+        windows: [],
+        unavailable: { reason: "probeFailed", message: "Gateway budget unavailable." },
+      },
+    });
     const report = collectProviderUsageLimits(
       selected.instanceId,
       [selected, latestFailure, nativeCodex],
@@ -1698,7 +1795,7 @@ describe("/usage-limits", () => {
       now,
     );
 
-    expect(report?.accounts.find((account) => account.id === "codex-work")?.limits).toEqual(
+    expect(report?.accounts.find((account) => account.id === "claude-work")?.limits).toEqual(
       latestFailure.usageLimits,
     );
     expect(
