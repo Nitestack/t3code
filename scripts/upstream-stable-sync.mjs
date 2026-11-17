@@ -1436,7 +1436,7 @@ async function main() {
       `${JSON.stringify({ tag: targetTag, commit: targetCommit }, null, 2)}\n`,
     );
     git(["add", "--", MARKER_PATH]);
-    git(["commit", "--no-edit", "-m", `chore: sync upstream stable ${targetTag}`]);
+    git(["commit", "--no-verify", "--no-edit", "-m", `chore: sync upstream stable ${targetTag}`]);
 
     const version = targetTag.replace(/^v/, "");
     const updater = NodeURL.fileURLToPath(
@@ -1451,7 +1451,7 @@ async function main() {
     }
     if (versionChanges.length > 0) {
       git(["add", "--", ...versionChanges]);
-      git(["commit", "-m", `chore: set release package versions to ${version}`]);
+      git(["commit", "--no-verify", "-m", `chore: set release package versions to ${version}`]);
     }
   }
 
