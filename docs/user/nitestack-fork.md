@@ -86,8 +86,8 @@ to both an original T3 server and a fork server.
 
 ## Mobile apps
 
-The Android app's launcher label is **T3 Code**. Its hidden package ID is `com.nitestack.t3code`,
-which lets it install alongside the Play Store app. When a stable release is published, its signed
+The Android app's launcher label is **T3 Code**. It uses the official package ID `com.t3tools.t3code` so T3 Connect sign-in
+works, which means it replaces the Play Store app: uninstall that first, then update only from fork releases. When a stable release is published, its signed
 APK appears with its SHA-256 checksum and build metadata; there is no store listing. Its `vX.Y.Z` tag points to the fork
 integration merge commit on `main`, whose tree contains fork changes and upstream through the
 matching stable tag. The upstream tag commit is recorded only as the stable base. The release
