@@ -267,20 +267,28 @@ it.effect.each([
   }),
 );
 
-it.effect("reports a timed-out budget read as a failed probe", () =>
+it.effect("reads one profile budget at a time and times out a stuck read", () =>
   Effect.gen(function* () {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = [];
     const http = {
-      client: HttpClient.make(() => Effect.never),
-      requests: [],
+      client: HttpClient.make((request) => {
+        requests.push(request);
+        return Effect.never;
+      }),
+      requests,
     };
     const { service } = yield* budgetFor(http);
-    const fiber = yield* service.usageLimits("slow").pipe(Effect.forkChild);
+    const slow = yield* service.usageLimits("slow").pipe(Effect.forkChild);
+    yield* service.usageLimits("queued").pipe(Effect.forkChild);
+    yield* TestClock.adjust("20 seconds");
+    expect(requests).toHaveLength(1);
     yield* TestClock.adjust("10 seconds");
-    const limits = yield* Fiber.join(fiber);
+    const limits = yield* Fiber.join(slow);
     expect(limits.unavailable).toEqual({
       reason: "probeFailed",
       message: "The aix gateway budget request timed out.",
     });
+    expect(requests).toHaveLength(2);
   }),
 );
 
