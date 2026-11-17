@@ -63,14 +63,16 @@ export function providerSettingsRowLabels(input: {
   readonly displayName?: string | undefined;
   /** aix display names repeat the profile, which the profile selector already shows. */
   readonly isAix?: boolean | undefined;
+  readonly aixStatus?: "ready" | "warning" | "error" | "disabled" | "neutral" | undefined;
   readonly version?: string | null | undefined;
   readonly status: string;
   readonly accountSource?: string | undefined;
 }) {
   const accountSource = input.accountSource?.trim();
+  const status = input.isAix && input.aixStatus === "ready" ? "Ready" : input.status;
   return {
     title: (input.isAix ? undefined : input.displayName?.trim()) || input.driverLabel,
     version: input.version ?? null,
-    detail: [input.status, accountSource].filter(Boolean).join(" · "),
+    detail: [status, input.isAix ? null : accountSource].filter(Boolean).join(" · "),
   };
 }

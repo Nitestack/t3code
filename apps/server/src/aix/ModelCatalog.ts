@@ -313,7 +313,7 @@ function modelFamily(id: string): string | undefined {
   const tokens = nameTokens(id).map((token) => token.toLowerCase());
   if (modelRegion(id) !== undefined) tokens.shift();
   const [first, second] = tokens;
-  if (first === "gpt") return second === "oss" ? "GPT-OSS" : "OpenAI GPT";
+  if (first === "gpt") return second === "oss" ? "GPT-OSS" : "GPT";
   return first === undefined ? undefined : MODEL_FAMILIES.get(first);
 }
 

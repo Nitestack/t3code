@@ -51,7 +51,7 @@ it("normalizes known names and collapses wildcard routes to concrete selectable 
   expect(models.map(({ id, family }) => [id, family])).toEqual([
     ["claude-opus-5-5", "Claude"],
     ["google/gemma-4-31b-it", "Gemma"],
-    ["gpt-6.1-sol", "OpenAI GPT"],
+    ["gpt-6.1-sol", "GPT"],
     ["gpt-oss-120b", "GPT-OSS"],
   ]);
 });

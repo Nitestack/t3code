@@ -89,7 +89,7 @@ it("passes the display name and catalog metadata through unchanged", () => {
   const catalog: CatalogModel = {
     id: "gpt-6.1-sol",
     displayName: "GPT-6.1 Sol",
-    family: "OpenAI GPT",
+    family: "GPT",
     provider: "openai",
     contextTokens: 128_000,
     pricing: { inputPerMillionTokens: 2 },
@@ -101,7 +101,7 @@ it("passes the display name and catalog metadata through unchanged", () => {
     modelId: "gpt-6.1-sol",
     displayName: "GPT-6.1 Sol",
     metadata: {
-      family: "OpenAI GPT",
+      family: "GPT",
       provider: "openai",
       contextTokens: 128_000,
       pricing: { inputPerMillionTokens: 2 },

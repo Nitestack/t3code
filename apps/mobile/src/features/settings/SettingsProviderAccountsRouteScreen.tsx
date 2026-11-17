@@ -319,6 +319,7 @@ function ProviderAccount({
     driverLabel: PROVIDER_DISPLAY_NAMES[provider.driver] ?? String(provider.driver),
     displayName: provider.displayName,
     isAix: provider.aixProfile !== undefined,
+    aixStatus: !provider.enabled ? "disabled" : provider.status,
     version: provider.version,
     status: status ?? "Checking provider status",
     accountSource: signedIn ? (provider.auth.label ?? provider.auth.type) : undefined,

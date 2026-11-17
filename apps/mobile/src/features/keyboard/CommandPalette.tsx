@@ -226,7 +226,13 @@ export function CommandPalette(props: {
   const { themeVariables } = useAppearancePreferences();
   const selectDetail = useSelectWorkspaceDetail();
   const runCommand = props.onCommand;
-  const { filter: filterScope, filterThreads: filterThreadScope } = useMobileEnvironmentScope();
+  const {
+    enabled: projectScopeEnabled,
+    activeScope,
+    setActiveScope,
+    filter: filterScope,
+    filterThreads: filterThreadScope,
+  } = useMobileEnvironmentScope();
   const projects = filterScope(useProjects());
   const allProjects = useProjects();
   const threads = filterThreadScope(useVisibleThreadShells(), allProjects);
@@ -350,6 +356,16 @@ export function CommandPalette(props: {
         run: () => openSettings(navigation, "SettingsArchive"),
       },
     ];
+    if (projectScopeEnabled) {
+      const destinationScope = activeScope === "work" ? "personal" : "work";
+      actions.push({
+        key: `show${destinationScope === "work" ? "Work" : "Personal"}Projects`,
+        kind: "action",
+        title: `Show ${destinationScope === "work" ? "Work" : "Personal"} projects`,
+        searchTerms: ["show projects", "switch scope", destinationScope],
+        run: () => setActiveScope(destinationScope),
+      });
+    }
     if (canTriage) {
       actions.push({
         key: "triage",
@@ -471,10 +487,13 @@ export function CommandPalette(props: {
     canTriage,
     navigation,
     projects,
+    projectScopeEnabled,
+    activeScope,
     runCommand,
     savedConnectionsById,
     selectDetail,
     startTriage,
+    setActiveScope,
     threads,
     triageEnvironmentId,
   ]);

@@ -75,18 +75,18 @@ describe("aix model picker metadata", () => {
   it("shows supplied prices per million, family, context, output, and reasoning", () => {
     expect(
       catalogMetadataRows({
-        family: "OpenAI GPT",
+        family: "GPT",
         contextTokens: 128_000,
         maxOutputTokens: 16_000,
         pricing: { inputPerMillionTokens: 2, outputPerMillionTokens: 8 },
         reasoning: { efforts: ["low", "high"] },
       }),
     ).toEqual([
-      { label: "Family", value: "OpenAI GPT" },
+      { label: "Family", value: "GPT" },
       { label: "Context window", value: "128k tokens" },
       { label: "Max output", value: "16k tokens" },
-      { label: "Input", value: "$2 USD / 1M tokens" },
-      { label: "Output", value: "$8 USD / 1M tokens" },
+      { label: "Input", value: "$2 / 1M tokens" },
+      { label: "Output", value: "$8 / 1M tokens" },
       { label: "Reasoning", value: "low, high" },
     ]);
   });

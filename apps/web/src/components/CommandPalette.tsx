@@ -45,6 +45,7 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import {
   AuthOrchestrationOperateScope,
+  AuthOrchestrationReadScope,
   AuthSourceControlWriteScope,
   AuthFilesystemReadScope,
   type DesktopWslState,
@@ -71,6 +72,7 @@ import {
   LinkIcon,
   MessageSquareIcon,
   PaletteIcon,
+  RefreshCwIcon,
   RotateCcwIcon,
   SettingsIcon,
   MonitorIcon,
@@ -106,7 +108,7 @@ import {
   projectScopeInput,
   supportsProjectScope,
 } from "@t3tools/client-runtime/environment";
-import { useClientEnvironmentScope } from "../environmentScope";
+import { setActiveEnvironmentScope, useClientEnvironmentScope } from "../environmentScope";
 import { useOpenPanelPullRequestUrl } from "../hooks/useOpenPanelPullRequestUrl";
 import { copyThreadReference } from "../lib/copyThreadReference";
 import {
@@ -231,6 +233,7 @@ import {
   type CommandPaletteGroup,
   resolveAddProjectEntry,
   shouldShowUnsupportedWorkProjectNote,
+  aixCatalogRefreshTargets,
   type AddProjectCloneFlow,
   type AddProjectEnvironmentOption,
   buildPaletteRemoteSourceReadiness,
@@ -1343,7 +1346,6 @@ function OpenCommandPaletteDialog(props: {
   };
 
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
-
   if (projects.length > 0) {
     const activeProjectTitle =
       projectPickerEntries.find((entry) => entry.isPreferred)?.group.displayName ??
@@ -1833,6 +1835,41 @@ function OpenCommandPaletteDialog(props: {
           to: "/projects/$projectKey",
           params: { projectKey: contextualProjectGroup.projectKey },
         });
+      },
+    });
+  }
+
+  const projectScopeAction = activeScope === "work" ? "personal" : "work";
+  actionItems.push({
+    kind: "action",
+    value: `action:show-${projectScopeAction}-projects`,
+    searchTerms: ["show projects", "switch scope", projectScopeAction],
+    title: `Show ${projectScopeAction === "work" ? "Work" : "Personal"} projects`,
+    icon: <FolderIcon className={ITEM_ICON_CLASS} />,
+    run: async () => setActiveEnvironmentScope(projectScopeAction),
+  });
+
+  const aixRefreshTargets = aixCatalogRefreshTargets(providersByEnvironment, (environmentId) =>
+    readEnvironmentScope(environmentId, AuthOrchestrationReadScope),
+  );
+  if (aixRefreshTargets.length > 0) {
+    actionItems.push({
+      kind: "action",
+      value: "action:refresh-aix-catalogs",
+      searchTerms: ["refresh aix catalogs", "sync aix models", "reload aix"],
+      title: "Refresh aix catalogs",
+      icon: <RefreshCwIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        const results = await Promise.all(
+          aixRefreshTargets.map(({ environmentId, instanceId }) =>
+            refreshProviders({
+              environmentId,
+              input: { instanceId, refreshModels: true },
+            }),
+          ),
+        );
+        const failure = results.find((result) => result._tag === "Failure");
+        if (failure?._tag === "Failure") throw squashAtomCommandFailure(failure);
       },
     });
   }

@@ -2,8 +2,8 @@
 
 Nitestack/t3code is a soft fork of [T3 Code](https://github.com/pingdotgg/t3code), created by
 pingdotgg and distributed under the MIT License. It keeps T3's providers, threads, and remote access,
-and adds runtime support for [aix](https://github.com/Nitestack/aix) API-key profiles and a
-client-side Work/Personal view of connected environments.
+and adds runtime support for [aix](https://github.com/Nitestack/aix) API-key profiles and
+project-level Personal and Work scopes.
 
 It uses the same T3 Code app name, `t3` and `t3code-desktop` commands, and default state directory
 as upstream, so install it instead of upstream T3 Code, not next to it. Android is the exception:
@@ -40,9 +40,10 @@ Each model runs in the agent that matches its family:
 If a selected model or profile stops working, the turn fails with an error. T3 never switches to a
 different model or agent for you.
 
-When a profile's LiteLLM key has a budget, the usage limits panel shows it as a Gateway budget bar
-for each of that profile's instances, with its reset time when the gateway reports one. A key
-without a budget, or a direct Anthropic profile, shows no bar.
+When a profile's LiteLLM key has a budget, the Usage page's Work tab shows one dollar Budget for
+that profile, with its reset time when the gateway reports one. The composer usage-limits panel
+separates Personal and Work limits. A key without a budget, or a direct Anthropic profile, shows
+no budget.
 
 ### Refresh and key rotation
 
@@ -65,15 +66,18 @@ the project's last selection, like other providers.
 
 ## Work/Personal view
 
-Web, desktop, and the fork's Android app have a Work/Personal switch. Use **Classify environments**
-next to it to mark each environment as Work. Environments you have not classified count
-as Personal. The switch filters the sidebar, project and thread
-pickers, search, and the command palette, and new threads are created in the active view. Switching
-never stops running turns or queued work, and notifications are not filtered by view. The switch
-is saved per client. Shared preferences such as theme and shortcuts stay shared, and
-environment and project settings keep their usual scope.
+Projects have a Personal or Work scope. On web, desktop, and the fork's Android app, the sidebar
+switch shows projects in the selected scope. Move a project from its sidebar menu, the command
+palette, or Project settings; the move can be undone. New projects inherit the active scope when the
+connected server supports project scopes. The model picker starts in the project's scope, and its
+Personal/Work toggle can switch scopes while you choose a model. In Settings → Providers, use the
+Personal/Work switch and Work profile menu to find provider instances.
 
-The view is only a client-side filter. It does not provide access control or isolate server data.
+The scope filters projects, threads, search, and related project choices. It does not stop running
+turns or queued work, and notifications are not filtered by scope. The preference is saved per
+client. Shared preferences such as theme and shortcuts stay shared.
+
+The scope is only a client-side filter. It does not provide access control or isolate server data.
 For real separation, run separate T3 servers with their own data directories using `T3CODE_HOME` as
 described in the [isolated Nix launch guide](./install.md#t3-code-fork-nix). One client can connect
 to both an original T3 server and a fork server.
@@ -106,8 +110,9 @@ Compared with upstream T3 Code at
   enabled with `T3CODE_AIX=1`.
 - Model details for aix models: family, context window, prices, reasoning levels, refresh, and a
   stale-catalog warning.
-- The Usage dialog's Work scope includes aix limits, cost, and tokens; only aix Claude sessions run through T3 count as Work.
-- A client-side Work/Personal view on web, desktop, and the fork's Android app.
+- The Usage page's Work tab includes Work-scoped Codex records and Claude sessions matched to aix
+  profile instances, along with aix budgets, cost, and tokens.
+- Project-level Personal/Work scopes on web, desktop, and the fork's Android app.
 - A separately signed Android APK with its own package ID, and no fork iOS build.
 - A Nix flake with the `t3code-<version>` package and the usual T3 Code commands.
 - Upstream sync limited to stable releases and proposed as reviewable pull requests.

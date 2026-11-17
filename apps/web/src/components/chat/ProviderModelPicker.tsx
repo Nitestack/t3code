@@ -355,6 +355,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     : undefined;
   const triggerTooltipContent = [
     props.triggerLabel ?? allModelNames ?? triggerLabel,
+    activeEntry?.aixProfile ? (activeEntry.aixProfileLabel ?? activeEntry.aixProfile) : null,
     props.triggerDetail,
     shortcutLabel,
   ]
@@ -436,6 +437,9 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
             ref={triggerRef}
             aria-label={[
               props.triggerAriaLabel ?? props.triggerLabel ?? allModelNames ?? triggerLabel,
+              props.isComposerOwned && activeEntry?.aixProfile
+                ? (activeEntry.aixProfileLabel ?? activeEntry.aixProfile)
+                : null,
               props.triggerDetail,
             ]
               .filter(Boolean)
@@ -467,6 +471,11 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
         <span
           className={cn("flex min-w-0 flex-1 items-center", size === "xs" ? "gap-1" : "gap-1.5")}
         >
+          {props.isComposerOwned && activeEntry?.aixProfile ? (
+            <span className="max-w-24 shrink-0 truncate text-muted-foreground/75 text-xs">
+              {activeEntry.aixProfileLabel ?? activeEntry.aixProfile} ·
+            </span>
+          ) : null}
           {selectedEntries && props.triggerLabel === undefined ? (
             <span
               data-chat-provider-model-picker-icon
