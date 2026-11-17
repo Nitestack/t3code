@@ -85,8 +85,8 @@ describe("aix model picker metadata", () => {
       { label: "Family", value: "GPT" },
       { label: "Context window", value: "128k tokens" },
       { label: "Max output", value: "16k tokens" },
-      { label: "Input", value: "$2 / 1M tokens" },
-      { label: "Output", value: "$8 / 1M tokens" },
+      { label: "Input", value: "$2.00 / 1M tokens" },
+      { label: "Output", value: "$8.00 / 1M tokens" },
       { label: "Reasoning", value: "low, high" },
     ]);
   });

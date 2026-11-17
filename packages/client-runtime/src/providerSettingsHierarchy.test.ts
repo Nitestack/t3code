@@ -85,16 +85,14 @@ describe("provider settings hierarchy", () => {
         driverLabel: "Codex",
         displayName: "adCare · Codex",
         isAix: true,
-        aixStatus: "ready",
-        status: "Authenticated · Custom API endpoint",
+        status: "Available",
       }).title,
     ).toBe("Codex");
     expect(
       providerSettingsRowLabels({
         driverLabel: "Claude Code",
         isAix: true,
-        aixStatus: "ready",
-        status: "Authenticated",
+        status: "Ready",
         accountSource: "Custom API endpoint",
       }),
     ).toEqual({ title: "Claude Code", version: null, detail: "Ready" });

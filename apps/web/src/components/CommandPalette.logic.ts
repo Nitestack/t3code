@@ -54,15 +54,13 @@ export function aixCatalogRefreshTargets(
   >,
   canRefresh: (environmentId: EnvironmentId) => boolean,
 ) {
-  return [...providersByEnvironment].flatMap(([environmentId, providers]) =>
-    canRefresh(environmentId)
-      ? providers.flatMap((provider) =>
-          provider.aixProfile === undefined
-            ? []
-            : [{ environmentId, instanceId: provider.instanceId }],
-        )
-      : [],
-  );
+  // One forced refresh resyncs every aix profile in that environment.
+  return [...providersByEnvironment].flatMap(([environmentId, providers]) => {
+    const aix = canRefresh(environmentId)
+      ? providers.find((provider) => provider.aixProfile !== undefined)
+      : undefined;
+    return aix ? [{ environmentId, instanceId: aix.instanceId }] : [];
+  });
 }
 
 export function buildLinkedThreadActionItems(

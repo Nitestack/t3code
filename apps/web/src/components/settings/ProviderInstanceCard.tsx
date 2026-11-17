@@ -826,6 +826,9 @@ export function ProviderInstanceCard({
     instance.displayName?.trim() || driverOption?.label || String(instance.driver);
   const aixProfile =
     liveProvider?.aixProfile ?? readConfigString(instance.config, "aixProfile") ?? undefined;
+  // aix instances reach the gateway through a managed key, so the auth detail adds nothing.
+  const statusHeadline =
+    aixProfile !== undefined && statusKey === "ready" ? "Ready" : summary.headline;
   const aixProfileLabel =
     liveProvider?.aixProfileLabel ??
     readConfigString(instance.config, "aixProfileLabel") ??
@@ -1003,11 +1006,10 @@ export function ProviderInstanceCard({
     driverLabel: driverOption?.label ?? String(instance.driver),
     displayName: instance.displayName,
     isAix: aixProfile !== undefined,
-    aixStatus: updateProgress ? undefined : statusKey,
     version: versionLabel,
     status: updateProgress
       ? `Updating · ${updateProgress}`
-      : `${summary.headline}${needsAttention && inlineStatusDetail ? ` · ${inlineStatusDetail}` : ""}`,
+      : `${statusHeadline}${needsAttention && inlineStatusDetail ? ` · ${inlineStatusDetail}` : ""}`,
   });
   const editorStatusNode =
     isAuthenticated && authEmail ? (
@@ -1023,7 +1025,7 @@ export function ProviderInstanceCard({
     ) : (
       <>
         {statusDotNode}
-        <span>{summary.headline}</span>
+        <span>{statusHeadline}</span>
         {inlineStatusDetail ? (
           <span className="min-w-0 [overflow-wrap:anywhere]">· {inlineStatusDetail}</span>
         ) : null}
@@ -1471,7 +1473,7 @@ export function ProviderInstanceCard({
               across connected devices.
             </p>
             <ProviderModelsSection
-              canManageCustomModels={!readOnly}
+              canManageCustomModels={!readOnly && aixProfile === undefined}
               canWritePreferences={canWriteSettings}
               instanceId={instanceId}
               driverKind={driverKind}

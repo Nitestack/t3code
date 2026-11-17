@@ -1870,6 +1870,7 @@ function OpenCommandPaletteDialog(props: {
         );
         const failure = results.find((result) => result._tag === "Failure");
         if (failure?._tag === "Failure") throw squashAtomCommandFailure(failure);
+        toastManager.add({ type: "success", title: "aix catalogs refreshed" });
       },
     });
   }

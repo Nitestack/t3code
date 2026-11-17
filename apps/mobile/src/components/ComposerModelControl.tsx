@@ -94,9 +94,7 @@ export function ComposerModelControl(props: {
             }
             numberOfLines={1}
           >
-            {shortLabel}
-            {aixProfileLabel ? `${aixProfileLabel} · ` : ""}
-            {summary}
+            {[aixProfileLabel, shortLabel, summary].filter(Boolean).join(" · ")}
           </Text>
         ) : summary || aixProfileLabel ? (
           <Text
@@ -107,8 +105,7 @@ export function ComposerModelControl(props: {
             }
             numberOfLines={1}
           >
-            {aixProfileLabel ? `${aixProfileLabel} · ` : ""}
-            {summary}
+            {[aixProfileLabel, summary].filter(Boolean).join(" · ")}
           </Text>
         ) : undefined
       }

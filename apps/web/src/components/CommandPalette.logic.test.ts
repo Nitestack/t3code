@@ -79,10 +79,7 @@ describe("aix catalog refresh actions", () => {
         ]),
         (environmentId) => environmentId === work,
       ),
-    ).toEqual([
-      { environmentId: work, instanceId: ProviderInstanceId.make("aix-codex-ac") },
-      { environmentId: work, instanceId: ProviderInstanceId.make("aix-claude-ac") },
-    ]);
+    ).toEqual([{ environmentId: work, instanceId: ProviderInstanceId.make("aix-codex-ac") }]);
   });
 });
 

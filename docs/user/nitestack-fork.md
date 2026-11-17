@@ -48,8 +48,9 @@ no budget.
 ### Refresh and key rotation
 
 Profiles and model catalogs are loaded when the server starts and reloaded at most once a day.
-Use the refresh button next to an aix profile in the model picker to reload immediately, for
-example after adding a profile or model in aix. If a reload fails, the picker keeps the last catalog and marks it stale. A
+Use the refresh button next to an aix profile in the model picker, or "Refresh aix catalogs" in the
+command palette on web and desktop, to reload immediately, for example after adding a profile or
+model in aix. If a reload fails, the picker keeps the last catalog and marks it stale. A
 profile deleted in aix disables its instances; an instance you turn off yourself stays off when its
 profile returns.
 
@@ -77,7 +78,8 @@ The scope filters projects, threads, search, and related project choices. It doe
 turns or queued work, and notifications are not filtered by scope. The preference is saved per
 client. Shared preferences such as theme and shortcuts stay shared.
 
-The scope is only a client-side filter. It does not provide access control or isolate server data.
+Each project stores its scope on its server, and each client chooses which scope to show. The scope
+does not provide access control or isolate server data.
 For real separation, run separate T3 servers with their own data directories using `T3CODE_HOME` as
 described in the [isolated Nix launch guide](./install.md#t3-code-fork-nix). One client can connect
 to both an original T3 server and a fork server.

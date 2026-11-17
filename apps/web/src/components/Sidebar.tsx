@@ -244,6 +244,7 @@ import {
   filterByProjectScope,
   filterProjectsByScope,
   resolveProjectScope,
+  supportsProjectScope,
 } from "@t3tools/client-runtime/environment";
 import { useClientEnvironmentScope } from "../environmentScope";
 import {
@@ -3360,7 +3361,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                       ? `No ${activeScope === "work" ? "Work" : "Personal"} projects`
                       : "No projects yet"}
                   </span>
-                  {allProjects.length > 0 ? (
+                  {allProjects.some((project) =>
+                    supportsProjectScope(
+                      serverConfigs.get(project.environmentId)?.environment.capabilities,
+                    ),
+                  ) ? (
                     <span className="max-w-48 text-sidebar-muted-foreground">
                       Move a project here from its menu or project settings.
                     </span>
