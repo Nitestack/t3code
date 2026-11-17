@@ -65,10 +65,6 @@ export function groupWorkUsage(accounts: readonly LimitAccount[], now: number): 
   }
 
   const result = [...groups.values()].map(({ id, accounts: members }): WorkUsageGroup => {
-    const labels = members
-      .map((account) => account.profileLabel?.trim() || account.profileName?.trim())
-      .filter((label): label is string => Boolean(label))
-      .sort((left, right) => left.localeCompare(right));
     const projectReport = members
       .filter((account) => account.limits.aixProject && account.limits.aixProject.id === id)
       .sort(
@@ -104,7 +100,15 @@ export function groupWorkUsage(accounts: readonly LimitAccount[], now: number): 
       );
     return {
       id,
-      name: id === null ? "No project" : (labels[0] ?? members[0]?.profileName ?? "Work"),
+      // The gateway names no project, so it takes the name of the key that spends the most.
+      name:
+        id === null
+          ? "No project"
+          : ([...rows].sort(
+              (left, right) =>
+                (right.window?.amounts?.spent ?? 0) - (left.window?.amounts?.spent ?? 0) ||
+                left.label.localeCompare(right.label),
+            )[0]?.label ?? "Work"),
       projectAmounts:
         projectReport && "amounts" in projectReport ? projectReport.amounts : undefined,
       rows,
@@ -112,7 +116,10 @@ export function groupWorkUsage(accounts: readonly LimitAccount[], now: number): 
     };
   });
   return {
-    groups: result.sort((left, right) => left.name.localeCompare(right.name)),
+    groups: result.sort(
+      (left, right) =>
+        Number(left.id === null) - Number(right.id === null) || left.name.localeCompare(right.name),
+    ),
     flat,
     spent: result.reduce((sum, group) => sum + group.spent, 0),
   };

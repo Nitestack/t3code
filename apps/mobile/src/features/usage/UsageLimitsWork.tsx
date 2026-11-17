@@ -16,6 +16,7 @@ export function UsageLimitsWork({
 }: {
   presentations: LimitPresentations;
   now: number;
+  divider: boolean;
 }) {
   const usage = groupWorkUsage(
     collectLimitAccounts(presentations, { includeUnsupportedAix: true }),
@@ -71,8 +72,8 @@ export function UsageLimitsWork({
       </View>
       {usage.flat ? (
         <View className="rounded-[24px] border-continuous bg-grouped-card px-4">
-          {rows.map((row) => (
-            <KeyRow key={row.account.key} row={row} now={now} />
+          {rows.map((row, index) => (
+            <KeyRow key={row.account.key} row={row} now={now} divider={index > 0} />
           ))}
         </View>
       ) : (
@@ -108,8 +109,8 @@ export function UsageLimitsWork({
             ) : (
               <Text className="mb-1 text-sm font-t3-medium text-foreground">No project</Text>
             )}
-            {group.rows.map((row) => (
-              <KeyRow key={row.account.key} row={row} now={now} />
+            {group.rows.map((row, index) => (
+              <KeyRow key={row.account.key} row={row} now={now} divider={index > 0} />
             ))}
           </View>
         ))
@@ -121,6 +122,7 @@ export function UsageLimitsWork({
 function KeyRow({
   row,
   now,
+  divider,
 }: {
   row: ReturnType<typeof groupWorkUsage>["groups"][number]["rows"][number];
   now: number;
@@ -130,7 +132,9 @@ function KeyRow({
   const tone =
     row.status === "nearLimit" ? "destructive" : row.status === "overPace" ? "warning" : null;
   return (
-    <View className="flex-row flex-wrap items-center justify-between gap-x-3 border-t border-border-subtle py-2">
+    <View
+      className={`flex-row flex-wrap items-center justify-between gap-x-3 py-2 ${divider ? "border-t border-border-subtle" : ""}`}
+    >
       <View className="min-w-0 flex-1 flex-row items-center gap-2">
         <Text numberOfLines={1} className="shrink text-sm font-t3-medium text-foreground">
           {row.label}

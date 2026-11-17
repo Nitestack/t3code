@@ -117,7 +117,7 @@ function workAccount(input: {
 }
 
 describe("usage limit grouping", () => {
-  it("groups Gateway keys by project and uses the first profile label", () => {
+  it("groups Gateway keys by project and names it after its top-spending key", () => {
     const grouped = groupWorkUsage(
       [
         workAccount({
@@ -140,7 +140,7 @@ describe("usage limit grouping", () => {
     expect(grouped.flat).toBe(false);
     expect(grouped.spent).toBe(60);
     expect(grouped.groups.map((group) => [group.id, group.name])).toEqual([
-      ["project-a", "Alpha"],
+      ["project-a", "Zeta"],
       [null, "No project"],
     ]);
     expect(grouped.groups[0]?.projectAmounts).toEqual({ currency: "USD", spent: 300, total: 500 });

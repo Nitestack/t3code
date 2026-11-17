@@ -5,8 +5,9 @@ import {
   paceRemainingPercent,
 } from "@t3tools/shared/usageLimits";
 import { formatUsd } from "@t3tools/shared/usageFormat";
+import { cn } from "~/lib/utils";
 
-const chartColors = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)"];
+const chartColors = ["#7c8cf8", "#4fb7a5", "#ecad58", "#cb79b3"];
 
 export function UsageLimitsWork({
   presentations,
@@ -14,6 +15,7 @@ export function UsageLimitsWork({
 }: {
   presentations: LimitPresentations;
   now: number;
+  divider: boolean;
 }) {
   const usage = groupWorkUsage(
     collectLimitAccounts(presentations, { includeUnsupportedAix: true }),
@@ -81,8 +83,8 @@ export function UsageLimitsWork({
 
       {usage.flat ? (
         <section className="rounded-xl border bg-card px-4">
-          {rows.map((row) => (
-            <KeyRow key={row.account.key} row={row} now={now} />
+          {rows.map((row, index) => (
+            <KeyRow key={row.account.key} row={row} now={now} divider={index > 0} />
           ))}
         </section>
       ) : (
@@ -115,8 +117,8 @@ export function UsageLimitsWork({
             ) : (
               <h3 className="mb-1 text-sm font-semibold text-foreground">No project</h3>
             )}
-            {group.rows.map((row) => (
-              <KeyRow key={row.account.key} row={row} now={now} />
+            {group.rows.map((row, index) => (
+              <KeyRow key={row.account.key} row={row} now={now} divider={index > 0} />
             ))}
           </section>
         ))
@@ -128,6 +130,7 @@ export function UsageLimitsWork({
 function KeyRow({
   row,
   now,
+  divider,
 }: {
   row: ReturnType<typeof groupWorkUsage>["groups"][number]["rows"][number];
   now: number;
@@ -137,7 +140,7 @@ function KeyRow({
   const tone =
     row.status === "nearLimit" ? "destructive" : row.status === "overPace" ? "warning" : null;
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 border-t py-2 first:border-t-0">
+    <div className={cn("grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 py-2", divider && "border-t")}>
       <span className="flex min-w-0 items-center gap-2 text-sm font-medium text-foreground">
         <span className="truncate">{row.label}</span>
         {row.status === "nearLimit" ? <StatusChip tone="destructive">Near limit</StatusChip> : null}
