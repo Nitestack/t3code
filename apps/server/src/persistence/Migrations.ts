@@ -103,7 +103,8 @@ import Migration0092 from "./Migrations/092_QueuedTurnInputIndexJsonValid.ts";
 import Migration0093 from "./Migrations/093_ProviderTurnAttemptIndex.ts";
 import Migration0094 from "./Migrations/094_TurnItemMessageOrdinalIndex.ts";
 import Migration0095 from "./Migrations/095_TurnItemInlineWorkOutput.ts";
-import Migration0096 from "./Migrations/096_ProjectionProjectScope.ts";
+import Migration0096 from "./Migrations/096_RepairStaleTitleRegeneration.ts";
+import Migration0097 from "./Migrations/097_ProjectionProjectScope.ts";
 
 const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
@@ -202,7 +203,8 @@ const migrationEntries = [
   [93, "ProviderTurnAttemptIndex", Migration0093],
   [94, "TurnItemMessageOrdinalIndex", Migration0094],
   [95, "TurnItemInlineWorkOutput", Migration0095],
-  [96, "ProjectionProjectScope", Migration0096],
+  [96, "RepairStaleTitleRegeneration", Migration0096],
+  [97, "ProjectionProjectScope", Migration0097],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
@@ -280,6 +282,27 @@ export const hasPendingMigrations = Effect.fn("hasPendingMigrations")(function* 
   return (row?.latestId ?? 0) < latestMigrationId || (row?.previewRows ?? 0) > 0;
 });
 
+// Fork migrations are idempotent and renumbered past upstream ids on each stable sync. A ledger
+// row left at an id upstream later claimed is dropped so both migrations run in manifest order.
+const FORK_MIGRATIONS: ReadonlySet<string> = new Set(["ProjectionProjectScope"]);
+
+const reconcileForkMigrations = Effect.fn("reconcileForkMigrations")(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const tables = yield* sql`
+    SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'effect_sql_migrations'
+  `;
+  if (tables.length === 0) return;
+  const recorded = yield* sql<{ readonly migration_id: number; readonly name: string }>`
+    SELECT migration_id, name FROM effect_sql_migrations
+  `;
+  const manifestNames = new Map<number, string>(migrationManifest);
+  for (const row of recorded) {
+    if (FORK_MIGRATIONS.has(row.name) && manifestNames.get(row.migration_id) !== row.name) {
+      yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id = ${row.migration_id} AND name = ${row.name}`;
+    }
+  }
+});
+
 const run = Migrator.make({});
 
 export interface RunMigrationsOptions {
@@ -290,10 +313,13 @@ export const runMigrations = Effect.fn("runMigrations")(function* ({
   toMigrationInclusive,
 }: RunMigrationsOptions = {}) {
   // The desktop waits past its readiness budget until the finished line follows this one.
-  if (yield* hasPendingMigrations()) yield* Effect.log(DATABASE_MIGRATIONS_STARTED_MESSAGE);
+  const hasPending = yield* hasPendingMigrations();
+  if (hasPending) yield* Effect.log(DATABASE_MIGRATIONS_STARTED_MESSAGE);
   const includesV2 =
     toMigrationInclusive === undefined || toMigrationInclusive >= FIRST_V2_MIGRATION_ID;
-  const previewMigrations = includesV2 ? yield* reconcileV2PreviewMigration() : [];
+  // The reconcile takes the write lock; CLI startup must not contend with the server for a no-op.
+  const previewMigrations = includesV2 && hasPending ? yield* reconcileV2PreviewMigration() : [];
+  if (includesV2 && hasPending) yield* reconcileForkMigrations();
   if (includesV2) {
     yield* assertV2MigrationsCanRun(toMigrationInclusive);
   }

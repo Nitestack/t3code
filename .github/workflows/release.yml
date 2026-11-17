@@ -331,8 +331,10 @@ jobs:
     name: Build signed fork Android APK
     needs: [fork_preflight]
     if: ${{ !failure() && !cancelled() && inputs.artifact_run_id == '' && needs.fork_preflight.result == 'success' && needs.fork_preflight.outputs.already_published != 'true' }}
+    # GitHub validates every called job's permissions statically, including the tag-only release job.
     permissions:
-      contents: read
+      actions: read
+      contents: write
     uses: ./.github/workflows/mobile-android-fork.yml
     with:
       version: ${{ needs.fork_preflight.outputs.version }}
