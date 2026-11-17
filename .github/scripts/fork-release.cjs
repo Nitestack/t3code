@@ -409,7 +409,7 @@ async function verifyForkBuildArtifactAssets({
     : "";
   const nixStoreHash = nixStoreName.slice(0, 32);
   if (
-    androidMetadata.applicationId !== "com.nitestack.t3code" ||
+    androidMetadata.applicationId !== "com.t3tools.t3code" ||
     androidMetadata.versionName !== version ||
     androidMetadata.versionCode !== expectedAndroidVersionCode ||
     androidMetadata.gitSha?.toLowerCase() !== sha.toLowerCase() ||

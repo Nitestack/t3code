@@ -571,7 +571,7 @@ test("existing release assets must have matching source metadata and file checks
     fs.writeFileSync(
       path.join(directory, "metadata.json"),
       JSON.stringify({
-        applicationId: "com.nitestack.t3code",
+        applicationId: "com.t3tools.t3code",
         versionName: "0.1.9",
         versionCode: 1009,
         gitSha: sha,

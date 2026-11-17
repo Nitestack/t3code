@@ -1,8 +1,10 @@
 # T3 Code Android APK
 
 The `Nitestack Android APK` workflow builds a signed, sideloadable Android APK on GitHub-hosted
-`ubuntu-latest`, with the launcher label **T3 Code**. Its hidden package ID is
-`com.nitestack.t3code`, so it can be installed alongside the Play Store app. Run it manually from
+`ubuntu-latest`, with the launcher label **T3 Code**. It uses the official package ID
+`com.t3tools.t3code`, because T3 Connect's Clerk instance only accepts that package's sign-in
+redirect. It cannot be installed alongside the Play Store app, and Android refuses to update one
+with the other because the signing keys differ. Run it manually from
 `main` for the standalone Actions artifact `t3-code-android-<run-id>`, containing
 `T3-Code-<version>.apk`, its checksum, and metadata. The existing upstream `Release` workflow
 reuses this Android build and also builds the Windows installer and matching Nix package. Its
@@ -47,7 +49,7 @@ The workflow checks that all four secrets exist before installing dependencies, 
 
 Back up the original keystore and passwords separately from GitHub. For sideloaded installs, replacing the signing key means Android will reject an in-place update signed by the new key. Coordinate rotation as a new install: users must remove the prior app and install the new APK. Keep the old key available for releases intended to update existing installations.
 
-This standalone build disables Expo Updates and does not require EAS, Clerk, Firebase, or Play credentials. Any sign-in, push, or Google OAuth flow that requires upstream Clerk/Firebase application credentials is unavailable until the fork supplies compatible configuration. Android HTTPS app-link verification also depends on a matching `assetlinks.json` for the fork package, so the app's dedicated `t3code-aix` scheme is the portable deep-link path.
+This standalone build disables Expo Updates and does not require EAS, Clerk, Firebase, or Play credentials. Native Google sign-in and push need upstream Google and Firebase credentials tied to the Play signing key, so they may not work. Android HTTPS app-link verification depends on `assetlinks.json` listing the Play signing key, so the app's dedicated `t3code-aix` scheme is the portable deep-link path.
 
 ## Update and rollback
 

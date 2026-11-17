@@ -107,7 +107,7 @@ const VARIANT_CONFIG = {
     appName: "T3 Code",
     scheme: "t3code-aix",
     iosBundleIdentifier: "com.t3tools.t3code",
-    androidPackage: "com.nitestack.t3code",
+    androidPackage: "com.t3tools.t3code",
     relyingParty: "clerk.t3.codes",
     assets: RELEASE_ASSETS,
   },

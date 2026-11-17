@@ -595,7 +595,7 @@ jobs:
           const windows = JSON.parse(fs.readFileSync(windowsPath, "utf8"));
           const expectedVersion = process.env.EXPECTED_VERSION;
           const expectedSha = process.env.EXPECTED_SHA;
-          if (android.applicationId !== "com.nitestack.t3code" || android.versionName !== expectedVersion || android.gitSha !== expectedSha) {
+          if (android.applicationId !== "com.t3tools.t3code" || android.versionName !== expectedVersion || android.gitSha !== expectedSha) {
             throw new Error("Android metadata does not match the selected release source.");
           }
           if (windows.version !== expectedVersion || windows.gitSha !== expectedSha || windows.architecture !== "x64" || windows.installer !== require("node:path").basename(installerPath)) {

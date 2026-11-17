@@ -179,7 +179,7 @@ jobs:
           badging="$("$build_tools/aapt" dump badging "$apk")"
           package_info="$(printf '%s\n' "$badging" | sed -n "s/^package: name='\([^']*\)' versionCode='\([^']*\)' versionName='\([^']*\)'.*/\1 \2 \3/p")"
           read -r package_name version_code version_name <<< "$package_info"
-          if [ "$package_name" != "com.nitestack.t3code" ]; then
+          if [ "$package_name" != "com.t3tools.t3code" ]; then
             echo "::error::Unexpected APK application id: $package_name"
             exit 1
           fi
