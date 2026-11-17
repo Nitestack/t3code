@@ -732,12 +732,12 @@ const checkOpenCode2 = Effect.fn("checkOpenCode2")(function* (
   loadModels: Effect.Effect<ReadonlyArray<OpenCode2Model>, OpenCodeRuntime.OpenCodeRuntimeError>,
 ) {
   const result = yield* Effect.exit(loadModels);
-  const probe = (status: "ready" | "warning" | "error", message: string) => ({
+  const probe = (status: "ready" | "warning" | "error", message?: string) => ({
     installed: true,
     version,
     status,
     auth: { status: status === "ready" ? ("authenticated" as const) : ("unknown" as const) },
-    message,
+    ...(message ? { message } : {}),
   });
   if (result._tag === "Failure") {
     yield* logDiscoveryFailure({
@@ -774,10 +774,7 @@ const checkOpenCode2 = Effect.fn("checkOpenCode2")(function* (
     slashCommands: [COMPACT_SLASH_COMMAND],
     probe:
       result.value.length > 0
-        ? probe(
-            "ready",
-            `OpenCode ${version} lists ${result.value.length} model${result.value.length === 1 ? "" : "s"}.`,
-          )
+        ? probe("ready")
         : probe("warning", "OpenCode 2 is running, but it did not list any models yet."),
   });
 });
