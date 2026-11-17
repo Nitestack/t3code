@@ -4,10 +4,10 @@ import { formatContextWindowTokens } from "../../lib/contextWindow";
 export function aixCatalogStatus(
   provider: ServerProvider,
   aixProfile = provider.aixProfile,
-): {
-  readonly kind: "current" | "warning" | "stale" | "unavailable";
-  readonly message: string;
-} | null {
+):
+  | { readonly kind: "current" }
+  | { readonly kind: "warning" | "stale" | "unavailable"; readonly message: string }
+  | null {
   if (!aixProfile) return null;
   const message = provider.message?.trim();
   if (provider.status === "error") {
@@ -22,10 +22,7 @@ export function aixCatalogStatus(
   if (provider.status === "warning") {
     return { kind: "warning", message: message || "The aix provider needs attention." };
   }
-  return {
-    kind: "current",
-    message: message || "aix models are cached for up to 24 hours. Refresh to sync now.",
-  };
+  return { kind: "current" };
 }
 
 const usdPerMillion = new Intl.NumberFormat("en-US", {

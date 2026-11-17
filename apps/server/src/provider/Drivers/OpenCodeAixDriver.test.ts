@@ -128,7 +128,7 @@ const unusedRuntime = makeRuntime([]);
 it.effect("marks aix OpenCode snapshots stale after a failed catalog refresh", () =>
   run(
     Effect.gen(function* () {
-      const provider = { status: "ready", message: undefined } as never;
+      const provider = { status: "ready", message: undefined, models: [] } as never;
       const snapshot = {
         resolveMaintenance: () => Effect.succeed({} as never),
         getSnapshot: Effect.succeed(provider),
@@ -168,6 +168,38 @@ it.effect("marks aix OpenCode snapshots stale after a failed catalog refresh", (
   ),
 );
 
+it.effect("drops OpenCode's aix sub-provider label from aix models", () =>
+  run(
+    Effect.gen(function* () {
+      const provider = {
+        status: "ready",
+        models: [{ slug: "t3_aix/qwen3-coder", name: "Qwen3 Coder", subProvider: "aix" }],
+      } as never;
+      const snapshot = {
+        resolveMaintenance: () => Effect.succeed({} as never),
+        getSnapshot: Effect.succeed(provider),
+        refresh: Effect.succeed(provider),
+        streamChanges: Stream.make(provider),
+        applyUsageLimits: () => Effect.void,
+      } as ProviderInstance["snapshot"];
+      const driver = makeOpenCodeAixDriver(() => Effect.succeed({ snapshot } as ProviderInstance));
+
+      const aixInstance = yield* driver.create(
+        input({ aixProfile: "work" }, [
+          { name: "T3_AIX_PROFILE", value: "work", sensitive: false },
+        ]),
+      );
+      const current = yield* aixInstance.snapshot.getSnapshot;
+      const streamed = yield* aixInstance.snapshot.streamChanges.pipe(Stream.runHead);
+
+      for (const result of [current, Option.getOrThrow(streamed)]) {
+        expect(result.models).toEqual([{ slug: "t3_aix/qwen3-coder", name: "Qwen3 Coder" }]);
+      }
+    }),
+    unusedRuntime,
+  ),
+);
+
 it.effect("keeps aix budgets on the OpenCode instance and identifies the profile", () =>
   run(
     Effect.gen(function* () {
@@ -195,6 +227,7 @@ it.effect("keeps aix budgets on the OpenCode instance and identifies the profile
             status: "ready",
             enabled: true,
             usageLimits,
+            models: [] as ServerProvider["models"],
           } as ServerProvider;
           const snapshot = {
             resolveMaintenance: () => Effect.succeed({} as never),
@@ -232,7 +265,7 @@ const signalledInstance = Effect.fn("test.signalledInstance")(function* (
   const statuses = yield* Queue.unbounded<{ since: number; code: string } | undefined>();
   const changes = yield* Queue.unbounded<string>();
   const counts = { snapshotReads: 0, refreshes: 0 };
-  const provider = { status: "ready", message: undefined } as never;
+  const provider = { status: "ready", message: undefined, models: [] } as never;
   const snapshot = {
     resolveMaintenance: () => Effect.succeed({} as never),
     getSnapshot: Effect.sync(() => ({ ...(provider as object), revision: ++counts.snapshotReads })),
