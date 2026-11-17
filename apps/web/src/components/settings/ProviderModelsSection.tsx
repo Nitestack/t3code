@@ -69,6 +69,7 @@ function groupModelsForDisplay<T extends { readonly slug: string; readonly isCus
     readonly favoriteModels: ReadonlySet<string>;
     readonly hiddenModels: ReadonlySet<string>;
     readonly modelOrder: ReadonlyArray<string>;
+    readonly canManageCustomModels: boolean;
   },
 ): T[] {
   const ordered = sortModelsForProviderInstance(models, {
@@ -76,7 +77,8 @@ function groupModelsForDisplay<T extends { readonly slug: string; readonly isCus
     groupFavorites: true,
     modelOrder: options.modelOrder,
   });
-  const isHidden = (model: T) => !model.isCustom && options.hiddenModels.has(model.slug);
+  const isHidden = (model: T) =>
+    (!model.isCustom || !options.canManageCustomModels) && options.hiddenModels.has(model.slug);
   return [
     ...ordered.filter((model) => options.favoriteModels.has(model.slug)),
     ...ordered.filter((model) => !options.favoriteModels.has(model.slug) && !isHidden(model)),
@@ -87,16 +89,19 @@ function groupModelsForDisplay<T extends { readonly slug: string; readonly isCus
 function nextHiddenModelsForBulkToggle(
   models: ReadonlyArray<Pick<ServerProviderModel, "slug" | "isCustom">>,
   hiddenModels: ReadonlyArray<string>,
+  canManageCustomModels: boolean,
 ): string[] {
-  const builtInSlugs = models.filter((model) => !model.isCustom).map((model) => model.slug);
-  const builtInSlugSet = new Set(builtInSlugs);
-  const allBuiltInModelsHidden = builtInSlugs.every((slug) => hiddenModels.includes(slug));
+  const hideableSlugs = models
+    .filter((model) => !model.isCustom || !canManageCustomModels)
+    .map((model) => model.slug);
+  const hideableSlugSet = new Set(hideableSlugs);
+  const allHideableModelsHidden = hideableSlugs.every((slug) => hiddenModels.includes(slug));
 
-  if (allBuiltInModelsHidden) {
-    return hiddenModels.filter((slug) => !builtInSlugSet.has(slug));
+  if (allHideableModelsHidden) {
+    return hiddenModels.filter((slug) => !hideableSlugSet.has(slug));
   }
 
-  return [...new Set([...hiddenModels, ...builtInSlugs])];
+  return [...new Set([...hiddenModels, ...hideableSlugs])];
 }
 
 interface ProviderModelsSectionProps {
@@ -158,10 +163,11 @@ export function ProviderModelsSection({
     favoriteModels: favoriteModelSet,
     hiddenModels: hiddenModelSet,
     modelOrder,
+    canManageCustomModels,
   });
   const favoriteCount = displayModels.filter((model) => favoriteModelSet.has(model.slug)).length;
   const hiddenCount = displayModels.filter(
-    (model) => !model.isCustom && hiddenModelSet.has(model.slug),
+    (model) => (!model.isCustom || !canManageCustomModels) && hiddenModelSet.has(model.slug),
   ).length;
   const flagMissingReasoning = models.some(hasReasoningControl);
   const showFilter = models.length > FILTER_THRESHOLD;
@@ -190,8 +196,9 @@ export function ProviderModelsSection({
 
   // Derive after the effect and use hiddenModels directly to preserve the editor's option-array cache.
   const builtInModels = models.filter((model) => !model.isCustom);
-  const allBuiltInModelsHidden =
-    builtInModels.length > 0 && builtInModels.every((model) => hiddenModels.includes(model.slug));
+  const hideableModels = models.filter((model) => !model.isCustom || !canManageCustomModels);
+  const allHideableModelsHidden =
+    hideableModels.length > 0 && hideableModels.every((model) => hiddenModels.includes(model.slug));
 
   const handleAdd = async () => {
     if (!canManageCustomModels || driverKind === "antigravity" || isSaving) return;
@@ -274,7 +281,7 @@ export function ProviderModelsSection({
   const groupOf = (model: (typeof displayModels)[number]) =>
     favoriteModelSet.has(model.slug)
       ? "favorite"
-      : !model.isCustom && hiddenModelSet.has(model.slug)
+      : (!model.isCustom || !canManageCustomModels) && hiddenModelSet.has(model.slug)
         ? "hidden"
         : "visible";
   const handleMove = (slug: string, direction: -1 | 1) => {
@@ -310,7 +317,7 @@ export function ProviderModelsSection({
       <ProviderModelRow
         key={`${instanceId}:${model.slug}`}
         model={model}
-        isHidden={!model.isCustom && hiddenModelSet.has(model.slug)}
+        isHidden={(!model.isCustom || !canManageCustomModels) && hiddenModelSet.has(model.slug)}
         isFavorite={group === "favorite"}
         canMoveUp={!isFiltering && previousModel !== undefined && groupOf(previousModel) === group}
         canMoveDown={!isFiltering && nextModel !== undefined && groupOf(nextModel) === group}
@@ -344,19 +351,19 @@ export function ProviderModelsSection({
           />
         ) : null}
         <div className="flex items-center gap-2">
-          {builtInModels.length > 0 ? (
+          {hideableModels.length > 0 ? (
             <Button
               type="button"
               size="xs"
               variant="ghost-muted"
               onClick={() =>
                 onHiddenModelsChange(
-                  nextHiddenModelsForBulkToggle(models, hiddenModels),
-                  builtInModels.map((model) => model.slug),
+                  nextHiddenModelsForBulkToggle(models, hiddenModels, canManageCustomModels),
+                  hideableModels.map((model) => model.slug),
                 )
               }
             >
-              {allBuiltInModelsHidden ? "Enable all" : "Disable all"}
+              {allHideableModelsHidden ? "Enable all" : "Disable all"}
             </Button>
           ) : null}
           <span className="text-xs text-muted-foreground">
@@ -510,10 +517,8 @@ const ProviderModelRow = memo(function ProviderModelRow({
   const nameClassName = cn("text-xs", isHidden ? "text-muted-foreground" : "text-foreground/90");
   // Synced (aix) and read-only lists cannot edit custom entries, so they read as plain models.
   const editableCustom = model.isCustom && canManageCustomModels;
-  const pickerTooltip = model.isCustom
-    ? editableCustom
-      ? "Custom models are always shown in the picker"
-      : "Always shown in the picker"
+  const pickerTooltip = editableCustom
+    ? "Custom models are always shown in the picker"
     : isHidden
       ? "Hidden from picker"
       : "Shown in picker";
@@ -654,7 +659,7 @@ const ProviderModelRow = memo(function ProviderModelRow({
           <Switch
             size="sm"
             checked={!isHidden}
-            disabled={!canWritePreferences || model.isCustom}
+            disabled={!canWritePreferences || (model.isCustom && canManageCustomModels)}
             onCheckedChange={(checked) => onSetHidden(model.slug, !checked)}
             aria-label={`Show ${model.name} in the model picker`}
           />
