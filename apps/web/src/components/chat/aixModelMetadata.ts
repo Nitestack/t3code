@@ -24,16 +24,23 @@ export function aixCatalogStatus(
   }
   return {
     kind: "current",
-    message: message || "Aix models are cached for up to 24 hours. Refresh to sync now.",
+    message: message || "aix models are cached for up to 24 hours. Refresh to sync now.",
   };
 }
+
+const usdPerMillion = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 4,
+});
 
 export function catalogMetadataRows(
   metadata: ServerProvider["models"][number]["catalogMetadata"],
 ): ReadonlyArray<{ readonly label: string; readonly value: string }> {
   const unknown = "Unknown";
   const price = (value: number | undefined) =>
-    value === undefined ? unknown : `$${value} USD / 1M tokens`;
+    value === undefined ? unknown : `${usdPerMillion.format(value)} / 1M tokens`;
   const efforts = metadata?.reasoning?.efforts;
   return [
     { label: "Family", value: metadata?.family ?? unknown },

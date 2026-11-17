@@ -826,6 +826,13 @@ export function ProviderInstanceCard({
     instance.displayName?.trim() || driverOption?.label || String(instance.driver);
   const aixProfile =
     liveProvider?.aixProfile ?? readConfigString(instance.config, "aixProfile") ?? undefined;
+  // aix instances reach the gateway through a managed key, so the auth detail adds nothing.
+  const statusHeadline =
+    aixProfile !== undefined && statusKey === "ready" ? "Ready" : summary.headline;
+  const aixProfileLabel =
+    liveProvider?.aixProfileLabel ??
+    readConfigString(instance.config, "aixProfileLabel") ??
+    aixProfile;
   const accentColor = normalizeProviderAccentColor(instance.accentColor);
   const managedPolicy = useManagedPolicy(environmentId);
   const instanceLocks = managedInstanceLocks(managedPolicy, instance.driver);
@@ -1002,7 +1009,7 @@ export function ProviderInstanceCard({
     version: versionLabel,
     status: updateProgress
       ? `Updating · ${updateProgress}`
-      : `${summary.headline}${needsAttention && inlineStatusDetail ? ` · ${inlineStatusDetail}` : ""}`,
+      : `${statusHeadline}${needsAttention && inlineStatusDetail ? ` · ${inlineStatusDetail}` : ""}`,
   });
   const editorStatusNode =
     isAuthenticated && authEmail ? (
@@ -1018,7 +1025,7 @@ export function ProviderInstanceCard({
     ) : (
       <>
         {statusDotNode}
-        <span>{summary.headline}</span>
+        <span>{statusHeadline}</span>
         {inlineStatusDetail ? (
           <span className="min-w-0 [overflow-wrap:anywhere]">· {inlineStatusDetail}</span>
         ) : null}
@@ -1232,7 +1239,7 @@ export function ProviderInstanceCard({
         className={cn("inline-flex items-center gap-1 empty:hidden", readOnly && "opacity-50")}
       >
         {titleTailNode}
-        {onDelete ? (
+        {onDelete && aixProfile === undefined ? (
           <Button
             type="button"
             size="icon-xs"
@@ -1320,6 +1327,12 @@ export function ProviderInstanceCard({
         headerAction={editorHeaderAction}
       >
         <SettingsRow title="Status" status={statusContent} />
+        {aixProfile !== undefined ? (
+          <SettingsRow
+            title="Managed by aix"
+            description={`Profile ${aixProfileLabel ?? aixProfile}`}
+          />
+        ) : null}
         <SettingsRow
           // aix sync rewrites the display name, so only the accent stays editable.
           title={aixProfile === undefined ? "Display name" : "Accent color"}
@@ -1354,7 +1367,7 @@ export function ProviderInstanceCard({
         />
       </SettingsSection>
 
-      {setup || environmentFields.length > 0 ? (
+      {aixProfile === undefined && (setup || environmentFields.length > 0) ? (
         <SettingsSection title="Setup">
           {setup}
           {environmentFields.length > 0 ? (
@@ -1387,7 +1400,9 @@ export function ProviderInstanceCard({
         </SettingsSection>
       ) : null}
 
-      {instance.driver === "codex" && readCodexSetupMode(instance.config) === "managed" ? (
+      {aixProfile === undefined &&
+      instance.driver === "codex" &&
+      readCodexSetupMode(instance.config) === "managed" ? (
         <div
           inert={readOnly}
           aria-disabled={readOnly || undefined}
@@ -1402,7 +1417,8 @@ export function ProviderInstanceCard({
             {runtime ?? runtimeFields}
           </FoldedSettingsSection>
         </div>
-      ) : !driverOption || deriveProviderSettingsFields(driverOption).length > 0 ? (
+      ) : aixProfile === undefined &&
+        (!driverOption || deriveProviderSettingsFields(driverOption).length > 0) ? (
         <SettingsSection
           title="Runtime"
           inert={readOnly}
@@ -1413,30 +1429,32 @@ export function ProviderInstanceCard({
         </SettingsSection>
       ) : null}
 
-      <SettingsSection
-        title="Environment"
-        inert={readOnly || instanceLocks?.wholeEnvironment}
-        aria-disabled={readOnly || instanceLocks?.wholeEnvironment || undefined}
-        className={readOnly ? "opacity-50 select-none" : undefined}
-      >
-        {instanceLocks?.wholeEnvironment ? (
-          <ManagedNotice>{instanceLocks.reason}</ManagedNotice>
-        ) : null}
-        <div className={instanceLocks?.wholeEnvironment ? "opacity-50" : undefined}>
-          <ProviderEnvironmentSection
-            environment={genericEnvironment}
-            onChange={updateGenericEnvironment}
-            secretSources={secretSources}
-            environmentId={environmentId}
-            managed={
-              instanceLocks && {
-                names: instanceLocks.environmentNames,
-                reason: instanceLocks.reason,
+      {aixProfile === undefined ? (
+        <SettingsSection
+          title="Environment"
+          inert={readOnly || instanceLocks?.wholeEnvironment}
+          aria-disabled={readOnly || instanceLocks?.wholeEnvironment || undefined}
+          className={readOnly ? "opacity-50 select-none" : undefined}
+        >
+          {instanceLocks?.wholeEnvironment ? (
+            <ManagedNotice>{instanceLocks.reason}</ManagedNotice>
+          ) : null}
+          <div className={instanceLocks?.wholeEnvironment ? "opacity-50" : undefined}>
+            <ProviderEnvironmentSection
+              environment={genericEnvironment}
+              onChange={updateGenericEnvironment}
+              secretSources={secretSources}
+              environmentId={environmentId}
+              managed={
+                instanceLocks && {
+                  names: instanceLocks.environmentNames,
+                  reason: instanceLocks.reason,
+                }
               }
-            }
-          />
-        </div>
-      </SettingsSection>
+            />
+          </div>
+        </SettingsSection>
+      ) : null}
       {environmentId !== undefined && liveProvider?.driver === "acpRegistry" ? (
         <AcpSessionManagementSection
           environmentId={environmentId}
@@ -1451,11 +1469,12 @@ export function ProviderInstanceCard({
         <SettingsSection title="Models">
           <div className="px-3 py-3 sm:px-4">
             <p className="mb-3 text-xs text-muted-foreground">
-              Model preferences and custom models are saved on the selected environment and shared
-              across connected devices.
+              {aixProfile === undefined
+                ? "Model preferences and custom models are saved on the selected environment and shared across connected devices."
+                : "aix supplies these models. Favorites, order, and hidden models are saved on the selected environment."}
             </p>
             <ProviderModelsSection
-              canManageCustomModels={!readOnly}
+              canManageCustomModels={!readOnly && aixProfile === undefined}
               canWritePreferences={canWriteSettings}
               instanceId={instanceId}
               driverKind={driverKind}

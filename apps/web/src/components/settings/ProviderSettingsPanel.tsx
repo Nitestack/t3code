@@ -819,6 +819,8 @@ export function EnvironmentProviderSettings({
     scope: providerViewScope,
     profileId: providerProfileId,
   });
+  // aix profiles are managed by the gateway sync, so new instances only make sense under Personal.
+  const showAddProvider = canAddProvider && settingsHierarchy.scope === "personal";
   const visibleIds = new Set(settingsHierarchy.visibleEntries.map((entry) => entry.instanceId));
   const visibleRows = rows.filter((row) => visibleIds.has(row.instanceId));
 
@@ -1041,7 +1043,7 @@ export function EnvironmentProviderSettings({
         {...searchableSetting("providers")}
         variant="plain"
         titleAction={
-          canAddProvider ? (
+          showAddProvider ? (
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -1155,7 +1157,7 @@ export function EnvironmentProviderSettings({
             >
               <div className="divide-y divide-border/50">
                 {visibleRows.map((row) => renderProviderInstance(row, "list"))}
-                {canAddProvider ? (
+                {showAddProvider ? (
                   <button
                     type="button"
                     className="flex w-full cursor-pointer items-center gap-3 px-3 py-3 text-left text-sm text-muted-foreground transition-colors outline-none hover:bg-muted/25 hover:text-foreground focus-visible:bg-muted/25 focus-visible:text-foreground sm:px-4"
@@ -1493,7 +1495,7 @@ function ProviderInstanceRow({
       }
       onUpdate={(next) => actions.updateInstance(instanceId, instance, next)}
       onDelete={
-        mode === "editor" && !isDefault
+        mode === "editor" && !isDefault && liveProvider?.aixProfile === undefined
           ? () => actions.deleteInstance(instanceId, instance)
           : undefined
       }

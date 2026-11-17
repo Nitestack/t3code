@@ -91,6 +91,14 @@ describe("provider settings hierarchy", () => {
     expect(
       providerSettingsRowLabels({
         driverLabel: "Claude Code",
+        isAix: true,
+        status: "Ready",
+        accountSource: "Custom API endpoint",
+      }),
+    ).toEqual({ title: "Claude Code", version: null, detail: "Ready" });
+    expect(
+      providerSettingsRowLabels({
+        driverLabel: "Claude Code",
         version: null,
         status: "Authenticated · ChatGPT Plus Subscription",
       }),

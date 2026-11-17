@@ -61,7 +61,7 @@ export function resolveProviderSettingsHierarchy<T extends ProviderSettingsEntry
 export function providerSettingsRowLabels(input: {
   readonly driverLabel: string;
   readonly displayName?: string | undefined;
-  /** aix display names repeat the profile, which the profile selector already shows. */
+  /** aix names repeat the profile the selector already shows, and their account source is the managed gateway key. */
   readonly isAix?: boolean | undefined;
   readonly version?: string | null | undefined;
   readonly status: string;
@@ -71,6 +71,6 @@ export function providerSettingsRowLabels(input: {
   return {
     title: (input.isAix ? undefined : input.displayName?.trim()) || input.driverLabel,
     version: input.version ?? null,
-    detail: [input.status, accountSource].filter(Boolean).join(" · "),
+    detail: [input.status, input.isAix ? null : accountSource].filter(Boolean).join(" · "),
   };
 }

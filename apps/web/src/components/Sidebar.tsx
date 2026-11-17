@@ -244,6 +244,7 @@ import {
   filterByProjectScope,
   filterProjectsByScope,
   resolveProjectScope,
+  supportsProjectScope,
 } from "@t3tools/client-runtime/environment";
 import { useClientEnvironmentScope } from "../environmentScope";
 import {
@@ -3355,7 +3356,20 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             <div className="flex flex-col items-center gap-2 px-2 py-6 text-center text-xs text-muted-foreground/60">
               {projects.length === 0 ? (
                 <>
-                  <span>No projects yet</span>
+                  <span>
+                    {allProjects.length > 0
+                      ? `No ${activeScope === "work" ? "Work" : "Personal"} projects`
+                      : "No projects yet"}
+                  </span>
+                  {allProjects.some((project) =>
+                    supportsProjectScope(
+                      serverConfigs.get(project.environmentId)?.environment.capabilities,
+                    ),
+                  ) ? (
+                    <span className="max-w-48 text-sidebar-muted-foreground">
+                      Move a project here from its menu or project settings.
+                    </span>
+                  ) : null}
                   <button
                     type="button"
                     onClick={openAddProjectCommandPalette}

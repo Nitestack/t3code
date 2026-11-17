@@ -21,6 +21,7 @@ import {
 import {
   type ScopedThreadRef,
   type EnvironmentId,
+  type ServerProvider,
   type ProjectId,
   type EnvironmentMachineKind,
   type FilesystemBrowseEntry,
@@ -44,6 +45,22 @@ export function shouldShowUnsupportedWorkProjectNote(input: {
   readonly supportsProjectScope: boolean;
 }): boolean {
   return input.activeScope === "work" && !input.supportsProjectScope;
+}
+
+export function aixCatalogRefreshTargets(
+  providersByEnvironment: ReadonlyMap<
+    EnvironmentId,
+    ReadonlyArray<Pick<ServerProvider, "instanceId" | "aixProfile">>
+  >,
+  canRefresh: (environmentId: EnvironmentId) => boolean,
+) {
+  // One forced refresh resyncs every aix profile in that environment.
+  return [...providersByEnvironment].flatMap(([environmentId, providers]) => {
+    const aix = canRefresh(environmentId)
+      ? providers.find((provider) => provider.aixProfile !== undefined)
+      : undefined;
+    return aix ? [{ environmentId, instanceId: aix.instanceId }] : [];
+  });
 }
 
 export function buildLinkedThreadActionItems(

@@ -367,7 +367,7 @@ export function ProviderModelsSection({
             {hiddenCount > 0 ? ` · ${hiddenCount} hidden` : ""}
           </span>
         </div>
-        {driverKind !== "antigravity" && !isAdding ? (
+        {canManageCustomModels && driverKind !== "antigravity" && !isAdding ? (
           <Button
             type="button"
             size="xs"
@@ -508,8 +508,12 @@ const ProviderModelRow = memo(function ProviderModelRow({
 }) {
   const capLabels = describeModelCapabilities(model, flagMissingReasoning);
   const nameClassName = cn("text-xs", isHidden ? "text-muted-foreground" : "text-foreground/90");
+  // Synced (aix) and read-only lists cannot edit custom entries, so they read as plain models.
+  const editableCustom = model.isCustom && canManageCustomModels;
   const pickerTooltip = model.isCustom
-    ? "Custom models are always shown in the picker"
+    ? editableCustom
+      ? "Custom models are always shown in the picker"
+      : "Always shown in the picker"
     : isHidden
       ? "Hidden from picker"
       : "Shown in picker";
@@ -563,7 +567,7 @@ const ProviderModelRow = memo(function ProviderModelRow({
             ) : null}
           </TooltipPopup>
         </Tooltip>
-        {model.isCustom ? (
+        {editableCustom ? (
           <span className="shrink-0 text-2xs text-muted-foreground/70">custom</span>
         ) : null}
       </span>
@@ -609,7 +613,7 @@ const ProviderModelRow = memo(function ProviderModelRow({
             </Tooltip>
           </>
         ) : null}
-        {model.isCustom ? (
+        {editableCustom ? (
           <>
             <Tooltip>
               <TooltipTrigger
@@ -617,7 +621,6 @@ const ProviderModelRow = memo(function ProviderModelRow({
                   <Button
                     size="icon-micro"
                     variant="ghost-muted"
-                    disabled={!canManageCustomModels}
                     aria-label={`Edit ${model.slug}`}
                     onClick={() => onToggleEdit(model.slug)}
                   />
@@ -633,7 +636,6 @@ const ProviderModelRow = memo(function ProviderModelRow({
                   <Button
                     size="icon-micro"
                     variant="ghost-muted"
-                    disabled={!canManageCustomModels}
                     aria-label={`Remove ${model.slug}`}
                     onClick={() => onRemove(model.slug)}
                   />

@@ -13,6 +13,7 @@ import {
   reduceCommandPaletteUiState,
   resolveAddProjectEntry,
   shouldShowUnsupportedWorkProjectNote,
+  aixCatalogRefreshTargets,
   createCommandPaletteSearchState,
   reduceCommandPaletteSearchState,
   type CommandPaletteUiState,
@@ -57,6 +58,28 @@ describe("linked pull request thread navigation", () => {
     expect(items[0]?.description).toBe("Archived thread");
     await items[0]?.run();
     expect(runThread).toHaveBeenCalledWith({ environmentId, id });
+  });
+});
+
+describe("aix catalog refresh actions", () => {
+  it("offers refresh targets only for aix profiles in environments with access", () => {
+    const personal = EnvironmentId.make("personal");
+    const work = EnvironmentId.make("work");
+    expect(
+      aixCatalogRefreshTargets(
+        new Map([
+          [personal, [{ instanceId: ProviderInstanceId.make("codex"), aixProfile: undefined }]],
+          [
+            work,
+            [
+              { instanceId: ProviderInstanceId.make("aix-codex-ac"), aixProfile: "ac" },
+              { instanceId: ProviderInstanceId.make("aix-claude-ac"), aixProfile: "ac" },
+            ],
+          ],
+        ]),
+        (environmentId) => environmentId === work,
+      ),
+    ).toEqual([{ environmentId: work, instanceId: ProviderInstanceId.make("aix-codex-ac") }]);
   });
 });
 

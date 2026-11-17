@@ -46,11 +46,13 @@ export function ComposerModelControl(props: {
       })
     : null;
   const shortLabel = props.modelOption?.shortName ?? label;
+  const aixProfileLabel = props.modelOption?.aixProfileLabel;
   return (
     <ComposerInlineControl
       accessibilityLabel={[
         "Model and reasoning settings",
         label,
+        aixProfileLabel,
         badge?.showBadge ? badge.displayName : null,
         summary,
       ]
@@ -92,10 +94,9 @@ export function ComposerModelControl(props: {
             }
             numberOfLines={1}
           >
-            {shortLabel}
-            {summary ? ` · ${summary}` : ""}
+            {[aixProfileLabel, shortLabel, summary].filter(Boolean).join(" · ")}
           </Text>
-        ) : summary ? (
+        ) : summary || aixProfileLabel ? (
           <Text
             className={
               props.size === "large"
@@ -104,7 +105,7 @@ export function ComposerModelControl(props: {
             }
             numberOfLines={1}
           >
-            {summary}
+            {[aixProfileLabel, summary].filter(Boolean).join(" · ")}
           </Text>
         ) : undefined
       }
