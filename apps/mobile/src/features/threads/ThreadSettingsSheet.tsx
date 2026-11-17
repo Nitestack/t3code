@@ -892,7 +892,7 @@ function ThreadSettingsAixCatalogRefreshButton(props: {
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`Refresh ${props.providerLabel} AIX catalog`}
+      accessibilityLabel={`Refresh ${props.providerLabel} aix catalog`}
       accessibilityState={{ disabled: props.disabled, busy: props.refreshing }}
       className="size-10 items-center justify-center rounded-full active:bg-subtle"
       disabled={props.disabled}
