@@ -2836,6 +2836,13 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   if (platform === "mac") {
     const path = yield* Path.Path;
     const repoRoot = yield* RepoRoot;
+    // A stable self-signed identity keeps the designated requirement across releases,
+    // which Squirrel.Mac updates and macOS privacy grants both match against.
+    const selfSignedIdentity = signed
+      ? undefined
+      : Option.getOrUndefined(
+          yield* Config.String("T3CODE_DESKTOP_MAC_SELF_SIGNED_IDENTITY").pipe(Config.option),
+        )?.trim() || undefined;
     buildConfig.mac = {
       target: target === "dmg" ? [target, "zip"] : [target],
       icon: "icon.icns",
@@ -2880,6 +2887,8 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
         },
       ],
       ...(signed ? { sign: path.join(repoRoot, "scripts/sign-macos.ts") } : {}),
+      // Without notarization, hardened runtime only adds entitlement gates for agents' child processes.
+      ...(selfSignedIdentity ? { identity: selfSignedIdentity, hardenedRuntime: false } : {}),
       ...(macPasskeySigning
         ? {
             entitlements: macPasskeySigning.entitlementsPath,

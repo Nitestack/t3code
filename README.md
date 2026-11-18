@@ -86,6 +86,12 @@ For a LiteLLM API key with a reported budget, check its budget on the Usage page
 - Native Codex and Claude Code routing is limited to combinations known to work. The OpenCode route covers supported chat models, but arbitrary gateway aliases and model compatibility are not guaranteed. T3 does not silently substitute another model or provider.
 - Model metadata may be absent. Budget windows and reset times are shown only when the gateway reports them.
 - The fork's Android app is signed separately, has its own package ID, and includes the Personal/Work switch. The official iOS and Android apps have no scope switch or extended model details and have not been verified against a fork server. There is no fork iOS app.
+- Fork releases include a Windows x64 installer, an Apple Silicon macOS app, and a Linux x64 AppImage. Installed desktop apps update themselves from fork releases. The macOS app is not notarized by Apple, so **macOS installs only through the install script**; a DMG or zip downloaded in a browser is blocked by Gatekeeper:
+
+  ```sh
+  curl -fsSL https://github.com/Nitestack/t3code/releases/latest/download/install-macos.sh | bash
+  ```
+
 - The fork's Nix flake builds from source and currently targets `x86_64-linux`; it is not a universal prebuilt binary.
 - [Fork releases](https://github.com/Nitestack/t3code/releases) use upstream stable versions (for example, **T3 Code v0.1.10**). For Nix, `github:Nitestack/t3code/release` follows the latest published release after the first one; pin a release tag for a reproducible version. `main` includes unreleased fork changes. The [fork release runbook](./docs/operations/fork-release.md) explains the process. Upstream download links below install original T3 Code, not this fork.
 

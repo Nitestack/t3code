@@ -1,8 +1,8 @@
 # Fork release runbook
 
-This runbook covers stable upstream syncs and version-matched Windows, Android, and Nix builds for
+This runbook covers stable upstream syncs and version-matched Windows, macOS, Linux AppImage, Android, and Nix builds for
 `Nitestack/t3code`. The fork has no store builds or iOS build. Users can install it from a signed
-Android APK, a Windows installer, source, or the latest-release or pinned Nix flake ref, as the
+Android APK, a Windows installer, the macOS install script, a Linux AppImage, source, or the latest-release or pinned Nix flake ref, as the
 [fork guide](../user/nitestack-fork.md) explains.
 
 The Nix package is `t3code-<version>` and uses the upstream `t3` and `t3code-desktop` commands,
@@ -22,16 +22,16 @@ APK is the exception and can coexist because its hidden package ID differs.
    [fork guide](../user/nitestack-fork.md#what-this-fork-changes).
 6. In GitHub Actions, run `Release` from `main`, choose channel `stable`, and leave `publish`
    unchecked. Enter the matching application version if you want it shown in the Actions run title. The
-   workflow builds the signed Android APK, Windows x64 installer, and Nix package from the exact
+   workflow builds the signed Android APK, Windows x64 installer, macOS arm64 app, Linux x64 AppImage, and Nix package from the exact
    source commit, verifies their version and source metadata, and uploads one build-only artifact.
    This run creates no tag or release, including a draft release. If the selected source has no
    `.github/upstream-stable.json` marker, provide `upstream_base` as the full peeled commit SHA for
    the matching upstream `v<version>` tag. An invalid or mismatched marker always blocks the run.
 7. Download `t3-code-installers-<version>-<12-char-source-sha>` from that Actions run.
-   It contains `T3-Code-<version>-x64.exe`, `T3-Code-<version>.apk`, their `.sha256` files, platform metadata, `nix-build.json`,
+   It contains `T3-Code-<version>-x64.exe`, `T3-Code-<version>.apk`, `T3-Code-<version>-arm64.{dmg,zip}`, `T3-Code-x86_64.AppImage`, their `.sha256` files, blockmaps, the `latest*.yml` update feeds, `install-macos.sh`, platform metadata, `nix-build.json`,
    and `BUILD-INFO.md`. All metadata names the fork integration commit as the built source and
    records the upstream stable tag and peeled base commit separately. The Windows runner records its Authenticode status; without fork Windows
-   signing credentials it is expected to be unsigned. The Android APK is signed with the fork's
+   signing credentials it is expected to be unsigned. The macOS app is signed with the fork's self-signed `T3 Code Fork` certificate (secrets `MACOS_SELF_SIGNED_CERTIFICATE` and `MACOS_SELF_SIGNED_CERTIFICATE_PASSWORD`) and is not notarized. Keep that certificate: installed Macs accept in-app updates only from builds signed with the same one, so a new certificate means every Mac must reinstall with the script. The Android APK is signed with the fork's
    upload certificate. Check both checksums and metadata before local installation.
 8. After local acceptance, record the build-only run ID, exact commit, and source branch from
    `BUILD-INFO.md`. Request explicit authorization before publishing. Dispatch `Release` on
@@ -169,7 +169,7 @@ Credentials stay out of settings, logs, client responses, and artifacts. Before 
   Android workflow and guide. Anything else needs a look before releasing.
 
 - The standalone Android workflow uploads only the APK, its checksum, and `metadata.json`. The
-  combined release artifact also contains the Windows installer and Nix verification record.
+  combined release artifact also contains the desktop installers, update feeds, and Nix verification record.
 
 ## Compatibility evidence
 

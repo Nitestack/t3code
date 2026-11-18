@@ -17,26 +17,83 @@ function checksummedReleaseAssets(version) {
     `T3-Code-${version}.apk`,
     `T3-Code-${version}-arm64.dmg`,
     `T3-Code-${version}-arm64.zip`,
+    // Unversioned: electron-updater replaces an installed AppImage in place only without x.y.z.
+    "T3-Code-x86_64.AppImage",
   ];
 }
 
+// electron-updater feeds: each manifest must list the installer its platform updates from.
+function updateManifests(version) {
+  return {
+    "latest.yml": `T3-Code-${version}-x64.exe`,
+    "latest-mac.yml": `T3-Code-${version}-arm64.zip`,
+    "latest-linux.yml": "T3-Code-x86_64.AppImage",
+  };
+}
+
 function requiredReleaseAssets(version) {
-  const [windows, android, macDmg, macZip] = checksummedReleaseAssets(version);
+  const [windows, android, macDmg, macZip, linux] = checksummedReleaseAssets(version);
   return [
     windows,
     `${windows}.sha256`,
+    `${windows}.blockmap`,
     "windows-metadata.json",
     android,
     `${android}.sha256`,
     "metadata.json",
     macDmg,
     `${macDmg}.sha256`,
+    `${macDmg}.blockmap`,
     macZip,
     `${macZip}.sha256`,
+    `${macZip}.blockmap`,
     "install-macos.sh",
+    linux,
+    `${linux}.sha256`,
+    ...Object.keys(updateManifests(version)),
     "nix-build.json",
     "BUILD-INFO.md",
   ];
+}
+
+// Reads the url/sha512 pairs electron-builder writes under `files:`; no YAML dependency in workflows.
+function parseUpdateManifest(contents) {
+  const version = /^version: ['"]?([^'"\s]+)['"]?$/m.exec(contents)?.[1];
+  const files = [];
+  for (const line of contents.split(/\r?\n/)) {
+    const url = /^\s*- url: ['"]?([^'"]+?)['"]?$/.exec(line);
+    if (url) {
+      files.push({ url: url[1] });
+      continue;
+    }
+    const sha512 = /^\s+sha512: ['"]?([^'"\s]+)['"]?$/.exec(line);
+    const current = files.at(-1);
+    if (sha512 && current && current.sha512 === undefined) current.sha512 = sha512[1];
+  }
+  return { version, files };
+}
+
+async function verifyUpdateManifests(directory, version) {
+  for (const [manifest, installer] of Object.entries(updateManifests(version))) {
+    const { version: manifestVersion, files } = parseUpdateManifest(
+      fs.readFileSync(path.join(directory, manifest), "utf8"),
+    );
+    if (manifestVersion !== version || !files.some((file) => file.url === installer)) {
+      throw new Error(`${manifest} does not offer ${installer} for version ${version}.`);
+    }
+    for (const file of files) {
+      const filePath = path.join(directory, file.url);
+      if (
+        path.basename(file.url) !== file.url ||
+        !fs.existsSync(filePath) ||
+        (await hashFile(filePath, "sha512", "base64")) !== file.sha512
+      ) {
+        throw new Error(
+          `${manifest} lists ${file.url}, which is missing or has different contents.`,
+        );
+      }
+    }
+  }
 }
 
 function assertForkReleaseTagTarget({ tag, expectedSha, actualSha }) {
@@ -161,7 +218,9 @@ function buildForkBuildInfo({
     "",
     "The Windows x64 installer was built and its packaged native runtime was verified on the standard Windows 2025 runner. Windows signing status is recorded in windows-metadata.json.",
     "The Android APK was signed with the release upload certificate and verified by the Android build job.",
-    "The macOS Apple Silicon DMG and zip are not Developer ID signed; they passed a launch check on a GitHub macOS runner.",
+    "The macOS Apple Silicon DMG and zip are signed with the fork's self-signed certificate, not notarized, and passed a launch check on a GitHub macOS runner.",
+    "The Linux x64 AppImage passed a launch check on the standard Ubuntu runner.",
+    "latest.yml, latest-mac.yml, and latest-linux.yml are the desktop update feeds; every file they list was checked against its SHA-512.",
     `The matching ${markdownCode(`t3code-${version}`)} Nix package was built successfully; its exact source and store path are in nix-build.json.`,
     "",
     publicationMode === "authorized-auto-publish"
@@ -221,12 +280,12 @@ function buildForkReleaseNotes({
     "",
     `Tested build artifact run: ${markdownCode(buildArtifactRunId)} (attempt: ${markdownCode(buildArtifactRunAttempt)})`,
     "",
-    `The Windows installer, macOS Apple Silicon app, signed Android APK, and versioned Nix package are built from the fork commit and include fork changes plus upstream through ${upstreamTag}. Checksums and build metadata are attached.`,
+    `The Windows installer, macOS Apple Silicon app, Linux AppImage, signed Android APK, and versioned Nix package are built from the fork commit and include fork changes plus upstream through ${upstreamTag}. Checksums and build metadata are attached. Installed desktop apps update themselves from fork releases.`,
     "",
-    "Install or update on macOS (Apple Silicon). The app is not notarized; this installs it without a Gatekeeper prompt:",
+    "On macOS (Apple Silicon), install only with this command. The app is not notarized, so a DMG or zip downloaded in a browser is blocked by Gatekeeper:",
     "",
     "```sh",
-    `curl -fsSL https://github.com/Nitestack/t3code/releases/download/${releaseTag}/install-macos.sh | bash`,
+    "curl -fsSL https://github.com/Nitestack/t3code/releases/latest/download/install-macos.sh | bash",
     "```",
     "",
     "Install the matching Nix build from this release tag:",
@@ -367,10 +426,10 @@ function parseChecksum(directory, filename) {
   return match[1];
 }
 
-async function hashFile(filename) {
-  const hash = crypto.createHash("sha256");
+async function hashFile(filename, algorithm = "sha256", encoding = "hex") {
+  const hash = crypto.createHash(algorithm);
   for await (const chunk of createReadStream(filename)) hash.update(chunk);
-  return hash.digest("hex");
+  return hash.digest(encoding);
 }
 
 async function verifyForkBuildArtifactAssets({
@@ -415,6 +474,7 @@ async function verifyForkBuildArtifactAssets({
   }
   const windowsHash = hashes.get(windows);
   const androidHash = hashes.get(android);
+  await verifyUpdateManifests(directory, version);
 
   const readJson = (filename) =>
     JSON.parse(fs.readFileSync(path.join(directory, filename), "utf8"));

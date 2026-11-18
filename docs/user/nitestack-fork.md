@@ -93,10 +93,10 @@ works, which means it replaces the Play Store app: uninstall that first, then up
 APK appears with its SHA-256 checksum and build metadata; there is no store listing. Its `vX.Y.Z` tag points to the fork
 integration merge commit on `main`, whose tree contains fork changes and upstream through the
 matching stable tag. The upstream tag commit is recorded only as the stable base. The release
-workflow also builds a Windows x64 installer and the matching Nix package. Windows signing status is recorded in
+workflow also builds a Windows x64 installer, an Apple Silicon macOS app, a Linux x64 AppImage, and the matching Nix package. Windows signing status is recorded in
 the artifact metadata; current fork builds are expected to be unsigned. Before public publication,
 the Windows installer and APK can be downloaded from the build-only Actions artifact described in
-the [install guide](./install.md#t3-code-fork-windows-and-android). See the
+the [install guide](./install.md#t3-code-fork-desktop-and-android). See the
 [Android build guide](../operations/android-fork-apk.md).
 
 The official Android and iOS apps are unchanged upstream clients. aix profiles reach them as regular
@@ -178,7 +178,8 @@ vp i
 Then restart with the same `T3CODE_HOME`. Before upgrading, keep a copy of that data directory;
 checking out older source does not roll back database migrations. To return to a known-good source
 revision, stop the server and run `git switch --detach <known-good-commit>`, then `vp i` and restart.
-Do not use the upstream desktop updater or Nix package to update this fork.
+Installed fork desktop apps (Windows, macOS, and the Linux AppImage) update themselves from fork
+releases through the in-app updater. Do not install upstream T3 Code or its Nix package over the fork.
 
 For connection and pairing help, see [remote access](./remote-access.md) and
 [T3 Connect troubleshooting](./t3-connect-troubleshooting.md). For existing provider and thread

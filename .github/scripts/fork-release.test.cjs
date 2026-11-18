@@ -159,9 +159,10 @@ test("release notes and summaries preserve backticks and dollar signs", () => {
 });
 
 test("release assets keep the upstream T3 Code installer names", () => {
-  assert.deepEqual(requiredReleaseAssets("0.1.9").slice(0, 5), [
+  assert.deepEqual(requiredReleaseAssets("0.1.9").slice(0, 6), [
     "T3-Code-0.1.9-x64.exe",
     "T3-Code-0.1.9-x64.exe.sha256",
+    "T3-Code-0.1.9-x64.exe.blockmap",
     "windows-metadata.json",
     "T3-Code-0.1.9.apk",
     "T3-Code-0.1.9.apk.sha256",
@@ -559,12 +560,43 @@ test("existing release assets must have matching source metadata and file checks
   try {
     const windowsBytes = Buffer.from("windows installer bytes");
     const androidBytes = Buffer.from("signed apk bytes");
-    for (const mac of [macZip, "T3-Code-0.1.9-arm64.dmg"]) {
-      fs.writeFileSync(path.join(directory, mac), mac);
-      fs.writeFileSync(path.join(directory, `${mac}.sha256`), `${digest(mac)}  ${mac}\n`);
+    for (const installer of [macZip, "T3-Code-0.1.9-arm64.dmg", "T3-Code-x86_64.AppImage"]) {
+      fs.writeFileSync(path.join(directory, installer), installer);
+      fs.writeFileSync(
+        path.join(directory, `${installer}.sha256`),
+        `${digest(installer)}  ${installer}\n`,
+      );
+    }
+    for (const blockmapped of [windows, macZip, "T3-Code-0.1.9-arm64.dmg"]) {
+      fs.writeFileSync(path.join(directory, `${blockmapped}.blockmap`), "blockmap");
     }
     fs.writeFileSync(path.join(directory, "install-macos.sh"), "#!/bin/bash\n");
     fs.writeFileSync(path.join(directory, windows), windowsBytes);
+    const sha512 = (name) =>
+      crypto
+        .createHash("sha512")
+        .update(fs.readFileSync(path.join(directory, name)))
+        .digest("base64");
+    const writeManifest = (manifest, files) =>
+      fs.writeFileSync(
+        path.join(directory, manifest),
+        [
+          "version: 0.1.9",
+          "files:",
+          ...files.flatMap((name) => [
+            `  - url: ${name}`,
+            `    sha512: ${sha512(name)}`,
+            "    size: 1",
+          ]),
+          `path: ${files[0]}`,
+          `sha512: ${sha512(files[0])}`,
+          "releaseDate: '2026-11-18T00:00:00.000Z'",
+          "",
+        ].join("\n"),
+      );
+    writeManifest("latest.yml", [windows]);
+    writeManifest("latest-mac.yml", [macZip, "T3-Code-0.1.9-arm64.dmg"]);
+    writeManifest("latest-linux.yml", ["T3-Code-x86_64.AppImage"]);
     fs.writeFileSync(path.join(directory, android), androidBytes);
     fs.writeFileSync(
       path.join(directory, `${windows}.sha256`),
@@ -687,6 +719,34 @@ test("existing release assets must have matching source metadata and file checks
       /contents do not match/,
     );
     fs.writeFileSync(path.join(directory, macZip), macZip);
+    // A checksum file regenerated after tampering still cannot match the update feed.
+    fs.appendFileSync(path.join(directory, macZip), "rebuilt");
+    fs.writeFileSync(
+      path.join(directory, `${macZip}.sha256`),
+      `${digest(fs.readFileSync(path.join(directory, macZip)))}  ${macZip}\n`,
+    );
+    await assert.rejects(
+      verifyForkBuildArtifactAssets({
+        directory,
+        version: "0.1.9",
+        sha,
+        upstreamBase,
+        upstreamTag: "v0.1.9",
+      }),
+      /latest-mac\.yml lists T3-Code-0\.1\.9-arm64\.zip/,
+    );
+    writeManifest("latest-mac.yml", ["T3-Code-0.1.9-arm64.dmg"]);
+    await assert.rejects(
+      verifyForkBuildArtifactAssets({
+        directory,
+        version: "0.1.9",
+        sha,
+        upstreamBase,
+        upstreamTag: "v0.1.9",
+      }),
+      /latest-mac\.yml does not offer T3-Code-0\.1\.9-arm64\.zip/,
+    );
+    writeManifest("latest-mac.yml", [macZip]);
     fs.appendFileSync(path.join(directory, windows), "tampered");
     await assert.rejects(
       verifyExistingForkReleaseAssets({
