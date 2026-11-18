@@ -90,8 +90,9 @@ export const ModelListRow = memo(function ModelListRow(props: {
           <Tooltip>
             <TooltipTrigger
               render={
-                <span className="text-xs font-medium text-success" aria-label="Free model">
-                  $
+                <span className="text-xs font-medium text-success">
+                  <span aria-hidden="true">$</span>
+                  <span className="sr-only">, free</span>
                 </span>
               }
             />

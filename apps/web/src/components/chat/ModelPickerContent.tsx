@@ -465,11 +465,13 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   const selectedModelKeySet = new Set(
     selectedModelKeys ?? (activeModelKey ? [activeModelKey] : []),
   );
-  const inScopePickerInstances = providerInstancesForProjectScope({
+  const scopeInstanceEntries = providerInstancesForProjectScope({
     entries: instanceEntries,
     scope: hierarchyScope,
     ...(hierarchyScope === "work" && selectedAixProfile ? { aixProfile: selectedAixProfile } : {}),
-  }).filter(
+  });
+  const scopeInstanceIds = new Set(scopeInstanceEntries.map((entry) => entry.instanceId));
+  const inScopePickerInstances = scopeInstanceEntries.filter(
     (entry) =>
       isProviderInstancePickerVisible(entry) &&
       (props.lockedProvider === null ||
@@ -541,20 +543,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       selectedInstanceId === "favorites"
         ? undefined
         : instanceEntries.find((entry) => entry.instanceId === selectedInstanceId);
-    const candidates = providerInstancesForProjectScope({
-      entries: instanceEntries,
-      scope: hierarchyScope,
-      ...(hierarchyScope === "work" && selectedAixProfile
-        ? { aixProfile: selectedAixProfile }
-        : {}),
-    }).filter(
-      (entry) =>
-        isProviderInstancePickerVisible(entry) &&
-        (props.lockedProvider === null ||
-          (entry.driverKind === props.lockedProvider &&
-            (!props.lockedContinuationGroupKey ||
-              entry.continuationGroupKey === props.lockedContinuationGroupKey))),
-    );
+    const candidates = inScopePickerInstances;
     const nextInstanceId =
       candidates.find((entry) => entry.driverKind === previousEntry?.driverKind)?.instanceId ??
       candidates[0]?.instanceId ??
@@ -714,6 +703,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   const scopeModels = flatModels.filter((model) => {
     const isSelected = selectedModelKeySet.has(modelPickerModelKey(model.instanceId, model.slug));
     const entry = entryByInstanceId.get(model.instanceId);
+    // The selection may sit in the other scope; it never leaks into this scope's search or favorites.
+    if (!scopeInstanceIds.has(model.instanceId)) return false;
     return isPickerModelVisibleForProjectScope({
       scope: hierarchyScope,
       modelProfileId: entry?.aixProfile,
@@ -761,14 +752,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     return disabled;
   })();
   const sidebarInstanceEntries = (() => {
-    const levelEntries = providerInstancesForProjectScope({
-      entries: instanceEntries,
-      scope: hierarchyScope,
-      ...(hierarchyScope === "work" && selectedAixProfile
-        ? { aixProfile: selectedAixProfile }
-        : {}),
-    });
-    const enabledEntries = levelEntries.filter(isProviderInstancePickerVisible);
+    const enabledEntries = scopeInstanceEntries.filter(isProviderInstancePickerVisible);
     if (!isLocked) {
       return enabledEntries;
     }

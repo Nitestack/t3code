@@ -184,6 +184,9 @@ const CommandRow = memo(function CommandRow(props: {
   return (
     <Pressable
       accessibilityRole="button"
+      {...(props.item.type === "model" && props.item.option.isFree
+        ? { accessibilityLabel: `${props.item.label}, free` }
+        : {})}
       onPress={props.onPress}
       className="flex-row items-center gap-2.5 border-border px-3.5 py-2.5 active:opacity-60"
       style={{ borderBottomWidth: props.isLast ? 0 : StyleSheet.hairlineWidth }}
@@ -226,7 +229,8 @@ const CommandRow = memo(function CommandRow(props: {
       </Text>
       {props.item.type === "model" && props.item.option.isFree ? (
         <Text
-          accessibilityLabel="Free model"
+          accessible={false}
+          importantForAccessibility="no"
           className="text-sm font-t3-bold text-adaptive-emerald-600-400"
         >
           $

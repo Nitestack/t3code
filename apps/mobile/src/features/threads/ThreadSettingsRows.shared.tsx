@@ -51,7 +51,13 @@ export function ModelRowContent(
       )}
     >
       <Pressable
-        accessibilityLabel={[props.option.label, props.option.subtitle].filter(Boolean).join(", ")}
+        accessibilityLabel={[
+          props.option.label,
+          props.option.isFree ? "free" : null,
+          props.option.subtitle,
+        ]
+          .filter(Boolean)
+          .join(", ")}
         accessibilityRole="radio"
         accessibilityState={{
           checked: props.selected,
@@ -72,7 +78,8 @@ export function ModelRowContent(
             </Text>
             {props.option.isFree ? (
               <Text
-                accessibilityLabel="Free model"
+                accessible={false}
+                importantForAccessibility="no"
                 className="text-sm font-t3-bold text-adaptive-emerald-600-400"
               >
                 $
