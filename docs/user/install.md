@@ -132,8 +132,7 @@ Nix manages both the desktop app and the bundled
 ### T3 Code fork (Nix)
 
 This build uses the same T3 Code app name, `t3` and `t3code-desktop` commands, and default state
-directory as upstream, so install it instead of upstream T3 Code, not next to it. Android is the
-exception: its hidden package ID differs, so both Android apps can be installed. A stable release
+directory as upstream, so install it instead of upstream T3 Code, not next to it. The fork's Android app likewise replaces the Play Store app. A stable release
 tag points to the fork integration commit on `main`, with fork changes and upstream through the
 matching stable tag; metadata records that upstream tag's peeled commit as the stable base. The
 flake reads the application version from the source and pins nixpkgs in `flake.lock`.

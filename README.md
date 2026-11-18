@@ -44,35 +44,56 @@ Move a project between Personal and Work from its sidebar menu, the command pale
 
 ![Project settings listing demo projects with their Personal and Work scopes](./.github/readme/aix/work-personal-scope.png)
 
-## Set up aix and run T3
+## Install
 
-Install aix on the **machine running the T3 server**, configure an API-key profile for a gateway you can access, and make sure `aix` is on that server process's `PATH`. On Linux or macOS, the current aix README provides this installer:
+Download the fork from its [latest release](https://github.com/Nitestack/t3code/releases/latest). It uses the same app name and data directory as upstream T3 Code, so install it **instead of** upstream T3 Code. Installed desktop apps update themselves from later fork releases.
+
+### Windows (x64)
+
+Download `T3-Code-<version>-x64.exe` and run it. The installer is not code-signed, so Windows may show "Windows protected your PC": choose **More info → Run anyway**.
+
+### macOS (Apple Silicon)
+
+Install with the script. It is the only supported way: the app is not notarized by Apple, so Gatekeeper blocks a DMG or zip downloaded in a browser.
+
+```sh
+curl -fsSL https://github.com/Nitestack/t3code/releases/latest/download/install-macos.sh | bash
+```
+
+The script checks the download's SHA-256, installs **T3 Code** into `/Applications` (or `~/Applications`), and opens it.
+
+### Linux (x64)
+
+Download `T3-Code-x86_64.AppImage`, then make it executable and start it:
+
+```sh
+chmod +x ./T3-Code-x86_64.AppImage
+./T3-Code-x86_64.AppImage
+```
+
+On NixOS, or to manage T3 with Nix, install the fork's flake instead; Nix handles updates:
+
+```sh
+nix profile add 'github:Nitestack/t3code/release'
+```
+
+See the [fork Nix guide](./docs/user/install.md#t3-code-fork-nix) for NixOS and Home Manager.
+
+### Android
+
+Download `T3-Code-<version>.apk` and open it on your phone. It replaces the Play Store T3 Code app, so uninstall that first. Install later APKs from fork releases the same way.
+
+### Set up aix
+
+T3 runs agents through [aix](https://github.com/Nitestack/aix) profiles on the **machine running the T3 server**, which is your computer when you use the desktop app (inside WSL if the Windows app runs its server there). Install aix there:
 
 ```sh
 curl -fsSL https://github.com/Nitestack/aix/releases/latest/download/install.sh | sh
 ```
 
-Then follow aix's [installation instructions](https://github.com/Nitestack/aix#installation) for other options and its [profile configuration guide](https://github.com/Nitestack/aix#config-format) to define the profile and gateway endpoint. Check that aix can see the profile with `aix profiles`. aix-managed ChatGPT OAuth profiles are not supported by this integration.
+Configure an API-key profile with aix's [profile guide](https://github.com/Nitestack/aix#config-format) and check it with `aix profiles`. ChatGPT sign-in profiles are not supported. The fork's desktop app and Nix package turn aix on for you; set `T3CODE_AIX=0` to turn it off. Restart T3 after installing aix so it finds the command.
 
-For a source checkout, install the repository dependencies and start the development server:
-
-```sh
-git clone https://github.com/Nitestack/t3code.git
-cd t3code
-vp i
-T3CODE_AIX=1 vp run dev --home-dir "$HOME/.t3-aix"
-```
-
-Open the local address printed at startup. `--home-dir` is the dev runner's explicit data-directory option. In linked development worktrees, state defaults to that worktree's `.t3` even if `T3CODE_HOME` is set; use `--home-dir` to choose another directory.
-
-For the fork's pinned Nix CLI on `x86_64-linux`, `--base-dir` is the server CLI's explicit data-directory option and is equivalent to `T3CODE_HOME`:
-
-```sh
-T3CODE_AIX=1 T3CODE_HOME="$HOME/.local/share/t3code-aix" \
-  t3 serve --no-browser --base-dir "$HOME/.local/share/t3code-aix"
-```
-
-The command prints pairing details for connecting another client. Keep each independent T3 server on its own data directory. The source flake and install instructions are in the [fork Nix guide](./docs/user/install.md#t3-code-fork-nix); the source checkout and development environment are covered by the [development runbook](./docs/operations/development.md#first-checkout).
+To host T3 for other devices without the desktop app, run `t3 serve`; it prints pairing details. See [remote access](./docs/user/remote-access.md). To work on the fork itself, see the [development runbook](./docs/operations/development.md#first-checkout).
 
 ## A typical workflow
 
@@ -85,14 +106,8 @@ For a LiteLLM API key with a reported budget, check its budget on the Usage page
 - aix integration requires API-key profiles. ChatGPT OAuth profiles remain unsupported; regular T3 provider sign-ins, including subscription-based providers, continue to work.
 - Native Codex and Claude Code routing is limited to combinations known to work. The OpenCode route covers supported chat models, but arbitrary gateway aliases and model compatibility are not guaranteed. T3 does not silently substitute another model or provider.
 - Model metadata may be absent. Budget windows and reset times are shown only when the gateway reports them.
-- The fork's Android app is signed separately, has its own package ID, and includes the Personal/Work switch. The official iOS and Android apps have no scope switch or extended model details and have not been verified against a fork server. There is no fork iOS app.
-- Fork releases include a Windows x64 installer, an Apple Silicon macOS app, and a Linux x64 AppImage. Installed desktop apps update themselves from fork releases. The macOS app is not notarized by Apple, so **macOS installs only through the install script**; a DMG or zip downloaded in a browser is blocked by Gatekeeper:
-
-  ```sh
-  curl -fsSL https://github.com/Nitestack/t3code/releases/latest/download/install-macos.sh | bash
-  ```
-
-- The fork's Nix flake builds from source and currently targets `x86_64-linux`; it is not a universal prebuilt binary.
+- The fork's Android app is signed separately, replaces the Play Store app, and includes the Personal/Work switch. The official iOS and Android apps have no scope switch or extended model details and have not been verified against a fork server. There is no fork iOS app.
+- Desktop builds cover Windows x64, Apple Silicon Macs, and Linux x64. The Nix flake builds from source for `x86_64-linux`.
 - [Fork releases](https://github.com/Nitestack/t3code/releases) use upstream stable versions (for example, **T3 Code v0.1.10**). For Nix, `github:Nitestack/t3code/release` follows the latest published release after the first one; pin a release tag for a reproducible version. `main` includes unreleased fork changes. The [fork release runbook](./docs/operations/fork-release.md) explains the process. Upstream download links below install original T3 Code, not this fork.
 
 For provider details, remote connections, troubleshooting, and mobile boundaries, see the [fork guide](./docs/user/nitestack-fork.md), [provider setup](./docs/user/install.md#providers), [remote access](./docs/user/remote-access.md), and [T3 Connect troubleshooting](./docs/user/t3-connect-troubleshooting.md).

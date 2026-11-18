@@ -6,8 +6,8 @@ and adds runtime support for [aix](https://github.com/Nitestack/aix) API-key pro
 project-level Personal and Work scopes.
 
 It uses the same T3 Code app name, `t3` and `t3code-desktop` commands, and default state directory
-as upstream, so install it instead of upstream T3 Code, not next to it. Android is the exception:
-its hidden package ID differs, so both Android apps can be installed.
+as upstream, so install it instead of upstream T3 Code, not next to it. The Android app also uses
+the official package ID, so it replaces the Play Store app.
 
 ## aix profiles
 
@@ -15,7 +15,7 @@ Configure aix itself with the [aix setup and profile guide](https://github.com/N
 To use its profiles in T3, start the fork's server with `aix` on its `PATH` and `T3CODE_AIX=1` in
 its environment. Without that variable the server behaves like upstream T3, and instances it created
 for aix earlier are disabled. Your own Codex, Claude, and other provider sign-ins are not changed.
-The Nix build and the Windows desktop app's WSL backend set `T3CODE_AIX=1` for you; set
+The Nix build and the fork's desktop app set `T3CODE_AIX=1` for you; set
 `T3CODE_AIX=0` to turn it off.
 
 T3 reads the profile list from aix and asks aix for each profile's endpoint and key inside the server
@@ -117,7 +117,7 @@ Compared with upstream T3 Code at
 - The Usage page's Work tab includes Work-scoped Codex records and Claude sessions matched to aix
   profile instances, along with aix budgets, cost, and tokens.
 - Project-level Personal/Work scopes on web, desktop, and the fork's Android app.
-- A separately signed Android APK with its own package ID, and no fork iOS build.
+- A separately signed Android APK that replaces the Play Store app, and no fork iOS build.
 - A Nix flake with the `t3code-<version>` package and the usual T3 Code commands.
 - Upstream sync limited to stable releases and proposed as reviewable pull requests.
 
