@@ -40,6 +40,30 @@ export interface ClaudeModelCatalog {
   readonly models: ReadonlyArray<ClaudeCatalogModel>;
 }
 
+export function withoutAixClaudeModelOptions(
+  capabilities: ModelCapabilities | null,
+): ModelCapabilities | null {
+  if (!capabilities?.optionDescriptors) return capabilities;
+  return {
+    ...capabilities,
+    optionDescriptors: capabilities.optionDescriptors.filter(
+      (descriptor) => descriptor.id !== "fastMode" && descriptor.id !== "ultracode",
+    ),
+  };
+}
+
+export function withoutAixClaudeCatalogOptions(catalog: ClaudeModelCatalog): ClaudeModelCatalog {
+  return {
+    models: catalog.models.map((entry) => ({
+      ...entry,
+      model: {
+        ...entry.model,
+        capabilities: withoutAixClaudeModelOptions(entry.model.capabilities),
+      },
+    })),
+  };
+}
+
 function tryResolveClaudeModelCatalog(
   resolved: ModelCatalog.ProviderCatalog | undefined,
 ): ClaudeModelCatalog | null {

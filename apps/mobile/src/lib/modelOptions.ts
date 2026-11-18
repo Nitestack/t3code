@@ -24,6 +24,7 @@ import {
 import { resolveModelShortName } from "@t3tools/client-runtime/provider-clients";
 import { aixMetadataFromInstanceId } from "@t3tools/client-runtime/provider-picker-hierarchy";
 import { resolveProvidersForCwd } from "@t3tools/client-runtime/providerSkills";
+import { isFreeCatalogModel } from "@t3tools/client-runtime/catalog-model";
 
 export type ModelOption = {
   readonly key: string;
@@ -44,6 +45,7 @@ export type ModelOption = {
   };
   readonly isDefault: boolean;
   readonly isLegacy: boolean;
+  readonly isFree?: boolean;
   readonly isUnavailable?: boolean;
   readonly isHidden?: boolean;
   readonly canHide?: boolean;
@@ -428,6 +430,7 @@ export function buildModelOptions(
         canHide: !model.isCustom || Boolean(provider.aixProfile ?? aixMetadata),
         isDefault: model.isDefault === true,
         isLegacy: model.isLegacy === true,
+        ...(isFreeCatalogModel(model.catalogMetadata) ? { isFree: true } : {}),
         ...(updateRequired ? { providerUpdateRequired: updateRequired } : {}),
         capabilities: model.capabilities,
         selection: normalizeSelectionOptions(
@@ -491,6 +494,7 @@ export function buildModelOptions(
         providerBadge: providerBadgeFor(fallbackModelSelection.instanceId),
         isDefault: false,
         isLegacy: model?.isLegacy === true,
+        ...(isFreeCatalogModel(model?.catalogMetadata) ? { isFree: true } : {}),
         ...(isModelSelectionUnavailable(config, fallbackModelSelection, projectId) ||
         (provider !== undefined && !isProviderEnabledForProject(config, provider, projectId)) ||
         provider?.updateRequiredModels?.some((gated) => gated.slug === fallbackModelSelection.model)

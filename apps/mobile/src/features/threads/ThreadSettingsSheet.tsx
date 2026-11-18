@@ -919,7 +919,6 @@ function resolveSessionPickerHierarchy(session: ThreadSettingsSessionValue) {
           .flatMap((group) => group.models)
           .find((model) => model.selection.instanceId === selectedInstanceId)?.aixProfile
       : undefined,
-    selectedInstanceId,
   });
 }
 

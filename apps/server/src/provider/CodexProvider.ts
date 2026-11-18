@@ -41,6 +41,7 @@ import {
 } from "@t3tools/shared/model";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import { codexAppServerArgs, resolveCodexLaunchArgs } from "./codexLaunchArgs.ts";
+import { withoutAixCodexModelOptions } from "./codexModelCatalog.ts";
 import {
   buildServerProvider,
   COMPACT_SLASH_COMMAND,
@@ -483,7 +484,7 @@ function appendCustomCodexModels(
   if (!aixManaged) return withCustom;
   // An aix instance offers only what its gateway catalog lists, so built-ins are hidden.
   const synced = new Set(readCustomModelEntries(customModels).map((entry) => entry.slug));
-  return withCustom.filter((model) => synced.has(model.slug));
+  return withoutAixCodexModelOptions(withCustom.filter((model) => synced.has(model.slug)));
 }
 
 function parseCodexSkillsListResponse(

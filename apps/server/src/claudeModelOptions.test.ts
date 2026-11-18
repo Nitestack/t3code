@@ -6,6 +6,7 @@ import { compileClaudeModelSelection } from "./claudeModelOptions.ts";
 import {
   BUNDLED_CLAUDE_MODEL_CATALOG,
   scopeClaudeModelCatalog,
+  withoutAixClaudeCatalogOptions,
 } from "./provider/ClaudeModelCatalog.ts";
 
 const selection = (
@@ -32,6 +33,26 @@ describe("compileClaudeModelSelection", () => {
       effort: "max",
       settings: { fastMode: true },
     });
+  });
+
+  it("ignores stale Fast and Ultracode selections in the aix catalog", () => {
+    const model = BUNDLED_CLAUDE_MODEL_CATALOG.models.find((entry) =>
+      entry.model.capabilities?.optionDescriptors?.some(
+        (descriptor) => descriptor.id === "ultracode",
+      ),
+    )?.model;
+    expect(model).toBeDefined();
+    const catalog = withoutAixClaudeCatalogOptions(BUNDLED_CLAUDE_MODEL_CATALOG);
+    const compiled = compileClaudeModelSelection(
+      selection(model!.slug, [
+        { id: "fastMode", value: true },
+        { id: "ultracode", value: true },
+      ]),
+      catalog,
+    );
+
+    expect(compiled.settings).not.toHaveProperty("fastMode");
+    expect(compiled.settings).not.toHaveProperty("ultracode");
   });
 
   it("runs Ultracode at the chosen effort and reads the old Ultracode effort as xhigh", () => {

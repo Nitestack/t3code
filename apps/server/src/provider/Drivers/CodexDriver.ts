@@ -275,6 +275,7 @@ export const CodexDriver: ProviderDriver<
         config: homeConfig,
       },
       {
+        aixManaged,
         // The profile's gateway budget is the only usage source for an aix-managed instance.
         onUsageLimits: (update) => (aixManaged ? Effect.void : snapshot.applyUsageLimits(update)),
         models: Effect.suspend(() => snapshot.getSnapshot).pipe(

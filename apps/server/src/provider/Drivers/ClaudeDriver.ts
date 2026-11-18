@@ -249,6 +249,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
       },
       {
         scopedLimitNames,
+        aixManaged,
         // The profile's gateway budget is the only usage source for an aix-managed instance.
         onUsageLimits: (update) => (aixManaged ? Effect.void : snapshot.applyUsageLimits(update)),
         onSessionInit: (cwd) => Queue.offer(workspaceRescans, cwd).pipe(Effect.asVoid),

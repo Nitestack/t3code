@@ -76,6 +76,7 @@ import {
   formatClaudeVersionUpgradeMessage,
   resolveClaudeModelsForVersion,
   resolveClaudeUpdateRequiredModels,
+  withoutAixClaudeModelOptions,
   withUltracodeToggle,
 } from "./ClaudeModelCatalog.ts";
 
@@ -98,7 +99,12 @@ function claudeProviderModels(
   if (!aixManaged) return models;
   // An aix instance offers only what its gateway catalog lists, so built-ins are hidden.
   const synced = new Set(readCustomModelEntries(customModels).map((entry) => entry.slug));
-  return models.filter((model) => synced.has(model.slug));
+  return models
+    .filter((model) => synced.has(model.slug))
+    .map((model) => ({
+      ...model,
+      capabilities: withoutAixClaudeModelOptions(model.capabilities),
+    }));
 }
 
 const CLAUDE_PRESENTATION = {
