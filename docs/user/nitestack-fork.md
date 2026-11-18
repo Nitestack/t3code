@@ -1,8 +1,8 @@
-# Nitestack/t3code fork
+# get-aix/t3code fork
 
-Nitestack/t3code is a soft fork of [T3 Code](https://github.com/pingdotgg/t3code), created by
+get-aix/t3code is a soft fork of [T3 Code](https://github.com/pingdotgg/t3code), created by
 pingdotgg and distributed under the MIT License. It keeps T3's providers, threads, and remote access,
-and adds runtime support for [aix](https://github.com/Nitestack/aix) API-key profiles and
+and adds runtime support for [aix](https://github.com/get-aix/aix) API-key profiles and
 project-level Personal and Work scopes.
 
 It uses the same T3 Code app name, `t3` and `t3code-desktop` commands, and default state directory
@@ -11,7 +11,7 @@ the official package ID, so it replaces the Play Store app.
 
 ## aix profiles
 
-Configure aix itself with the [aix setup and profile guide](https://github.com/Nitestack/aix/blob/main/README.md).
+Configure aix itself with the [aix setup and profile guide](https://github.com/get-aix/aix/blob/main/README.md).
 To use its profiles in T3, start the fork's server with `aix` on its `PATH` and `T3CODE_AIX=1` in
 its environment. Without that variable the server behaves like upstream T3, and instances it created
 for aix earlier are disabled. Your own Codex, Claude, and other provider sign-ins are not changed.
@@ -127,7 +127,7 @@ Install [vp](../operations/development.md#first-checkout), clone this fork, and 
 development server and web client:
 
 ```sh
-git clone https://github.com/Nitestack/t3code.git
+git clone https://github.com/get-aix/t3code.git
 cd t3code
 vp i
 vp run dev
@@ -142,7 +142,7 @@ including an original T3 server. For NixOS development, see the
 ## Nix install
 
 The repository flake builds the application from source for `x86_64-linux`. Use
-`github:Nitestack/t3code/release` to follow the latest published release, or pin a release tag for a
+`github:get-aix/t3code/release` to follow the latest published release, or pin a release tag for a
 reproducible version. The `release` branch appears after the first published release; `main`
 includes unreleased fork changes. The flake provides the standard `t3` and `t3code-desktop`
 commands. Follow the [Nix install instructions](./install.md#t3-code-fork-nix).

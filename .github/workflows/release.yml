@@ -1,5 +1,5 @@
 name: Release
-run-name: ${{ github.repository == 'Nitestack/t3code' && inputs.channel == 'stable' && (inputs.publish && 'Fork publish stable' || 'Fork build-only stable') || 'Release stable' }} ${{ inputs.version || github.ref_name }} source ${{ inputs.source_commit || github.sha }}
+run-name: ${{ github.repository == 'get-aix/t3code' && inputs.channel == 'stable' && (inputs.publish && 'Fork publish stable' || 'Fork build-only stable') || 'Release stable' }} ${{ inputs.version || github.ref_name }} source ${{ inputs.source_commit || github.sha }}
 
 on:
   push:
@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
     inputs:
       channel:
-        description: "Release channel (stable on Nitestack/t3code publishes the reviewed fork commit)"
+        description: "Release channel (stable on get-aix/t3code publishes the reviewed fork commit)"
         required: false
         default: preview
         type: choice
@@ -50,7 +50,7 @@ on:
 # Serialize upstream nightlies as before. Fork stable builds use their full
 # source SHA so different commits cannot replace one another's pending run.
 concurrency:
-  group: release-${{ github.repository == 'Nitestack/t3code' && github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && format('fork-stable-{0}', inputs.source_commit || github.sha) || ((github.event_name == 'schedule' || inputs.channel == 'nightly' || inputs.channel == 'preview') && 'nightly' || 'stable') }}
+  group: release-${{ github.repository == 'get-aix/t3code' && github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && format('fork-stable-{0}', inputs.source_commit || github.sha) || ((github.event_name == 'schedule' || inputs.channel == 'nightly' || inputs.channel == 'preview') && 'nightly' || 'stable') }}
   cancel-in-progress: false
 
 permissions:
@@ -64,7 +64,7 @@ jobs:
   fork_preflight:
     name: Fork release preflight
     if: >-
-      github.repository == 'Nitestack/t3code' &&
+      github.repository == 'get-aix/t3code' &&
       github.event_name == 'workflow_dispatch' && inputs.channel == 'stable'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -832,7 +832,7 @@ jobs:
     name: Verify tested build-only artifact
     needs: [fork_preflight]
     if: >-
-      github.repository == 'Nitestack/t3code' &&
+      github.repository == 'get-aix/t3code' &&
       github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && inputs.publish == true &&
       inputs.artifact_run_id != '' &&
       !failure() && !cancelled() &&
@@ -912,7 +912,7 @@ jobs:
     name: Publish authorized fork release
     needs: [fork_preflight, fork_build_artifacts, fork_nix, fork_verify_tested_artifact]
     if: >-
-      github.repository == 'Nitestack/t3code' &&
+      github.repository == 'get-aix/t3code' &&
       github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && inputs.publish == true &&
       !failure() && !cancelled() &&
       needs.fork_preflight.result == 'success' &&
@@ -972,7 +972,7 @@ jobs:
         with:
           app-id: ${{ secrets.FORK_SYNC_APP_ID }}
           private-key: ${{ secrets.FORK_SYNC_APP_PRIVATE_KEY }}
-          owner: Nitestack
+          owner: get-aix
           repositories: t3code
           permission-contents: write
           permission-workflows: write
@@ -1086,7 +1086,7 @@ jobs:
     name: Advance the latest-release branch
     needs: [fork_preflight, fork_publish]
     if: >-
-      github.repository == 'Nitestack/t3code' &&
+      github.repository == 'get-aix/t3code' &&
       github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && inputs.publish == true &&
       !cancelled() &&
       needs.fork_preflight.result == 'success' &&
@@ -1117,7 +1117,7 @@ jobs:
         with:
           app-id: ${{ secrets.FORK_SYNC_APP_ID }}
           private-key: ${{ secrets.FORK_SYNC_APP_PRIVATE_KEY }}
-          owner: Nitestack
+          owner: get-aix
           repositories: t3code
           permission-contents: write
           permission-workflows: write

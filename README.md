@@ -1,8 +1,8 @@
 # T3 Code with aix support
 
-A soft fork of [T3 Code](https://github.com/pingdotgg/t3code), created by pingdotgg and released under the [MIT License](./LICENSE). It keeps T3's provider, thread, and remote-work flows, and adds runtime support for [aix](https://github.com/Nitestack/aix) API-key profiles and project-level Personal and Work scopes.
+A soft fork of [T3 Code](https://github.com/pingdotgg/t3code), created by pingdotgg and released under the [MIT License](./LICENSE). It keeps T3's provider, thread, and remote-work flows, and adds runtime support for [aix](https://github.com/get-aix/aix) API-key profiles and project-level Personal and Work scopes.
 
-[Upstream T3 Code](https://github.com/pingdotgg/t3code) · [aix setup and profiles](https://github.com/Nitestack/aix#installation) · [Fork guide](./docs/user/nitestack-fork.md) · [Remote access](./docs/user/remote-access.md) · [Portable handoffs](./docs/user/portable-handoffs.md) · [MIT License](./LICENSE)
+[Upstream T3 Code](https://github.com/pingdotgg/t3code) · [aix setup and profiles](https://github.com/get-aix/aix#installation) · [Fork guide](./docs/user/nitestack-fork.md) · [Remote access](./docs/user/remote-access.md) · [Portable handoffs](./docs/user/portable-handoffs.md) · [MIT License](./LICENSE)
 
 ## What the fork adds
 
@@ -46,7 +46,7 @@ Move a project between Personal and Work from its sidebar menu, the command pale
 
 ## Install
 
-Download the fork from its [latest release](https://github.com/Nitestack/t3code/releases/latest). It uses the same app name and data directory as upstream T3 Code, so install it **instead of** upstream T3 Code. Installed desktop apps update themselves from later fork releases.
+Download the fork from its [latest release](https://github.com/get-aix/t3code/releases/latest). It uses the same app name and data directory as upstream T3 Code, so install it **instead of** upstream T3 Code. Installed desktop apps update themselves from later fork releases.
 
 ### Windows (x64)
 
@@ -57,7 +57,7 @@ Download `T3-Code-<version>-x64.exe` and run it. The installer is not code-signe
 Install with the script. It is the only supported way: the app is not notarized by Apple, so Gatekeeper blocks a DMG or zip downloaded in a browser.
 
 ```sh
-curl -fsSL https://github.com/Nitestack/t3code/releases/latest/download/install-macos.sh | bash
+curl -fsSL https://github.com/get-aix/t3code/releases/latest/download/install-macos.sh | bash
 ```
 
 The script checks the download's SHA-256, installs **T3 Code** into `/Applications` (or `~/Applications`), and opens it.
@@ -77,7 +77,7 @@ On Debian or Ubuntu you can install `T3-Code-<version>-amd64.deb` instead, with
 On NixOS, or to manage T3 with Nix, install the fork's flake instead; Nix handles updates:
 
 ```sh
-nix profile add 'github:Nitestack/t3code/release'
+nix profile add 'github:get-aix/t3code/release'
 ```
 
 See the [fork Nix guide](./docs/user/install.md#t3-code-fork-nix) for NixOS and Home Manager.
@@ -88,13 +88,13 @@ Download `T3-Code-<version>.apk` and open it on your phone. It replaces the Play
 
 ### Set up aix
 
-T3 runs agents through [aix](https://github.com/Nitestack/aix) profiles on the **machine running the T3 server**, which is your computer when you use the desktop app (inside WSL if the Windows app runs its server there). Install aix there:
+T3 runs agents through [aix](https://github.com/get-aix/aix) profiles on the **machine running the T3 server**, which is your computer when you use the desktop app (inside WSL if the Windows app runs its server there). Install aix there:
 
 ```sh
-curl -fsSL https://github.com/Nitestack/aix/releases/latest/download/install.sh | sh
+curl -fsSL https://github.com/get-aix/aix/releases/latest/download/install.sh | sh
 ```
 
-Configure an API-key profile with aix's [profile guide](https://github.com/Nitestack/aix#config-format) and check it with `aix profiles`. ChatGPT sign-in profiles are not supported. The fork's desktop app and Nix package turn aix on for you; set `T3CODE_AIX=0` to turn it off. Restart T3 after installing aix so it finds the command.
+Configure an API-key profile with aix's [profile guide](https://github.com/get-aix/aix#config-format) and check it with `aix profiles`. ChatGPT sign-in profiles are not supported. The fork's desktop app and Nix package turn aix on for you; set `T3CODE_AIX=0` to turn it off. Restart T3 after installing aix so it finds the command.
 
 To host T3 for other devices without the desktop app, run `t3 serve`; it prints pairing details. See [remote access](./docs/user/remote-access.md). To work on the fork itself, see the [development runbook](./docs/operations/development.md#first-checkout).
 
@@ -111,7 +111,7 @@ For a LiteLLM API key with a reported budget, check its budget on the Usage page
 - Model metadata may be absent. Budget windows and reset times are shown only when the gateway reports them.
 - The fork's Android app is signed separately, replaces the Play Store app, and includes the Personal/Work switch. The official iOS and Android apps have no scope switch or extended model details and have not been verified against a fork server. There is no fork iOS app.
 - Desktop builds cover Windows x64, Apple Silicon Macs, and Linux x64. The Nix flake builds from source for `x86_64-linux`.
-- [Fork releases](https://github.com/Nitestack/t3code/releases) use upstream stable versions (for example, **T3 Code v0.1.10**). For Nix, `github:Nitestack/t3code/release` follows the latest published release after the first one; pin a release tag for a reproducible version. `main` includes unreleased fork changes. The [fork release runbook](./docs/operations/fork-release.md) explains the process. Upstream download links below install original T3 Code, not this fork.
+- [Fork releases](https://github.com/get-aix/t3code/releases) use upstream stable versions (for example, **T3 Code v0.1.10**). For Nix, `github:get-aix/t3code/release` follows the latest published release after the first one; pin a release tag for a reproducible version. `main` includes unreleased fork changes. The [fork release runbook](./docs/operations/fork-release.md) explains the process. Upstream download links below install original T3 Code, not this fork.
 
 For provider details, remote connections, troubleshooting, and mobile boundaries, see the [fork guide](./docs/user/nitestack-fork.md), [provider setup](./docs/user/install.md#providers), [remote access](./docs/user/remote-access.md), and [T3 Connect troubleshooting](./docs/user/t3-connect-troubleshooting.md).
 

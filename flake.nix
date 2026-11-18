@@ -19,7 +19,7 @@
         pname = "t3code-unwrapped";
         inherit version src;
         meta = old.meta // {
-          changelog = "https://github.com/Nitestack/t3code/commit/${self.rev or revision}";
+          changelog = "https://github.com/get-aix/t3code/commit/${self.rev or revision}";
         };
         # T3 Connect's public identifiers are compiled into the client and CLI.
         postPatch = (old.postPatch or "") + ''

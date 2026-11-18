@@ -49,7 +49,7 @@ permissions:
 
 jobs:
   test:
-    if: github.repository == 'Nitestack/t3code'
+    if: github.repository == 'get-aix/t3code'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -91,7 +91,7 @@ jobs:
         run: node --test scripts/upstream-stable-sync.test.mjs .github/scripts/fork-ci-checks.test.cjs .github/scripts/fork-release.test.cjs
 
   sync:
-    if: ${{ github.repository == 'Nitestack/t3code' && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+    if: ${{ github.repository == 'get-aix/t3code' && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
     needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -154,7 +154,7 @@ jobs:
         with:
           app-id: ${{ secrets.FORK_SYNC_APP_ID }}
           private-key: ${{ secrets.FORK_SYNC_APP_PRIVATE_KEY }}
-          owner: Nitestack
+          owner: get-aix
           repositories: t3code
           permission-administration: read
           permission-contents: write
@@ -194,7 +194,7 @@ jobs:
 
   merge_after_ci:
     if: >-
-      github.repository == 'Nitestack/t3code' &&
+      github.repository == 'get-aix/t3code' &&
       github.event_name == 'workflow_run' &&
       github.event.workflow_run.event == 'push' &&
       github.event.workflow_run.conclusion == 'success' &&
@@ -235,7 +235,7 @@ jobs:
         with:
           app-id: ${{ secrets.FORK_SYNC_APP_ID }}
           private-key: ${{ secrets.FORK_SYNC_APP_PRIVATE_KEY }}
-          owner: Nitestack
+          owner: get-aix
           repositories: t3code
           permission-administration: read
           permission-contents: write
@@ -268,7 +268,7 @@ jobs:
 
   release_after_main_ci:
     if: >-
-      github.repository == 'Nitestack/t3code' &&
+      github.repository == 'get-aix/t3code' &&
       github.event_name == 'workflow_run' &&
       github.event.workflow_run.event == 'push' &&
       github.event.workflow_run.conclusion == 'success' &&
@@ -310,7 +310,7 @@ jobs:
         with:
           app-id: ${{ secrets.FORK_SYNC_APP_ID }}
           private-key: ${{ secrets.FORK_SYNC_APP_PRIVATE_KEY }}
-          owner: Nitestack
+          owner: get-aix
           repositories: t3code
           permission-actions: write
 

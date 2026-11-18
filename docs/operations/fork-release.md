@@ -1,7 +1,7 @@
 # Fork release runbook
 
 This runbook covers stable upstream syncs and version-matched Windows, macOS, Linux AppImage, Android, and Nix builds for
-`Nitestack/t3code`. The fork has no store builds or iOS build. Users can install it from a signed
+`get-aix/t3code`. The fork has no store builds or iOS build. Users can install it from a signed
 Android APK, a Windows installer, the macOS install script, a Linux AppImage, source, or the latest-release or pinned Nix flake ref, as the
 [fork guide](../user/nitestack-fork.md) explains.
 
@@ -131,7 +131,7 @@ this implementation does not change repository settings:
   (`actor_type: "OrganizationAdmin"`). Do not add an integration, team, user, or other bypass
   actor. A ruleset alone does not satisfy the workflow's required-check preflight.
 - Add Actions secrets `FORK_SYNC_APP_ID` and `FORK_SYNC_APP_PRIVATE_KEY` for a GitHub App installed
-  only on `Nitestack/t3code`, with exactly `actions:write`, `administration:read`, `contents:write`,
+  only on `get-aix/t3code`, with exactly `actions:write`, `administration:read`, `contents:write`,
   `pull_requests:write`, and `workflows:write`. Administration read inspects branch protection and rulesets. Contents
   and pull-request write push the sync branch and open and merge its PR. Actions write lets the
   main-CI completion job dispatch the existing `Release` workflow. Workflows write lets the
@@ -216,7 +216,7 @@ here still needs evidence before release:
 
 ## First release
 
-The clone contains an imported upstream `v0.1.9` tag. It is not a Nitestack release, and it must not
+The clone contains an imported upstream `v0.1.9` tag. It is not a fork release, and it must not
 be moved, deleted, or force-pushed. Current `main` already includes upstream commit
 `f82162f0336c226ae1f2927f781a0fb660869a51`, which is beyond `v0.1.9`, so the first release must
 wait for and sync the first upstream stable tag that contains every upstream commit already in
@@ -228,14 +228,14 @@ step. After explicit authorization, dispatch the stable workflow for the reviewe
 `vX.Y.Z` titled `T3 Code vX.Y.Z` from those same tested installer bytes. This first successful
 publication also creates the `release` branch. Later publications move it only when the new release
 is a fast-forward; publishing an older release leaves it unchanged. The branch never force-moves.
-Use `github:Nitestack/t3code/release` to follow the latest published Nix build, or pin a release tag
+Use `github:get-aix/t3code/release` to follow the latest published Nix build, or pin a release tag
 for reproducibility. `main` includes unreleased fork changes. The notes identify the fork commit,
 source branch, upstream base, and build-only run, and the Nix command resolves the fork repository.
 
 Publishing reserves the tag before it creates the release. If a publish run fails between the
 two, the tag remains without a release and blocks that version for every source commit. Confirm on
 the Releases page that `vX.Y.Z` has no release, delete only that tag with
-`gh api -X DELETE repos/Nitestack/t3code/git/refs/tags/vX.Y.Z`, then rerun the publish dispatch.
+`gh api -X DELETE repos/get-aix/t3code/git/refs/tags/vX.Y.Z`, then rerun the publish dispatch.
 
 The `Nitestack Android APK` workflow remains available for a standalone signed build artifact. Its
 legacy `t3-android-vMAJOR.MINOR.PATCH` tag route remains compatible; use the `Release` workflow for

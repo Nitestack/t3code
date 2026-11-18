@@ -11,9 +11,9 @@ different.
 
 ## Verified starting point
 
-GitHub identifies `Nitestack/t3code` as a public fork of `pingdotgg/t3code`, with `main` as its
+GitHub identifies `get-aix/t3code` as a public fork of `pingdotgg/t3code`, with `main` as its
 default branch. The checkout's `origin` points to the fork and `upstream` points to the original
-repository. `gh` uses `Nitestack/t3code` as its local default. The fork history includes upstream
+repository. `gh` uses `get-aix/t3code` as its local default. The fork history includes upstream
 commits beyond the imported `v0.1.9` stable tag, so the sync automation waits for a stable tag that
 contains them before creating the first release.
 
@@ -87,7 +87,7 @@ authorization, a stable dispatch can publish the upstream-matched `vX.Y.Z` tag a
 release. The tag points to the fork integration merge commit on `main`: its tree includes fork changes
 and upstream through the matching stable tag. The upstream tag's peeled commit is recorded only as
 the stable base. Notes and artifact metadata show both full SHAs, and the Nix command pins to the fork
-release tag with `nix profile add 'github:Nitestack/t3code/<tag>'`.
+release tag with `nix profile add 'github:get-aix/t3code/<tag>'`.
 The old imported tag in this clone is not a fork release: the workflow refuses to move it or replace
 an existing release.
 
