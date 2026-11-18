@@ -601,7 +601,12 @@ test("existing release assets must have matching source metadata and file checks
   try {
     const windowsBytes = Buffer.from("windows installer bytes");
     const androidBytes = Buffer.from("signed apk bytes");
-    for (const installer of [macZip, "T3-Code-0.1.9-arm64.dmg", "T3-Code-x86_64.AppImage"]) {
+    for (const installer of [
+      macZip,
+      "T3-Code-0.1.9-arm64.dmg",
+      "T3-Code-x86_64.AppImage",
+      "T3-Code-0.1.9-amd64.deb",
+    ]) {
       fs.writeFileSync(path.join(directory, installer), installer);
       fs.writeFileSync(
         path.join(directory, `${installer}.sha256`),
@@ -637,7 +642,7 @@ test("existing release assets must have matching source metadata and file checks
       );
     writeManifest("latest.yml", [windows]);
     writeManifest("latest-mac.yml", [macZip, "T3-Code-0.1.9-arm64.dmg"]);
-    writeManifest("latest-linux.yml", ["T3-Code-x86_64.AppImage"]);
+    writeManifest("latest-linux.yml", ["T3-Code-x86_64.AppImage", "T3-Code-0.1.9-amd64.deb"]);
     fs.writeFileSync(path.join(directory, android), androidBytes);
     fs.writeFileSync(
       path.join(directory, `${windows}.sha256`),

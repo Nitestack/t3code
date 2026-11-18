@@ -710,8 +710,9 @@ jobs:
           for file in "$mac_base.dmg" "$mac_base.dmg.blockmap" "$mac_base.zip" "$mac_base.zip.blockmap" latest-mac.yml; do
             cp "incoming/mac/$file" release-assets/
           done
-          cp incoming/linux/T3-Code-x86_64.AppImage incoming/linux/latest-linux.yml release-assets/
-          (cd release-assets && for installer in "$mac_base.dmg" "$mac_base.zip" T3-Code-x86_64.AppImage; do
+          linux_deb="T3-Code-${EXPECTED_VERSION}-amd64.deb"
+          cp incoming/linux/T3-Code-x86_64.AppImage "incoming/linux/$linux_deb" incoming/linux/latest-linux.yml release-assets/
+          (cd release-assets && for installer in "$mac_base.dmg" "$mac_base.zip" T3-Code-x86_64.AppImage "$linux_deb"; do
             sha256sum "$installer" > "$installer.sha256"
           done)
           cp .github/scripts/install-macos.sh release-assets/install-macos.sh
