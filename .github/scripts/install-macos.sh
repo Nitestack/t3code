@@ -1,11 +1,11 @@
 #!/bin/bash
-# Installs or updates T3 Code on Apple Silicon from the Nitestack/t3code releases.
+# Installs or updates T3 Code on Apple Silicon from the get-aix/t3code releases.
 # The app is not notarized. curl, unlike a browser, sets no quarantine flag, so
 # Gatekeeper never checks the download and the app opens without a prompt.
 # Usage: curl -fsSL <release>/install-macos.sh | bash   (T3CODE_VERSION=1.2.3 pins a version)
 set -euo pipefail
 
-repo="Nitestack/t3code"
+repo="get-aix/t3code"
 
 fail() {
   echo "error: $*" >&2

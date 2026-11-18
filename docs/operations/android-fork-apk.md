@@ -36,7 +36,7 @@ keytool -genkeypair -v \
 base64 < t3code-android-upload.jks | tr -d '\r\n'
 ```
 
-Add these repository Actions secrets in the Nitestack fork:
+Add these repository Actions secrets in the fork:
 
 - `ANDROID_KEYSTORE_BASE64`: the single-line Base64 output
 - `ANDROID_KEYSTORE_PASSWORD`: keystore password

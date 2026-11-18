@@ -1,4 +1,4 @@
-const FORK_REPOSITORY = "Nitestack/t3code";
+const FORK_REPOSITORY = "get-aix/t3code";
 
 const REQUIRED_FORK_CHECKS = Object.freeze([
   "Fork Server",

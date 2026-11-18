@@ -3,7 +3,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { createReadStream } = require("node:fs");
 
-const RELEASE_REPOSITORY = "Nitestack/t3code";
+const RELEASE_REPOSITORY = "get-aix/t3code";
 const STABLE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const COMMIT_SHA = /^[0-9a-f]{40}$/i;
 // A fork fix on upstream X.Y.Z is X.Y.(Z+1)-aix.N: newer than its base, older than upstream's next.
@@ -277,13 +277,13 @@ function buildForkBuildInfo({
     "Build the matching Nix package from this source with:",
     "",
     "```sh",
-    `nix build 'github:Nitestack/t3code/${sha}'`,
+    `nix build 'github:get-aix/t3code/${sha}'`,
     "```",
     "",
     "After an authorized release publishes its matching tag, install it with:",
     "",
     "```sh",
-    `nix profile add 'github:Nitestack/t3code/v${version}'`,
+    `nix profile add 'github:get-aix/t3code/v${version}'`,
     "```",
     "",
   ].join("\n");
@@ -333,13 +333,13 @@ function buildForkReleaseNotes({
     "On macOS (Apple Silicon), install only with this command. The app is not notarized, so a DMG or zip downloaded in a browser is blocked by Gatekeeper:",
     "",
     "```sh",
-    "curl -fsSL https://github.com/Nitestack/t3code/releases/latest/download/install-macos.sh | bash",
+    "curl -fsSL https://github.com/get-aix/t3code/releases/latest/download/install-macos.sh | bash",
     "```",
     "",
     "Install the matching Nix build from this release tag:",
     "",
     "```sh",
-    `nix profile add 'github:Nitestack/t3code/${releaseTag}'`,
+    `nix profile add 'github:get-aix/t3code/${releaseTag}'`,
     "```",
     "",
   ].join("\n");
@@ -580,7 +580,7 @@ async function verifyForkBuildArtifactAssets({
     (sourceBranch !== "" && !buildInfo.includes(`Source branch: ${markdownCode(sourceBranch)}`)) ||
     (buildRunId !== "" && !buildInfo.includes(`Actions build run: ${markdownCode(buildRunId)}`)) ||
     (buildRunAttempt !== "" && !buildInfo.includes(`attempt: ${markdownCode(buildRunAttempt)}`)) ||
-    !buildInfo.includes(`nix build 'github:Nitestack/t3code/${sha}'`)
+    !buildInfo.includes(`nix build 'github:get-aix/t3code/${sha}'`)
   ) {
     throw new Error("Build information does not match its source identity.");
   }

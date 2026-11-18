@@ -30,7 +30,7 @@ const sha = "466b0b0968b7b7ae2016d742a52f3407c629564a";
 const upstreamBase = "24e77473ecf41bc1f7142529c7911c1c1aae1d76";
 const manifestVersions = { server: "0.1.9", desktop: "0.1.9", web: "0.1.9", contracts: "0.1.9" };
 const dispatch = {
-  repository: "Nitestack/t3code",
+  repository: "get-aix/t3code",
   eventName: "workflow_dispatch",
   ref: "refs/heads/main",
   channel: "stable",
@@ -144,7 +144,7 @@ test("release notes and summaries preserve backticks and dollar signs", () => {
     /Upstream stable base: `v0\.1\.9` = `24e77473ecf41bc1f7142529c7911c1c1aae1d76`/,
   );
   assert.match(releaseNotes, /include fork changes plus upstream through v0\.1\.9/);
-  assert.match(releaseNotes, /nix profile add 'github:Nitestack\/t3code\/v0\.1\.9'/);
+  assert.match(releaseNotes, /nix profile add 'github:get-aix\/t3code\/v0\.1\.9'/);
   assert.doesNotThrow(() =>
     assertExistingForkReleaseMetadata({
       release,
@@ -287,7 +287,7 @@ test("BUILD-INFO generation preserves literal backticks and dollar signs", () =>
   );
   assert.match(
     buildInfo,
-    /nix build 'github:Nitestack\/t3code\/466b0b0968b7b7ae2016d742a52f3407c629564a'/,
+    /nix build 'github:get-aix\/t3code\/466b0b0968b7b7ae2016d742a52f3407c629564a'/,
   );
   assert.match(
     buildForkBuildInfo({
@@ -307,7 +307,7 @@ test("BUILD-INFO generation preserves literal backticks and dollar signs", () =>
 test("fork release runs reject upstream repositories, unsupported dispatches, and non-main sources", () => {
   assert.throws(
     () => resolveForkRelease({ ...dispatch, repository: "pingdotgg/t3code" }),
-    /only available from Nitestack/,
+    /only available from get-aix/,
   );
   assert.throws(
     () => resolveForkRelease({ ...dispatch, channel: "preview" }),
@@ -380,8 +380,8 @@ test("publication accepts only a successful matching build-only run and artifact
     conclusion: "success",
     run_attempt: 1,
     head_branch: "main",
-    repository: { full_name: "Nitestack/t3code" },
-    head_repository: { full_name: "Nitestack/t3code" },
+    repository: { full_name: "get-aix/t3code" },
+    head_repository: { full_name: "get-aix/t3code" },
     display_title: `Fork build-only stable 0.1.9 source ${sha}`,
   };
   const jobs = [
@@ -831,6 +831,6 @@ test("fork releases select GitHub-hosted runners after checking the repository",
   assert.equal(resolveForkRelease(dispatch).runner, "ubuntu-latest");
   assert.throws(
     () => resolveForkRelease({ ...dispatch, repository: "pingdotgg/t3code" }),
-    /only available from Nitestack/,
+    /only available from get-aix/,
   );
 });

@@ -141,25 +141,25 @@ To follow the latest published release, use the moving `release` branch, which a
 first published release:
 
 ```bash
-nix profile add 'github:Nitestack/t3code/release'
+nix profile add 'github:get-aix/t3code/release'
 ```
 
-For NixOS or Home Manager, set the flake input to `github:Nitestack/t3code/release` and run
+For NixOS or Home Manager, set the flake input to `github:get-aix/t3code/release` and run
 `nix flake update t3code` before rebuilding to pick up a newer release. To pin a reproducible
 version, use a release tag:
 
 ```nix
-inputs.t3code.url = "github:Nitestack/t3code/<release-tag>";
+inputs.t3code.url = "github:get-aix/t3code/<release-tag>";
 ```
 
 The `main` branch includes unreleased fork changes. A full commit SHA can also select a reviewed
 unreleased build. The profile equivalent for a pinned release is:
 
 ```bash
-nix profile add 'github:Nitestack/t3code/<release-tag>'
+nix profile add 'github:get-aix/t3code/<release-tag>'
 ```
 
-Use a tag from the fork's [Releases page](https://github.com/Nitestack/t3code/releases). Older
+Use a tag from the fork's [Releases page](https://github.com/get-aix/t3code/releases). Older
 version tags in the repository are upstream's own and do not contain this build.
 
 For NixOS, add `inputs.t3code.packages.x86_64-linux.default` to
@@ -182,7 +182,7 @@ On an Apple Silicon Mac, install with the script; it is the only supported way, 
 not notarized and Gatekeeper blocks a DMG or zip downloaded in a browser:
 
 ```sh
-curl -fsSL https://github.com/Nitestack/t3code/releases/latest/download/install-macos.sh | bash
+curl -fsSL https://github.com/get-aix/t3code/releases/latest/download/install-macos.sh | bash
 ```
 
 The script checks the download's SHA-256, installs **T3 Code** in `/Applications` (or

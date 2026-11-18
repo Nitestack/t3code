@@ -16,7 +16,7 @@ const workflowRun = {
   event: "push",
   status: "completed",
   conclusion: "success",
-  head_repository: { full_name: "Nitestack/t3code" },
+  head_repository: { full_name: "get-aix/t3code" },
   head_branch: expectedBranch,
   head_sha: expectedSha,
 };
