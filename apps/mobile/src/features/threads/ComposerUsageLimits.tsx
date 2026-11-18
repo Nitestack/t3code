@@ -9,6 +9,10 @@ import type {
 import { Pressable, ScrollView, View } from "react-native";
 import { useState } from "react";
 import { formatUsd } from "@t3tools/shared/usageFormat";
+import {
+  composerWorkUsage,
+  reportAccountLabel,
+} from "@t3tools/client-runtime/state/usage-grouping";
 import { paceRemainingPercent } from "@t3tools/shared/usageLimits";
 
 import { SymbolView } from "../../components/ui/AppSymbol";
@@ -38,24 +42,9 @@ export function ComposerUsageLimits({
     selectedScope,
   );
   const now = Date.parse(report.createdAt);
-  const workAccount =
-    accounts.find(
-      (account) => account.instanceId === providerInstanceId && account.limits.profileName,
-    ) ?? accounts.find((account) => account.limits.profileName);
-  const project = workAccount?.limits.aixProject;
-  const projectAccounts = project
-    ? accounts.filter((account) => account.limits.aixProject?.id === project.id)
-    : workAccount
-      ? [workAccount]
-      : [];
-  const workGroupName = project
-    ? ([...projectAccounts]
-        .map((account) => account.displayName?.trim() || account.label)
-        .sort((left, right) => left.localeCompare(right))[0] ?? "Work")
-    : workAccount?.limits.aixProject === undefined
-      ? workAccount?.displayName?.trim() || workAccount?.label || "Work"
-      : "No project";
-  const workReset = workAccount?.limits.windows[0]?.resetsAt;
+  const work = composerWorkUsage(accounts, providerInstanceId);
+  const workGroupName = work?.name ?? "Work";
+  const workReset = work?.resetsAt;
   const close = (
     <Pressable
       accessibilityLabel="Dismiss usage limits"
@@ -173,31 +162,9 @@ function WorkUsageLimitsRows({
   readonly providerInstanceId?: ProviderInstanceId;
   readonly now: number;
 }) {
-  const selected =
-    accounts.find(
-      (account) => account.instanceId === providerInstanceId && account.limits.profileName,
-    ) ?? accounts.find((account) => account.limits.profileName);
-  if (!selected) return null;
-  const project = selected.limits.aixProject;
-  const projectAccounts = project
-    ? accounts.filter((account) => account.limits.aixProject?.id === project.id)
-    : [selected];
-  const ordered = [
-    selected,
-    ...projectAccounts
-      .filter((account) => account.id !== selected.id)
-      .sort(
-        (left, right) =>
-          (right.limits.windows[0]?.usedPercent ?? 0) - (left.limits.windows[0]?.usedPercent ?? 0),
-      ),
-  ];
-  const groupName = project
-    ? ([...ordered]
-        .map((account) => account.displayName?.trim() || account.label)
-        .sort((left, right) => left.localeCompare(right))[0] ?? "Work")
-    : selected.limits.aixProject === undefined
-      ? selected.displayName?.trim() || selected.label
-      : "No project";
+  const work = composerWorkUsage(accounts, providerInstanceId);
+  if (!work) return null;
+  const { ordered, name: groupName, projectAmounts } = work;
   return (
     <View className="px-4 pb-3">
       {ordered.map((account, index) => {
@@ -213,9 +180,9 @@ function WorkUsageLimitsRows({
                 numberOfLines={1}
                 className={`${index === 0 ? "text-sm font-t3-medium text-foreground" : "text-xs text-foreground-muted"}`}
               >
-                {account.displayName?.trim() || account.label}
+                {reportAccountLabel(account)}
               </Text>
-              {index === 0 && account.instanceId === providerInstanceId ? (
+              {index === 0 && work.isThread ? (
                 <Text className="text-xs text-foreground-muted">· this thread</Text>
               ) : null}
             </View>
@@ -235,16 +202,16 @@ function WorkUsageLimitsRows({
           </View>
         );
       })}
-      {project?.amounts ? (
+      {projectAmounts ? (
         <View className="flex-row flex-wrap items-center justify-between gap-x-3 border-t border-border-subtle py-2">
-          <Text className="text-xs text-foreground-muted">{groupName} total (team)</Text>
+          <Text className="text-xs text-foreground-muted">{groupName} project total</Text>
           <Text className="text-sm tabular-nums text-foreground">
-            {formatUsd(project.amounts.spent)}
-            <Text className="text-foreground-muted"> / {formatUsd(project.amounts.total)}</Text>
+            {formatUsd(projectAmounts.spent)}
+            <Text className="text-foreground-muted"> / {formatUsd(projectAmounts.total)}</Text>
           </Text>
           <UsageAmountBar
             usedPercent={
-              project.amounts.total > 0 ? (project.amounts.spent / project.amounts.total) * 100 : 0
+              projectAmounts.total > 0 ? (projectAmounts.spent / projectAmounts.total) * 100 : 0
             }
           />
         </View>

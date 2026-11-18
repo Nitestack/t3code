@@ -8,6 +8,7 @@ import type { TimestampFormat } from "@t3tools/contracts/settings";
 import { limitsNotice, resolveUsageLimitAccountsScope } from "@t3tools/shared/usageLimits";
 import { paceRemainingPercent } from "@t3tools/shared/usageLimits";
 import { formatUsd } from "@t3tools/shared/usageFormat";
+import { composerWorkUsage } from "@t3tools/client-runtime/state/usage-grouping";
 import { GaugeIcon } from "lucide-react";
 import { useState } from "react";
 
@@ -66,24 +67,9 @@ export function usageLimitsBannerItem(
 ): ComposerBannerStackItem {
   // The body owns the scope toggle, so a split report gets a summary that holds for both scopes.
   const { accounts, groups } = resolveUsageLimitAccountsScope(report.accounts, null, selectedScope);
-  const threadAccount = accounts.find((account) => account.instanceId === providerInstanceId);
-  const projectAccounts = threadAccount?.limits.aixProject
-    ? accounts
-        .filter((account) => account.limits.aixProject?.id === threadAccount.limits.aixProject?.id)
-        .sort((left, right) => accountLabel(left).localeCompare(accountLabel(right)))
-    : threadAccount
-      ? [threadAccount]
-      : [];
-  const groupName = threadAccount?.limits.aixProject
-    ? projectAccounts[0]
-      ? accountLabel(projectAccounts[0])
-      : "Work"
-    : threadAccount?.limits.aixProject === undefined
-      ? threadAccount
-        ? accountLabel(threadAccount)
-        : "Work"
-      : "No project";
-  const reset = threadAccount?.limits.windows[0]?.resetsAt;
+  const work = composerWorkUsage(accounts, providerInstanceId);
+  const groupName = work?.name ?? "Work";
+  const reset = work?.resetsAt;
   const [first] = accounts;
   const single = accounts.length === 1 && first ? first : null;
   const summary =
@@ -242,25 +228,9 @@ function WorkUsageLimitsRows({
   readonly providerInstanceId: ProviderInstanceId | null;
   readonly now: number;
 }) {
-  const selected =
-    accounts.find((account) => account.instanceId === providerInstanceId) ?? accounts[0];
-  if (!selected) return null;
-  const project = selected.limits.aixProject;
-  const projectAccounts = project
-    ? accounts.filter((account) => account.limits.aixProject?.id === project.id)
-    : [selected];
-  const sortedOthers = projectAccounts
-    .filter((account) => account.id !== selected.id)
-    .sort(
-      (left, right) =>
-        (right.limits.windows[0]?.usedPercent ?? 0) - (left.limits.windows[0]?.usedPercent ?? 0),
-    );
-  const ordered = [selected, ...sortedOthers];
-  const groupName = project
-    ? ([...ordered].map(accountLabel).sort((left, right) => left.localeCompare(right))[0] ?? "Work")
-    : selected.limits.aixProject === undefined
-      ? accountLabel(selected)
-      : "No project";
+  const work = composerWorkUsage(accounts, providerInstanceId);
+  if (!work) return null;
+  const { ordered, name: groupName, projectAmounts } = work;
   return (
     <div className="flex flex-col gap-0.5">
       {ordered.map((account, index) => {
@@ -275,7 +245,7 @@ function WorkUsageLimitsRows({
               className={`min-w-0 truncate ${index === 0 ? "text-sm font-medium text-foreground" : "text-xs text-muted-foreground"}`}
             >
               {accountLabel(account)}
-              {index === 0 && account.instanceId === providerInstanceId ? (
+              {index === 0 && work.isThread ? (
                 <span className="text-muted-foreground"> · this thread</span>
               ) : null}
             </span>
@@ -295,16 +265,16 @@ function WorkUsageLimitsRows({
           </div>
         );
       })}
-      {project?.amounts ? (
+      {projectAmounts ? (
         <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 border-t py-2">
-          <span className="text-xs text-muted-foreground">{groupName} total (team)</span>
+          <span className="text-xs text-muted-foreground">{groupName} project total</span>
           <span className="text-sm tabular-nums">
-            <b>{formatUsd(project.amounts.spent)}</b>
-            <span className="text-muted-foreground"> / {formatUsd(project.amounts.total)}</span>
+            <b>{formatUsd(projectAmounts.spent)}</b>
+            <span className="text-muted-foreground"> / {formatUsd(projectAmounts.total)}</span>
           </span>
           <UsageAmountBar
             usedPercent={
-              project.amounts.total > 0 ? (project.amounts.spent / project.amounts.total) * 100 : 0
+              projectAmounts.total > 0 ? (projectAmounts.spent / projectAmounts.total) * 100 : 0
             }
           />
         </div>

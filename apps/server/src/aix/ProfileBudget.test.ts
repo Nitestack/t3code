@@ -245,6 +245,28 @@ it.each([
   else expect(limits.aixProject).toBeUndefined();
 });
 
+it("keeps an AI Hub Gateway budget with an empty project, an unknown layer and no period start", () => {
+  const limits = ProfileBudget.aiHubKeyInfoUsageLimits({
+    profileName: "ac",
+    keyInfo: Option.getOrThrow(
+      ProfileBudget.decodeAiHubKeyInfo({
+        project_id: "",
+        layers: [
+          { scope: "key", budget_usd: "100", spent_usd: "25", period_start: null },
+          { scope: "region", budget_usd: null, spent_usd: "3" },
+        ],
+      }),
+    ),
+    checkedAt: CHECKED_AT,
+  });
+  expect(limits.windows[0]).toMatchObject({
+    usedPercent: 25,
+    amounts: { currency: "USD", spent: 25, total: 100 },
+  });
+  expect(limits.windows[0]?.resetsAt).toBeUndefined();
+  expect(limits.aixProject).toBeUndefined();
+});
+
 it("reports an uncapped AI Hub Gateway key as unsupported without using the tenant layer", () => {
   const limits = ProfileBudget.aiHubKeyInfoUsageLimits({
     profileName: "ac",

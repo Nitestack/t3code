@@ -1,4 +1,4 @@
-import { groupWorkUsage } from "@t3tools/client-runtime/state/usage-grouping";
+import { groupWorkUsage, type WorkUsageRow } from "@t3tools/client-runtime/state/usage-grouping";
 import {
   collectLimitAccounts,
   type LimitPresentations,
@@ -16,7 +16,6 @@ export function UsageLimitsWork({
 }: {
   presentations: LimitPresentations;
   now: number;
-  divider: boolean;
 }) {
   const usage = groupWorkUsage(
     collectLimitAccounts(presentations, { includeUnsupportedAix: true }),
@@ -119,14 +118,7 @@ export function UsageLimitsWork({
   );
 }
 
-function KeyRow({
-  row,
-  now,
-  divider,
-}: {
-  row: ReturnType<typeof groupWorkUsage>["groups"][number]["rows"][number];
-  now: number;
-}) {
+function KeyRow({ row, now, divider }: { row: WorkUsageRow; now: number; divider: boolean }) {
   const window = row.window;
   const tick = window ? paceRemainingPercent(window, now) : null;
   const tone =

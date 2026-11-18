@@ -1,11 +1,13 @@
-import { groupWorkUsage } from "@t3tools/client-runtime/state/usage-grouping";
+import { groupWorkUsage, type WorkUsageRow } from "@t3tools/client-runtime/state/usage-grouping";
 import {
   collectLimitAccounts,
+  collectLimitNotices,
   type LimitPresentations,
   paceRemainingPercent,
 } from "@t3tools/shared/usageLimits";
 import { formatUsd } from "@t3tools/shared/usageFormat";
 import { cn } from "~/lib/utils";
+import { LimitNotices } from "./UsageLimitsPooled";
 
 const chartColors = ["#7c8cf8", "#4fb7a5", "#ecad58", "#cb79b3"];
 
@@ -15,7 +17,6 @@ export function UsageLimitsWork({
 }: {
   presentations: LimitPresentations;
   now: number;
-  divider: boolean;
 }) {
   const usage = groupWorkUsage(
     collectLimitAccounts(presentations, { includeUnsupportedAix: true }),
@@ -25,11 +26,17 @@ export function UsageLimitsWork({
   const reset = rows
     .flatMap((row) => (row.window?.resetsAt ? [row.window.resetsAt] : []))
     .sort((left, right) => Date.parse(left) - Date.parse(right))[0];
+  const notices = collectLimitNotices(presentations);
   if (rows.length === 0) {
     return (
-      <p className="text-sm text-muted-foreground">
-        No Work profile limits are available for the selected environments.
-      </p>
+      <div className="flex flex-col gap-4">
+        {notices.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No Work profile limits are available for the selected environments.
+          </p>
+        ) : null}
+        <LimitNotices notices={notices} />
+      </div>
     );
   }
   const month = new Intl.DateTimeFormat(undefined, { month: "long" }).format(new Date(now));
@@ -123,18 +130,12 @@ export function UsageLimitsWork({
           </section>
         ))
       )}
+      <LimitNotices notices={notices} />
     </div>
   );
 }
 
-function KeyRow({
-  row,
-  now,
-  divider,
-}: {
-  row: ReturnType<typeof groupWorkUsage>["groups"][number]["rows"][number];
-  now: number;
-}) {
+function KeyRow({ row, now, divider }: { row: WorkUsageRow; now: number; divider: boolean }) {
   const window = row.window;
   const tick = window ? paceRemainingPercent(window, now) : null;
   const tone =

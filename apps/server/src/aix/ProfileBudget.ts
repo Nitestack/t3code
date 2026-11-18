@@ -37,15 +37,14 @@ export type KeyInfo = typeof KeyInfo.Type;
 export const decodeKeyInfo = Schema.decodeUnknownOption(KeyInfo);
 
 const AiHubLayer = Schema.Struct({
-  scope: Schema.Literals(["key", "personal", "project", "tenant"]),
+  // Unknown scopes are ignored, so a new gateway layer does not hide the budget.
+  scope: Schema.String,
   budget_usd: Schema.NullOr(Amount),
   spent_usd: Amount,
-  remaining_usd: Schema.NullOr(Amount),
-  period_start: Schema.String,
+  period_start: Schema.optional(Schema.NullOr(Schema.String)),
 });
 const AiHubKeyInfo = Schema.Struct({
-  kind: Schema.Literals(["personal", "project"]),
-  project_id: Schema.NullOr(Schema.String),
+  project_id: Schema.optional(Schema.NullOr(Schema.String)),
   layers: Schema.Array(AiHubLayer),
 });
 export type AiHubKeyInfo = typeof AiHubKeyInfo.Type;
@@ -174,21 +173,21 @@ export function aiHubKeyInfoUsageLimits(input: {
       : personalLayer?.budget_usd !== null && personalLayer?.budget_usd !== undefined
         ? personalLayer
         : undefined;
-  const aixProject =
-    input.keyInfo.project_id == null
-      ? undefined
-      : {
-          id: input.keyInfo.project_id,
-          ...(projectLayer?.budget_usd == null
-            ? {}
-            : {
-                amounts: {
-                  currency: "USD" as const,
-                  spent: projectLayer.spent_usd,
-                  total: projectLayer.budget_usd,
-                },
-              }),
-        };
+  const projectId = input.keyInfo.project_id?.trim();
+  const aixProject = !projectId
+    ? undefined
+    : {
+        id: projectId,
+        ...(projectLayer?.budget_usd == null
+          ? {}
+          : {
+              amounts: {
+                currency: "USD" as const,
+                spent: projectLayer.spent_usd,
+                total: projectLayer.budget_usd,
+              },
+            }),
+      };
   if (!selectedLayer || selectedLayer.budget_usd === null) {
     return {
       ...makeUnavailableUsageLimits({
@@ -287,34 +286,35 @@ const readJson = Effect.fn("AixProfileBudget.readJson")(function* (
         ? Effect.fail<BudgetFailure>({ _tag: "status", status: response.status })
         : response.json.pipe(Effect.mapError((): BudgetFailure => ({ _tag: "decode" }))),
     ),
-    Effect.timeoutOrElse({
-      duration: REQUEST_TIMEOUT,
-      orElse: () => Effect.fail<BudgetFailure>({ _tag: "timeout" }),
-    }),
   );
   return body;
 });
 
-const readKeyInfo = Effect.fn("AixProfileBudget.readKeyInfo")(function* (
-  environment: AixDiscovery.ResolvedEnvironment,
-) {
-  const versioned = yield* readJson(environment, true).pipe(Effect.result);
-  if (Result.isSuccess(versioned)) {
-    const decoded = decodeAiHubKeyInfo(versioned.success);
-    if (Option.isSome(decoded)) return { kind: "aiHub" as const, keyInfo: decoded.value };
-  } else if (
-    versioned.failure._tag !== "decode" &&
-    !(versioned.failure._tag === "status" && versioned.failure.status === 404)
-  ) {
-    return yield* Effect.fail(versioned.failure);
-  }
+const readKeyInfo = Effect.fn("AixProfileBudget.readKeyInfo")(
+  function* (environment: AixDiscovery.ResolvedEnvironment) {
+    const versioned = yield* readJson(environment, true).pipe(Effect.result);
+    if (Result.isSuccess(versioned)) {
+      const decoded = decodeAiHubKeyInfo(versioned.success);
+      if (Option.isSome(decoded)) return { kind: "aiHub" as const, keyInfo: decoded.value };
+    } else if (
+      versioned.failure._tag !== "decode" &&
+      !(versioned.failure._tag === "status" && versioned.failure.status === 404)
+    ) {
+      return yield* Effect.fail(versioned.failure);
+    }
 
-  const legacy = yield* readJson(environment, false);
-  return yield* Option.match(decodeKeyInfo(legacy), {
-    onNone: () => Effect.fail<BudgetFailure>({ _tag: "decode" }),
-    onSome: (keyInfo) => Effect.succeed({ kind: "legacy" as const, keyInfo }),
-  });
-});
+    const legacy = yield* readJson(environment, false);
+    return yield* Option.match(decodeKeyInfo(legacy), {
+      onNone: () => Effect.fail<BudgetFailure>({ _tag: "decode" }),
+      onSome: (keyInfo) => Effect.succeed({ kind: "legacy" as const, keyInfo }),
+    });
+  },
+  // One budget for both requests, so the legacy fallback cannot double the wait.
+  Effect.timeoutOrElse({
+    duration: REQUEST_TIMEOUT,
+    orElse: () => Effect.fail<BudgetFailure>({ _tag: "timeout" }),
+  }),
+);
 
 /** Seam for tests: production resolves the profile through `aix env`. */
 export interface AixBudgetSource {

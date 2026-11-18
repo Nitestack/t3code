@@ -14,6 +14,7 @@ import {
   filterLimitPresentationsByGroup,
   filterUsageBucketsByScope,
   filterUsageSummaryByScope,
+  composerWorkUsage,
   groupWorkUsage,
   groupLimitAccounts,
   resolveUsageLimitGroup,
@@ -360,5 +361,55 @@ describe("usage limit grouping", () => {
     expect(resolveUsageLimitGroup(null, both, "work")).toBe("work");
     expect(resolveUsageLimitGroup("personal", workOnly, "personal")).toBe("work");
     expect(resolveUsageLimitGroup(null, new Set(), "work")).toBe("personal");
+  });
+});
+
+describe("composerWorkUsage", () => {
+  const reportAccount = (input: {
+    readonly profile: string;
+    readonly instanceId: string;
+    readonly project: string;
+    readonly spent: number;
+  }) => ({
+    id: `aix-profile:${input.profile}`,
+    driver: ProviderDriverKind.make("claudeAgent"),
+    label: input.profile,
+    instanceId: ProviderInstanceId.make(input.instanceId),
+    limits: {
+      checkedAt,
+      profileName: input.profile,
+      aixProject: {
+        id: input.project,
+        amounts: { currency: "USD" as const, spent: 500, total: 900 },
+      },
+      windows: [
+        {
+          id: `aix-budget:${input.profile}`,
+          kind: "other" as const,
+          label: input.profile,
+          usedPercent: input.spent,
+          amounts: { currency: "USD" as const, spent: input.spent, total: 100 },
+        },
+      ],
+    },
+  });
+
+  it("finds the thread's profile through a sibling driver instance and names the project after its top spender", () => {
+    const work = composerWorkUsage(
+      [
+        reportAccount({ profile: "other", instanceId: "aix-codex-other", project: "q", spent: 90 }),
+        reportAccount({
+          profile: "alpha",
+          instanceId: "aix-claudeAgent-alpha",
+          project: "p",
+          spent: 10,
+        }),
+        reportAccount({ profile: "beta", instanceId: "aix-codex-beta", project: "p", spent: 60 }),
+      ],
+      "aix-codex-alpha",
+    );
+    expect(work?.isThread).toBe(true);
+    expect(work?.ordered.map((account) => account.label)).toEqual(["alpha", "beta"]);
+    expect(work?.name).toBe("beta");
   });
 });

@@ -3,6 +3,7 @@ import {
   type ServerProviderUsageAmounts,
   type ServerProvider,
   type UsageBucket,
+  type UsageLimitsReport,
   type UsageSummary,
 } from "@t3tools/contracts";
 import {
@@ -122,6 +123,57 @@ export function groupWorkUsage(accounts: readonly LimitAccount[], now: number): 
     ),
     flat,
     spent: result.reduce((sum, group) => sum + group.spent, 0),
+  };
+}
+
+type ReportAccount = UsageLimitsReport["accounts"][number];
+
+export const reportAccountLabel = (account: ReportAccount) =>
+  account.displayName?.trim() || account.limits.profileName || account.label;
+
+const AIX_INSTANCE_PROFILE = /^aix-[^-]+-(.+)$/u;
+
+/** The thread's Work key first, then its project siblings, named the way the usage page names them. */
+export function composerWorkUsage<A extends ReportAccount>(
+  accounts: readonly A[],
+  providerInstanceId: string | null | undefined,
+) {
+  const workAccounts = accounts.filter((account) => account.limits.profileName);
+  // A profile reports through one of its driver instances, not necessarily the thread's.
+  const threadProfile = providerInstanceId
+    ? AIX_INSTANCE_PROFILE.exec(providerInstanceId)?.[1]
+    : undefined;
+  const threadAccount =
+    workAccounts.find((account) => account.instanceId === providerInstanceId) ??
+    workAccounts.find((account) => account.limits.profileName === threadProfile);
+  const selected = threadAccount ?? workAccounts[0];
+  if (!selected) return null;
+  const project = selected.limits.aixProject;
+  const siblings = project
+    ? workAccounts.filter(
+        (account) => account.id !== selected.id && account.limits.aixProject?.id === project.id,
+      )
+    : [];
+  const ordered = [
+    selected,
+    ...siblings.sort(
+      (left, right) =>
+        (right.limits.windows[0]?.usedPercent ?? 0) - (left.limits.windows[0]?.usedPercent ?? 0),
+    ),
+  ];
+  const topSpender = [...ordered].sort(
+    (left, right) =>
+      (right.limits.windows[0]?.amounts?.spent ?? 0) -
+        (left.limits.windows[0]?.amounts?.spent ?? 0) ||
+      reportAccountLabel(left).localeCompare(reportAccountLabel(right)),
+  )[0];
+  return {
+    selected,
+    isThread: selected === threadAccount,
+    ordered,
+    name: reportAccountLabel(project && topSpender ? topSpender : selected),
+    projectAmounts: project?.amounts,
+    resetsAt: selected.limits.windows[0]?.resetsAt,
   };
 }
 

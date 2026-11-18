@@ -755,7 +755,7 @@ export function UsageLimitsPooled({
   );
 }
 
-function LimitNotices({ notices }: { readonly notices: readonly string[] }) {
+export function LimitNotices({ notices }: { readonly notices: readonly string[] }) {
   if (notices.length === 0) return null;
   return (
     <Alert variant="warning" controlAlignment="first-line">
