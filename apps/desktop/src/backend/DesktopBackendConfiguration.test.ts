@@ -242,6 +242,11 @@ describe("DesktopBackendConfiguration", () => {
         assert.equal(first.captureOutput, true);
         assert.equal(first.env.ELECTRON_RUN_AS_NODE, "1");
         assert.equal(first.env.T3CODE_DESKTOP_SHELL_DISCOVERY_PENDING, "1");
+        assert.equal(first.env.T3CODE_AIX, "1");
+        const aixOff = yield* configuration.resolvePrimary.pipe(
+          Effect.provideService(HostProcess.Environment, { T3CODE_AIX: "0" }),
+        );
+        assert.equal(aixOff.env.T3CODE_AIX, "0");
         assert.isUndefined(first.env.T3CODE_PORT);
         assert.isUndefined(first.env.T3CODE_MODE);
         assert.isUndefined(first.env.T3CODE_DESKTOP_LAN_HOST);

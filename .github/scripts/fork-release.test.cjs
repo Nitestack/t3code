@@ -13,9 +13,12 @@ const {
   buildForkNixBuildSummary,
   buildForkReleaseNotes,
   decideReleaseBranchUpdate,
+  forkAndroidVersionCode,
+  forkBaseVersion,
   requiredReleaseAssets,
   resolveForkUpstreamBase,
   resolveForkRelease,
+  resolveForkReleaseVersion,
   validateForkBuildOnlyRun,
   validateForkPublicationMode,
   verifyForkBuildArtifactAssets,
@@ -159,9 +162,10 @@ test("release notes and summaries preserve backticks and dollar signs", () => {
 });
 
 test("release assets keep the upstream T3 Code installer names", () => {
-  assert.deepEqual(requiredReleaseAssets("0.1.9").slice(0, 5), [
+  assert.deepEqual(requiredReleaseAssets("0.1.9").slice(0, 6), [
     "T3-Code-0.1.9-x64.exe",
     "T3-Code-0.1.9-x64.exe.sha256",
+    "T3-Code-0.1.9-x64.exe.blockmap",
     "windows-metadata.json",
     "T3-Code-0.1.9.apk",
     "T3-Code-0.1.9.apk.sha256",
@@ -197,6 +201,44 @@ test("release tags derive from the synchronized application version and cannot s
   assert.throws(
     () => resolveForkRelease({ ...dispatch, upstreamBaseIsAncestor: false }),
     /must be an ancestor of the fork release source/,
+  );
+});
+
+test("sources past a published release become ordered fork fixes of the next patch", () => {
+  const other = "1111111111111111111111111111111111111111";
+  const resolve = (input) => resolveForkReleaseVersion({ baseVersion: "0.1.9", sha, ...input });
+
+  assert.equal(resolve({}), "0.1.9");
+  assert.equal(resolve({ baseReleaseSha: sha }), "0.1.9");
+  assert.equal(resolve({ baseReleaseSha: other }), "0.1.10-aix.1");
+  const forkTags = [
+    { version: "0.1.10-aix.1", sha: other },
+    { version: "0.1.10-aix.2", sha },
+    { version: "0.1.9-aix.7", sha: other },
+  ];
+  assert.equal(resolve({ baseReleaseSha: other, forkTags }), "0.1.10-aix.2");
+  assert.equal(resolve({ baseReleaseSha: other, forkTags: forkTags.slice(0, 1) }), "0.1.10-aix.2");
+  assert.throws(
+    () => resolve({ baseReleaseSha: other, forkTags: [{ version: "0.1.10-aix.98", sha: other }] }),
+    /No fork revision left/,
+  );
+
+  assert.equal(forkBaseVersion("0.1.10-aix.2"), "0.1.9");
+  assert.equal(forkBaseVersion("0.1.9"), "0.1.9");
+  assert.throws(() => forkBaseVersion("0.2.0-aix.1"), /Fork version must be/);
+  const codes = ["0.1.9", "0.1.10-aix.1", "0.1.10-aix.2", "0.1.10"].map(forkAndroidVersionCode);
+  assert.deepEqual(codes, [100_999, 101_001, 101_002, 101_099]);
+
+  assert.deepEqual(resolveForkRelease({ ...dispatch, forkVersion: "0.1.10-aix.1" }), {
+    version: "0.1.10-aix.1",
+    tag: "v0.1.10-aix.1",
+    sha,
+    releaseName: "T3 Code v0.1.10-aix.1",
+    runner: "ubuntu-latest",
+  });
+  assert.throws(
+    () => resolveForkRelease({ ...dispatch, forkVersion: "0.1.11-aix.1" }),
+    /not based on application version 0\.1\.9/,
   );
 });
 
@@ -538,6 +580,7 @@ test("existing release assets must have matching source metadata and file checks
   const directory = fs.mkdtempSync(path.join(gitCommonDir, "fork-release-assets-"));
   const windows = "T3-Code-0.1.9-x64.exe";
   const android = "T3-Code-0.1.9.apk";
+  const macZip = "T3-Code-0.1.9-arm64.zip";
   const digest = (contents) => crypto.createHash("sha256").update(contents).digest("hex");
   const baseMetadata = {
     tag_name: "v0.1.9",
@@ -558,7 +601,43 @@ test("existing release assets must have matching source metadata and file checks
   try {
     const windowsBytes = Buffer.from("windows installer bytes");
     const androidBytes = Buffer.from("signed apk bytes");
+    for (const installer of [macZip, "T3-Code-0.1.9-arm64.dmg", "T3-Code-x86_64.AppImage"]) {
+      fs.writeFileSync(path.join(directory, installer), installer);
+      fs.writeFileSync(
+        path.join(directory, `${installer}.sha256`),
+        `${digest(installer)}  ${installer}\n`,
+      );
+    }
+    for (const blockmapped of [windows, macZip, "T3-Code-0.1.9-arm64.dmg"]) {
+      fs.writeFileSync(path.join(directory, `${blockmapped}.blockmap`), "blockmap");
+    }
+    fs.writeFileSync(path.join(directory, "install-macos.sh"), "#!/bin/bash\n");
     fs.writeFileSync(path.join(directory, windows), windowsBytes);
+    const sha512 = (name) =>
+      crypto
+        .createHash("sha512")
+        .update(fs.readFileSync(path.join(directory, name)))
+        .digest("base64");
+    const writeManifest = (manifest, files) =>
+      fs.writeFileSync(
+        path.join(directory, manifest),
+        [
+          "version: 0.1.9",
+          "files:",
+          ...files.flatMap((name) => [
+            `  - url: ${name}`,
+            `    sha512: ${sha512(name)}`,
+            "    size: 1",
+          ]),
+          `path: ${files[0]}`,
+          `sha512: ${sha512(files[0])}`,
+          "releaseDate: '2026-11-18T00:00:00.000Z'",
+          "",
+        ].join("\n"),
+      );
+    writeManifest("latest.yml", [windows]);
+    writeManifest("latest-mac.yml", [macZip, "T3-Code-0.1.9-arm64.dmg"]);
+    writeManifest("latest-linux.yml", ["T3-Code-x86_64.AppImage"]);
     fs.writeFileSync(path.join(directory, android), androidBytes);
     fs.writeFileSync(
       path.join(directory, `${windows}.sha256`),
@@ -573,7 +652,7 @@ test("existing release assets must have matching source metadata and file checks
       JSON.stringify({
         applicationId: "com.t3tools.t3code",
         versionName: "0.1.9",
-        versionCode: 1009,
+        versionCode: 100_999,
         gitSha: sha,
         sha256: digest(androidBytes),
         ...buildForkArtifactSourceMetadata({
@@ -669,6 +748,46 @@ test("existing release assets must have matching source metadata and file checks
       }),
       /source identity/,
     );
+    fs.appendFileSync(path.join(directory, macZip), "tampered");
+    await assert.rejects(
+      verifyForkBuildArtifactAssets({
+        directory,
+        version: "0.1.9",
+        sha,
+        upstreamBase,
+        upstreamTag: "v0.1.9",
+      }),
+      /contents do not match/,
+    );
+    fs.writeFileSync(path.join(directory, macZip), macZip);
+    // A checksum file regenerated after tampering still cannot match the update feed.
+    fs.appendFileSync(path.join(directory, macZip), "rebuilt");
+    fs.writeFileSync(
+      path.join(directory, `${macZip}.sha256`),
+      `${digest(fs.readFileSync(path.join(directory, macZip)))}  ${macZip}\n`,
+    );
+    await assert.rejects(
+      verifyForkBuildArtifactAssets({
+        directory,
+        version: "0.1.9",
+        sha,
+        upstreamBase,
+        upstreamTag: "v0.1.9",
+      }),
+      /latest-mac\.yml lists T3-Code-0\.1\.9-arm64\.zip/,
+    );
+    writeManifest("latest-mac.yml", ["T3-Code-0.1.9-arm64.dmg"]);
+    await assert.rejects(
+      verifyForkBuildArtifactAssets({
+        directory,
+        version: "0.1.9",
+        sha,
+        upstreamBase,
+        upstreamTag: "v0.1.9",
+      }),
+      /latest-mac\.yml does not offer T3-Code-0\.1\.9-arm64\.zip/,
+    );
+    writeManifest("latest-mac.yml", [macZip]);
     fs.appendFileSync(path.join(directory, windows), "tampered");
     await assert.rejects(
       verifyExistingForkReleaseAssets({
@@ -696,7 +815,7 @@ test("manual version overrides cannot diverge from product versions", () => {
       resolveForkRelease({
         ...dispatch,
         manifestVersions: Object.fromEntries(
-          Object.keys(manifestVersions).map((key) => [key, "0.1.9-fork.1"]),
+          Object.keys(manifestVersions).map((key) => [key, "0.1.9-aix.1"]),
         ),
       }),
     /must be stable MAJOR.MINOR.PATCH/,

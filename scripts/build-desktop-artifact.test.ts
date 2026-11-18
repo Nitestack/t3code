@@ -535,20 +535,57 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         undefined,
       );
 
+      const forkFix = yield* createBuildConfig(
+        "mac",
+        "dmg",
+        "0.0.34-aix.1",
+        false,
+        false,
+        undefined,
+        undefined,
+      );
+
       assert.isNull(preview.publish);
       assert.isNull(previewChannel.publish);
-      assert.deepStrictEqual(release.publish, [
+      const stableFeed = [
         {
           provider: "github",
           owner: "pingdotgg",
           repo: "t3code",
           releaseType: "release",
+          channel: "latest",
         },
-      ]);
+      ];
+      assert.deepStrictEqual(release.publish, stableFeed);
+      assert.deepStrictEqual(forkFix.publish, stableFeed);
     }).pipe(
       Effect.provide(
         ConfigProvider.layer(
           ConfigProvider.fromEnv({ env: { GITHUB_REPOSITORY: "pingdotgg/t3code" } }),
+        ),
+      ),
+    ),
+  );
+
+  it.effect("signs unsigned mac builds with a configured self-signed identity only", () =>
+    Effect.gen(function* () {
+      const build = (signed: boolean) =>
+        createBuildConfig("mac", "dmg", "0.0.33", signed, false, undefined, undefined).pipe(
+          Effect.map((config) => config.mac as Record<string, unknown>),
+        );
+      const selfSigned = yield* build(false);
+      const developerId = yield* build(true);
+
+      assert.equal(selfSigned.identity, "T3 Code Fork");
+      assert.equal(selfSigned.hardenedRuntime, false);
+      assert.notProperty(developerId, "identity");
+      assert.notProperty(developerId, "hardenedRuntime");
+    }).pipe(
+      Effect.provide(
+        ConfigProvider.layer(
+          ConfigProvider.fromEnv({
+            env: { T3CODE_DESKTOP_MAC_SELF_SIGNED_IDENTITY: "T3 Code Fork" },
+          }),
         ),
       ),
     ),

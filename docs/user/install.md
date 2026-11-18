@@ -132,8 +132,7 @@ Nix manages both the desktop app and the bundled
 ### T3 Code fork (Nix)
 
 This build uses the same T3 Code app name, `t3` and `t3code-desktop` commands, and default state
-directory as upstream, so install it instead of upstream T3 Code, not next to it. Android is the
-exception: its hidden package ID differs, so both Android apps can be installed. A stable release
+directory as upstream, so install it instead of upstream T3 Code, not next to it. The fork's Android app likewise replaces the Play Store app. A stable release
 tag points to the fork integration commit on `main`, with fork changes and upstream through the
 matching stable tag; metadata records that upstream tag's peeled commit as the stable base. The
 flake reads the application version from the source and pins nixpkgs in `flake.lock`.
@@ -173,14 +172,29 @@ programs.t3code.package = inputs.t3code.packages.x86_64-linux.default;
 For the moving input, `nix flake update t3code` records the latest release branch commit in the lock
 file. For a pinned input, change the tag and update the lock file deliberately.
 
-### T3 Code fork (Windows and Android)
+### T3 Code fork (desktop and Android)
+
+Published fork releases include `T3-Code-<version>-x64.exe` for Windows, `T3-Code-<version>.apk`
+for Android, and `T3-Code-x86_64.AppImage` for Linux x64. The desktop apps update themselves from
+later fork releases.
+
+On an Apple Silicon Mac, install with the script; it is the only supported way, because the app is
+not notarized and Gatekeeper blocks a DMG or zip downloaded in a browser:
+
+```sh
+curl -fsSL https://github.com/Nitestack/t3code/releases/latest/download/install-macos.sh | bash
+```
+
+The script checks the download's SHA-256, installs **T3 Code** in `/Applications` (or
+`~/Applications`), and opens it. Set `T3CODE_VERSION=<version>` to install a specific release.
+Later updates arrive in the app.
 
 Before a public fork release is authorized, collaborators can get installable test builds from the
 fork's GitHub Actions. Open **Actions → Release**, run it from `main` with channel `stable`, and
 leave **publish** unchecked. If the selected source has no upstream sync marker, enter the full
 40-character upstream commit in `upstream_base`. Download the combined artifact named
 `t3-code-installers-<version>-<12-character-commit>` from that run. It contains
-`T3-Code-<version>-x64.exe`, `T3-Code-<version>.apk`, SHA-256 files, and metadata. Check the matching
+the Windows, macOS, Android, and Linux installers, SHA-256 files, update feeds, and metadata. Check the matching
 checksum before installing. `windows-metadata.json` reports whether the Windows installer has an
 Authenticode signature; current fork builds are expected to be unsigned. Its metadata and
 `BUILD-INFO.md` identify the fork integration commit that was built and the upstream stable tag plus

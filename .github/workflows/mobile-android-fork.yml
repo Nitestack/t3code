@@ -89,8 +89,8 @@ jobs:
             version="${GITHUB_REF_NAME#t3-android-v}"
           fi
           if [ "$IS_REUSABLE_WORKFLOW" = "true" ] || [ "$GITHUB_REF_TYPE" = tag ] || [ -n "$version" ]; then
-            if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-              echo "::error::Android app version must be stable MAJOR.MINOR.PATCH."
+            if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-aix\.[1-9][0-9]*)?$ ]]; then
+              echo "::error::Android app version must be MAJOR.MINOR.PATCH or a fork fix MAJOR.MINOR.PATCH-aix.N."
               exit 1
             fi
             printf 'T3CODE_MOBILE_VERSION=%s\n' "$version" >> "$GITHUB_ENV"

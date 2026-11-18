@@ -1,13 +1,13 @@
 # Fork release runbook
 
-This runbook covers stable upstream syncs and version-matched Windows, Android, and Nix builds for
+This runbook covers stable upstream syncs and version-matched Windows, macOS, Linux AppImage, Android, and Nix builds for
 `Nitestack/t3code`. The fork has no store builds or iOS build. Users can install it from a signed
-Android APK, a Windows installer, source, or the latest-release or pinned Nix flake ref, as the
+Android APK, a Windows installer, the macOS install script, a Linux AppImage, source, or the latest-release or pinned Nix flake ref, as the
 [fork guide](../user/nitestack-fork.md) explains.
 
 The Nix package is `t3code-<version>` and uses the upstream `t3` and `t3code-desktop` commands,
 T3 Code app name, and default state directory. Install it instead of upstream T3 Code; the Android
-APK is the exception and can coexist because its hidden package ID differs.
+APK uses the official package ID and replaces the store app.
 
 ## Release checklist
 
@@ -22,16 +22,16 @@ APK is the exception and can coexist because its hidden package ID differs.
    [fork guide](../user/nitestack-fork.md#what-this-fork-changes).
 6. In GitHub Actions, run `Release` from `main`, choose channel `stable`, and leave `publish`
    unchecked. Enter the matching application version if you want it shown in the Actions run title. The
-   workflow builds the signed Android APK, Windows x64 installer, and Nix package from the exact
+   workflow builds the signed Android APK, Windows x64 installer, macOS arm64 app, Linux x64 AppImage, and Nix package from the exact
    source commit, verifies their version and source metadata, and uploads one build-only artifact.
    This run creates no tag or release, including a draft release. If the selected source has no
    `.github/upstream-stable.json` marker, provide `upstream_base` as the full peeled commit SHA for
    the matching upstream `v<version>` tag. An invalid or mismatched marker always blocks the run.
 7. Download `t3-code-installers-<version>-<12-char-source-sha>` from that Actions run.
-   It contains `T3-Code-<version>-x64.exe`, `T3-Code-<version>.apk`, their `.sha256` files, platform metadata, `nix-build.json`,
+   It contains `T3-Code-<version>-x64.exe`, `T3-Code-<version>.apk`, `T3-Code-<version>-arm64.{dmg,zip}`, `T3-Code-x86_64.AppImage`, their `.sha256` files, blockmaps, the `latest*.yml` update feeds, `install-macos.sh`, platform metadata, `nix-build.json`,
    and `BUILD-INFO.md`. All metadata names the fork integration commit as the built source and
    records the upstream stable tag and peeled base commit separately. The Windows runner records its Authenticode status; without fork Windows
-   signing credentials it is expected to be unsigned. The Android APK is signed with the fork's
+   signing credentials it is expected to be unsigned. The macOS app is signed with the fork's self-signed `T3 Code Fork` certificate (secrets `MACOS_SELF_SIGNED_CERTIFICATE` and `MACOS_SELF_SIGNED_CERTIFICATE_PASSWORD`) and is not notarized. Keep that certificate: installed Macs accept in-app updates only from builds signed with the same one, so a new certificate means every Mac must reinstall with the script. The Android APK is signed with the fork's
    upload certificate. Check both checksums and metadata before local installation.
 8. After local acceptance, record the build-only run ID, exact commit, and source branch from
    `BUILD-INFO.md`. Request explicit authorization before publishing. Dispatch `Release` on
@@ -63,6 +63,22 @@ node --test scripts/upstream-stable-sync.test.mjs
 
 Each package also has `vp run typecheck`. Web browser tests on NixOS need the
 [devenv shell](./devenv.md).
+
+## Fork fixes between upstream releases
+
+Release fork fixes the same way, from `main`, without editing any manifest. Preflight derives the
+version: a source whose upstream base `vX.Y.Z` is already published for another commit becomes
+`X.Y.(Z+1)-aix.N`, with `N` one past the highest existing fork tag of that patch (at most 98).
+Rerunning on a commit that already has a fork tag reuses that version. This sorts above the base
+release and below upstream's next stable, so installed desktop apps update to the fork fix and
+later to the upstream sync. The desktop feed stays on channel `latest`; electron-builder would
+otherwise name a `-aix.N` feed after its prerelease tag.
+
+Builds are stamped with the fork version at release time, so upstream sync merges never conflict on
+it. The Nix flake versions itself from source and still builds `t3code-<X.Y.Z>`; the pinned flake
+ref uses the fork tag. Android version codes are `(major*1e6 + minor*1e3 + patch)*100` plus `N`
+for a fork fix or 99 for a plain release, as `fork-release.cjs` and `apps/mobile/app.config.ts`
+compute.
 
 ## Stable upstream sync
 
@@ -169,7 +185,7 @@ Credentials stay out of settings, logs, client responses, and artifacts. Before 
   Android workflow and guide. Anything else needs a look before releasing.
 
 - The standalone Android workflow uploads only the APK, its checksum, and `metadata.json`. The
-  combined release artifact also contains the Windows installer and Nix verification record.
+  combined release artifact also contains the desktop installers, update feeds, and Nix verification record.
 
 ## Compatibility evidence
 

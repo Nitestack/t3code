@@ -6,24 +6,138 @@ const { createReadStream } = require("node:fs");
 const RELEASE_REPOSITORY = "Nitestack/t3code";
 const STABLE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const COMMIT_SHA = /^[0-9a-f]{40}$/i;
+// A fork fix on upstream X.Y.Z is X.Y.(Z+1)-aix.N: newer than its base, older than upstream's next.
+const FORK_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-aix\.([1-9]\d*))?$/;
 const BUILD_ONLY_JOBS = Object.freeze([
   "Build versioned fork Nix package",
   "Verify and package fork installers",
 ]);
 
+function forkBaseVersion(version) {
+  const match = FORK_VERSION.exec(version ?? "");
+  if (!match || (match[4] !== undefined && match[3] === "0")) {
+    throw new Error(
+      `Fork version must be X.Y.Z or X.Y.Z-aix.N on a released X.Y.(Z-1): ${version}`,
+    );
+  }
+  return match[4] === undefined ? version : `${match[1]}.${match[2]}.${Number(match[3]) - 1}`;
+}
+
+// Same formula as androidForkVersionCode in apps/mobile/app.config.ts; a fork fix sorts below X.Y.Z.
+function forkAndroidVersionCode(version) {
+  const match = FORK_VERSION.exec(version);
+  const [major, minor, patch] = match.slice(1, 4).map(Number);
+  return (
+    (major * 1_000_000 + minor * 1_000 + patch) * 100 +
+    (match[4] === undefined ? 99 : Number(match[4]))
+  );
+}
+
+// baseReleaseSha is the commit of the published v<baseVersion> release, or "" when there is none.
+function resolveForkReleaseVersion({ baseVersion, sha, baseReleaseSha = "", forkTags = [] }) {
+  if (!STABLE_VERSION.test(baseVersion ?? "") || !COMMIT_SHA.test(sha ?? "")) {
+    throw new Error("Fork release version needs a stable base version and a full source SHA.");
+  }
+  if (baseReleaseSha === "" || baseReleaseSha.toLowerCase() === sha.toLowerCase())
+    return baseVersion;
+  const [major, minor, patch] = baseVersion.split(".").map(Number);
+  const core = `${major}.${minor}.${patch + 1}`;
+  let latest = 0;
+  for (const tag of forkTags) {
+    const match = FORK_VERSION.exec(tag.version);
+    if (!match || match[4] === undefined || `${match[1]}.${match[2]}.${match[3]}` !== core)
+      continue;
+    if (tag.sha.toLowerCase() === sha.toLowerCase()) return tag.version;
+    latest = Math.max(latest, Number(match[4]));
+  }
+  if (latest >= 98)
+    throw new Error(`No fork revision left for ${core}; the Android version code allows 98.`);
+  return `${core}-aix.${latest + 1}`;
+}
+
+function checksummedReleaseAssets(version) {
+  return [
+    `T3-Code-${version}-x64.exe`,
+    `T3-Code-${version}.apk`,
+    `T3-Code-${version}-arm64.dmg`,
+    `T3-Code-${version}-arm64.zip`,
+    // Unversioned: electron-updater replaces an installed AppImage in place only without x.y.z.
+    "T3-Code-x86_64.AppImage",
+  ];
+}
+
+// electron-updater feeds: each manifest must list the installer its platform updates from.
+function updateManifests(version) {
+  return {
+    "latest.yml": `T3-Code-${version}-x64.exe`,
+    "latest-mac.yml": `T3-Code-${version}-arm64.zip`,
+    "latest-linux.yml": "T3-Code-x86_64.AppImage",
+  };
+}
+
 function requiredReleaseAssets(version) {
-  const windows = `T3-Code-${version}-x64.exe`;
-  const android = `T3-Code-${version}.apk`;
+  const [windows, android, macDmg, macZip, linux] = checksummedReleaseAssets(version);
   return [
     windows,
     `${windows}.sha256`,
+    `${windows}.blockmap`,
     "windows-metadata.json",
     android,
     `${android}.sha256`,
     "metadata.json",
+    macDmg,
+    `${macDmg}.sha256`,
+    `${macDmg}.blockmap`,
+    macZip,
+    `${macZip}.sha256`,
+    `${macZip}.blockmap`,
+    "install-macos.sh",
+    linux,
+    `${linux}.sha256`,
+    ...Object.keys(updateManifests(version)),
     "nix-build.json",
     "BUILD-INFO.md",
   ];
+}
+
+// Reads the url/sha512 pairs electron-builder writes under `files:`; no YAML dependency in workflows.
+function parseUpdateManifest(contents) {
+  const version = /^version: ['"]?([^'"\s]+)['"]?$/m.exec(contents)?.[1];
+  const files = [];
+  for (const line of contents.split(/\r?\n/)) {
+    const url = /^\s*- url: ['"]?([^'"]+?)['"]?$/.exec(line);
+    if (url) {
+      files.push({ url: url[1] });
+      continue;
+    }
+    const sha512 = /^\s+sha512: ['"]?([^'"\s]+)['"]?$/.exec(line);
+    const current = files.at(-1);
+    if (sha512 && current && current.sha512 === undefined) current.sha512 = sha512[1];
+  }
+  return { version, files };
+}
+
+async function verifyUpdateManifests(directory, version) {
+  for (const [manifest, installer] of Object.entries(updateManifests(version))) {
+    const { version: manifestVersion, files } = parseUpdateManifest(
+      fs.readFileSync(path.join(directory, manifest), "utf8"),
+    );
+    if (manifestVersion !== version || !files.some((file) => file.url === installer)) {
+      throw new Error(`${manifest} does not offer ${installer} for version ${version}.`);
+    }
+    for (const file of files) {
+      const filePath = path.join(directory, file.url);
+      if (
+        path.basename(file.url) !== file.url ||
+        !fs.existsSync(filePath) ||
+        (await hashFile(filePath, "sha512", "base64")) !== file.sha512
+      ) {
+        throw new Error(
+          `${manifest} lists ${file.url}, which is missing or has different contents.`,
+        );
+      }
+    }
+  }
 }
 
 function assertForkReleaseTagTarget({ tag, expectedSha, actualSha }) {
@@ -148,7 +262,10 @@ function buildForkBuildInfo({
     "",
     "The Windows x64 installer was built and its packaged native runtime was verified on the standard Windows 2025 runner. Windows signing status is recorded in windows-metadata.json.",
     "The Android APK was signed with the release upload certificate and verified by the Android build job.",
-    `The matching ${markdownCode(`t3code-${version}`)} Nix package was built successfully; its exact source and store path are in nix-build.json.`,
+    "The macOS Apple Silicon DMG and zip are signed with the fork's self-signed certificate, not notarized, and passed a launch check on a GitHub macOS runner.",
+    "The Linux x64 AppImage passed a launch check on the standard Ubuntu runner.",
+    "latest.yml, latest-mac.yml, and latest-linux.yml are the desktop update feeds; every file they list was checked against its SHA-512.",
+    `The matching ${markdownCode(`t3code-${forkBaseVersion(version)}`)} Nix package was built successfully; its exact source and store path are in nix-build.json.`,
     "",
     publicationMode === "authorized-auto-publish"
       ? "This build is part of an explicitly authorized stable release run."
@@ -162,7 +279,7 @@ function buildForkBuildInfo({
     "After an authorized release publishes its matching tag, install it with:",
     "",
     "```sh",
-    `nix profile add 'github:Nitestack/t3code/${upstreamTag}'`,
+    `nix profile add 'github:Nitestack/t3code/v${version}'`,
     "```",
     "",
   ].join("\n");
@@ -207,7 +324,13 @@ function buildForkReleaseNotes({
     "",
     `Tested build artifact run: ${markdownCode(buildArtifactRunId)} (attempt: ${markdownCode(buildArtifactRunAttempt)})`,
     "",
-    `The Windows installer, signed Android APK, and versioned Nix package are built from the fork commit and include fork changes plus upstream through ${upstreamTag}. Checksums and build metadata are attached.`,
+    `The Windows installer, macOS Apple Silicon app, Linux AppImage, signed Android APK, and versioned Nix package are built from the fork commit and include fork changes plus upstream through ${upstreamTag}. Checksums and build metadata are attached. Installed desktop apps update themselves from fork releases.`,
+    "",
+    "On macOS (Apple Silicon), install only with this command. The app is not notarized, so a DMG or zip downloaded in a browser is blocked by Gatekeeper:",
+    "",
+    "```sh",
+    "curl -fsSL https://github.com/Nitestack/t3code/releases/latest/download/install-macos.sh | bash",
+    "```",
     "",
     "Install the matching Nix build from this release tag:",
     "",
@@ -244,7 +367,7 @@ function validateForkBuildOnlyRun({ run, jobs, artifacts, expectedRunId, version
   const runId = Number(expectedRunId);
   const artifactName = `t3-code-installers-${version}-${sha.slice(0, 12)}`;
   if (
-    !STABLE_VERSION.test(version) ||
+    !FORK_VERSION.test(version) ||
     !COMMIT_SHA.test(sha) ||
     !Number.isSafeInteger(runId) ||
     runId < 1 ||
@@ -347,10 +470,10 @@ function parseChecksum(directory, filename) {
   return match[1];
 }
 
-async function hashFile(filename) {
-  const hash = crypto.createHash("sha256");
+async function hashFile(filename, algorithm = "sha256", encoding = "hex") {
+  const hash = crypto.createHash(algorithm);
   for await (const chunk of createReadStream(filename)) hash.update(chunk);
-  return hash.digest("hex");
+  return hash.digest(encoding);
 }
 
 async function verifyForkBuildArtifactAssets({
@@ -363,7 +486,11 @@ async function verifyForkBuildArtifactAssets({
   buildRunId = "",
   buildRunAttempt = "",
 }) {
-  if (upstreamTag !== `v${version}` || !COMMIT_SHA.test(sha) || !COMMIT_SHA.test(upstreamBase)) {
+  if (
+    upstreamTag !== `v${forkBaseVersion(version)}` ||
+    !COMMIT_SHA.test(sha) ||
+    !COMMIT_SHA.test(upstreamBase)
+  ) {
     throw new Error(
       "Build artifact source identity has an invalid version or upstream stable base.",
     );
@@ -385,24 +512,24 @@ async function verifyForkBuildArtifactAssets({
       "Build artifact does not contain the complete expected installer and Nix asset set.",
     );
   }
-  const windows = `T3-Code-${version}-x64.exe`;
-  const android = `T3-Code-${version}.apk`;
-  const windowsHash = parseChecksum(directory, windows);
-  const androidHash = parseChecksum(directory, android);
-  if (
-    (await hashFile(path.join(directory, windows))) !== windowsHash ||
-    (await hashFile(path.join(directory, android))) !== androidHash
-  ) {
-    throw new Error("Installer contents do not match their SHA-256 files.");
+  const [windows, android] = checksummedReleaseAssets(version);
+  const hashes = new Map();
+  for (const asset of checksummedReleaseAssets(version)) {
+    hashes.set(asset, parseChecksum(directory, asset));
+    if ((await hashFile(path.join(directory, asset))) !== hashes.get(asset)) {
+      throw new Error("Installer contents do not match their SHA-256 files.");
+    }
   }
+  const windowsHash = hashes.get(windows);
+  const androidHash = hashes.get(android);
+  await verifyUpdateManifests(directory, version);
 
   const readJson = (filename) =>
     JSON.parse(fs.readFileSync(path.join(directory, filename), "utf8"));
   const androidMetadata = readJson("metadata.json");
   const windowsMetadata = readJson("windows-metadata.json");
   const nixMetadata = readJson("nix-build.json");
-  const [major, minor, patch] = version.split(".").map(Number);
-  const expectedAndroidVersionCode = major * 1_000_000 + minor * 1_000 + patch;
+  const expectedAndroidVersionCode = forkAndroidVersionCode(version);
   const nixStorePath = typeof nixMetadata.storePath === "string" ? nixMetadata.storePath : "";
   const nixStoreName = nixStorePath.startsWith("/nix/store/")
     ? nixStorePath.slice("/nix/store/".length)
@@ -423,7 +550,7 @@ async function verifyForkBuildArtifactAssets({
     windowsMetadata.sha256 !== windowsHash ||
     !["signed", "unsigned"].includes(windowsMetadata.windowsSigning) ||
     nixMetadata.package !== "t3code" ||
-    nixMetadata.version !== version ||
+    nixMetadata.version !== forkBaseVersion(version) ||
     nixMetadata.gitSha?.toLowerCase() !== sha.toLowerCase() ||
     [androidMetadata, windowsMetadata, nixMetadata].some((metadata) =>
       Object.entries(sourceMetadata).some(
@@ -431,7 +558,7 @@ async function verifyForkBuildArtifactAssets({
       ),
     ) ||
     !/^[a-z0-9]{32}$/.test(nixStoreHash) ||
-    nixStoreName.slice(33) !== `t3code-${version}`
+    nixStoreName.slice(33) !== `t3code-${forkBaseVersion(version)}`
   ) {
     throw new Error(
       "Existing release metadata does not match the fork source, version, or installer contents.",
@@ -495,6 +622,7 @@ function resolveForkRelease({
   channel,
   requestedVersion = "",
   manifestVersions,
+  forkVersion = "",
   sha,
   sourceBranch = "",
   upstreamBase = "",
@@ -522,9 +650,13 @@ function resolveForkRelease({
   if (versions.length === 0 || versions.some((version) => version !== versions[0])) {
     throw new Error("Server, desktop, web, and contracts must have the same application version.");
   }
-  const version = versions[0];
-  if (!STABLE_VERSION.test(version))
-    throw new Error(`Application version must be stable MAJOR.MINOR.PATCH: ${version}`);
+  const baseVersion = versions[0];
+  if (!STABLE_VERSION.test(baseVersion))
+    throw new Error(`Application version must be stable MAJOR.MINOR.PATCH: ${baseVersion}`);
+  const version = forkVersion || baseVersion;
+  if (forkBaseVersion(version) !== baseVersion) {
+    throw new Error(`Fork version ${version} is not based on application version ${baseVersion}.`);
+  }
   if (requestedVersion && requestedVersion !== version) {
     throw new Error(
       `Requested version ${requestedVersion} does not match application version ${version}.`,
@@ -537,8 +669,10 @@ function resolveForkRelease({
   if (!COMMIT_SHA.test(upstreamBase)) {
     throw new Error("Release upstream base must be a full 40-character commit SHA.");
   }
-  if (upstreamTag !== tag) {
-    throw new Error(`Upstream stable tag ${upstreamTag || "(missing)"} does not match ${tag}.`);
+  if (upstreamTag !== `v${baseVersion}`) {
+    throw new Error(
+      `Upstream stable tag ${upstreamTag || "(missing)"} does not match v${baseVersion}.`,
+    );
   }
   if (!upstreamBaseIsAncestor) {
     throw new Error("The upstream stable base must be an ancestor of the fork release source.");
@@ -600,6 +734,9 @@ function resolveForkRelease({
 
 module.exports = {
   RELEASE_REPOSITORY,
+  forkAndroidVersionCode,
+  forkBaseVersion,
+  resolveForkReleaseVersion,
   analyzeForkUpstreamHistory,
   assertForkReleaseTagTarget,
   assertExistingForkReleaseMetadata,

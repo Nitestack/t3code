@@ -73,6 +73,7 @@ jobs:
       contents: read
     outputs:
       version: ${{ steps.resolve.outputs.version }}
+      base_version: ${{ steps.resolve.outputs.base_version }}
       tag: ${{ steps.resolve.outputs.tag }}
       release_name: ${{ steps.resolve.outputs.release_name }}
       sha: ${{ steps.resolve.outputs.sha }}
@@ -234,7 +235,31 @@ jobs:
             echo "::error::Fork source contains $count upstream-main commit(s) beyond $upstream_tag: $short_shas. Main accepts stable upstream tags only."
             exit 1
           fi
-          tag="v${tag_version:-$manifest_version}"
+          # A source past the published v<base> release becomes the next fork fix (X.Y.(Z+1)-aix.N).
+          base_release_sha=""
+          if gh api "repos/$GITHUB_REPOSITORY/releases/tags/v$manifest_version" > /dev/null 2>"$RUNNER_TEMP/base-release-error"; then
+            base_release_sha="$(git rev-parse --verify "refs/tags/v$manifest_version^{commit}")"
+          elif ! grep -q "HTTP 404" "$RUNNER_TEMP/base-release-error"; then
+            echo "Could not verify whether release v$manifest_version exists." >&2
+            exit 1
+          fi
+          git for-each-ref --format='%(refname:strip=2) %(*objectname)%(objectname)' 'refs/tags/v*-aix.*' > "$RUNNER_TEMP/fork-tags.txt"
+          fork_version="$(SOURCE_SHA="$source_sha" MANIFEST_VERSION="$manifest_version" BASE_RELEASE_SHA="$base_release_sha" node - "$RUNNER_TEMP/fork-tags.txt" <<'NODE'
+          const fs = require("node:fs");
+          const { resolveForkReleaseVersion } = require("./.github/scripts/fork-release.cjs");
+          const forkTags = fs.readFileSync(process.argv[2], "utf8").split(/\r?\n/).filter(Boolean).map((line) => {
+            const [tag, objects] = line.split(" ");
+            return { version: tag.replace(/^v/, ""), sha: objects.slice(0, 40) };
+          });
+          process.stdout.write(resolveForkReleaseVersion({
+            baseVersion: process.env.MANIFEST_VERSION,
+            sha: process.env.SOURCE_SHA,
+            baseReleaseSha: process.env.BASE_RELEASE_SHA,
+            forkTags,
+          }));
+          NODE
+          )"
+          tag="v${tag_version:-$fork_version}"
           remote_refs="$(git ls-remote origin "refs/tags/$tag" "refs/tags/$tag^{}")"
           existing_tag_sha="$(printf '%s\n' "$remote_refs" | awk '$2 ~ /\^\{\}$/ { print $1; exit }')"
           if [[ -z "$existing_tag_sha" ]]; then
@@ -257,13 +282,13 @@ jobs:
             existing_release_path="$RUNNER_TEMP/existing-fork-release.json"
             existing_assets_dir="$RUNNER_TEMP/existing-fork-release-assets"
             printf '%s' "$existing_release" > "$existing_release_path"
-            SOURCE_SHA="$source_sha" UPSTREAM_BASE="$upstream_base" UPSTREAM_TAG="$upstream_tag" MANIFEST_VERSION="$manifest_version" node - \
+            SOURCE_SHA="$source_sha" UPSTREAM_BASE="$upstream_base" UPSTREAM_TAG="$upstream_tag" FORK_VERSION="$fork_version" node - \
               "$existing_release_path" <<'NODE'
           const fs = require("node:fs");
           const { assertExistingForkReleaseMetadata } = require("./.github/scripts/fork-release.cjs");
           assertExistingForkReleaseMetadata({
             release: JSON.parse(fs.readFileSync(process.argv[2], "utf8")),
-            version: process.env.MANIFEST_VERSION,
+            version: process.env.FORK_VERSION,
             sha: process.env.SOURCE_SHA,
             upstreamBase: process.env.UPSTREAM_BASE,
             upstreamTag: process.env.UPSTREAM_TAG,
@@ -271,14 +296,14 @@ jobs:
           });
           NODE
             gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir "$existing_assets_dir"
-            SOURCE_SHA="$source_sha" UPSTREAM_BASE="$upstream_base" UPSTREAM_TAG="$upstream_tag" MANIFEST_VERSION="$manifest_version" node - \
+            SOURCE_SHA="$source_sha" UPSTREAM_BASE="$upstream_base" UPSTREAM_TAG="$upstream_tag" FORK_VERSION="$fork_version" node - \
               "$existing_release_path" "$existing_assets_dir" <<'NODE'
           const fs = require("node:fs");
           const { verifyExistingForkReleaseAssets } = require("./.github/scripts/fork-release.cjs");
           verifyExistingForkReleaseAssets({
             release: JSON.parse(fs.readFileSync(process.argv[2], "utf8")),
             directory: process.argv[3],
-            version: process.env.MANIFEST_VERSION,
+            version: process.env.FORK_VERSION,
             sha: process.env.SOURCE_SHA,
             upstreamBase: process.env.UPSTREAM_BASE,
             upstreamTag: process.env.UPSTREAM_TAG,
@@ -293,10 +318,11 @@ jobs:
           export EXISTING_RELEASE="$existing_release"
           export EXISTING_ASSETS_VERIFIED="$existing_assets_verified"
           export UPSTREAM_BASE="$upstream_base"
-          export UPSTREAM_TAG="$upstream_tag"
+          export UPSTREAM_TAG="$upstream_tag" MANIFEST_VERSION="$manifest_version"
           export UPSTREAM_BASE_IS_ANCESTOR="$upstream_base_is_ancestor"
           export UPSTREAM_HISTORY_JSON="$history_json"
           export PUBLICATION_MODE="$publication_mode"
+          export FORK_VERSION="$fork_version"
           node - "$manifest_versions" <<'NODE' >> "$GITHUB_OUTPUT"
           const { resolveForkRelease } = require("./.github/scripts/fork-release.cjs");
           const result = resolveForkRelease({
@@ -306,6 +332,7 @@ jobs:
             channel: process.env.RELEASE_CHANNEL,
             requestedVersion: process.env.REQUESTED_VERSION,
             manifestVersions: JSON.parse(process.argv[2]),
+            forkVersion: process.env.FORK_VERSION,
             sha: process.env.SOURCE_SHA,
             sourceBranch: process.env.SOURCE_BRANCH,
             upstreamBase: process.env.UPSTREAM_BASE,
@@ -328,6 +355,7 @@ jobs:
             artifact_name: `t3-code-installers-${result.version}-${result.sha.slice(0, 12)}`,
             upstream_base: process.env.UPSTREAM_BASE,
             upstream_tag: process.env.UPSTREAM_TAG,
+            base_version: process.env.MANIFEST_VERSION,
             source_branch: process.env.SOURCE_BRANCH,
             publication_mode: process.env.PUBLICATION_MODE,
           })) {
@@ -412,7 +440,7 @@ jobs:
           overwrite: true
 
   fork_desktop_linux:
-    name: Build Linux CLI runtime for Windows
+    name: Build Linux x64 AppImage and CLI runtime
     needs: [fork_preflight, fork_bundle]
     if: ${{ !failure() && !cancelled() && inputs.artifact_run_id == '' && needs.fork_preflight.result == 'success' && needs.fork_preflight.outputs.already_published != 'true' && needs.fork_bundle.result == 'success' }}
     permissions:
@@ -435,6 +463,7 @@ jobs:
       rust_target: x86_64-unknown-linux-gnu
       resource_key: linux-x64
       cli_archive: true
+      launch_check: true
       relay_client_tracing: false
       fork_build_only: true
 
@@ -464,6 +493,39 @@ jobs:
       cli_archive: false
       relay_client_tracing: false
       fork_build_only: true
+
+  # Signed with the fork's self-signed certificate instead of a Developer ID, so
+  # it is not notarized; install-macos.sh installs it without a Gatekeeper prompt.
+  fork_desktop_mac:
+    name: Build macOS arm64 app
+    needs: [fork_preflight, fork_bundle]
+    if: ${{ !failure() && !cancelled() && inputs.artifact_run_id == '' && needs.fork_preflight.result == 'success' && needs.fork_preflight.outputs.already_published != 'true' && needs.fork_bundle.result == 'success' }}
+    permissions:
+      actions: read
+      contents: read
+    uses: ./.github/workflows/release-desktop.yml
+    with:
+      version: ${{ needs.fork_preflight.outputs.version }}
+      ref: ${{ needs.fork_preflight.outputs.sha }}
+      release_channel: stable
+      clerk_publishable_key: ""
+      clerk_jwt_template: ""
+      clerk_cli_oauth_client_id: ""
+      relay_url: ""
+      label: macOS arm64
+      runner: macos-15
+      platform: mac
+      target: dmg
+      arch: arm64
+      rust_target: aarch64-apple-darwin
+      resource_key: darwin-arm64
+      cli_archive: false
+      launch_check: true
+      relay_client_tracing: false
+      fork_build_only: true
+    secrets:
+      MACOS_SELF_SIGNED_CERTIFICATE: ${{ secrets.MACOS_SELF_SIGNED_CERTIFICATE }}
+      MACOS_SELF_SIGNED_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_SELF_SIGNED_CERTIFICATE_PASSWORD }}
 
   fork_nix:
     name: Build versioned fork Nix package
@@ -496,7 +558,8 @@ jobs:
       - name: Build and verify the matching Nix package
         id: build
         env:
-          EXPECTED_VERSION: ${{ needs.fork_preflight.outputs.version }}
+          # The flake versions itself from source, so a fork fix builds t3code-<base version>.
+          EXPECTED_VERSION: ${{ needs.fork_preflight.outputs.base_version }}
           EXPECTED_SHA: ${{ needs.fork_preflight.outputs.sha }}
         shell: bash
         run: |
@@ -524,14 +587,24 @@ jobs:
 
   fork_build_artifacts:
     name: Verify and package fork installers
-    needs: [fork_preflight, fork_android, fork_desktop_windows, fork_nix]
+    needs:
+      [
+        fork_preflight,
+        fork_android,
+        fork_desktop_linux,
+        fork_desktop_windows,
+        fork_desktop_mac,
+        fork_nix,
+      ]
     if: >-
       !failure() && !cancelled() &&
       inputs.artifact_run_id == '' &&
       needs.fork_preflight.result == 'success' &&
       needs.fork_preflight.outputs.already_published != 'true' &&
       needs.fork_android.result == 'success' &&
+      needs.fork_desktop_linux.result == 'success' &&
       needs.fork_desktop_windows.result == 'success' &&
+      needs.fork_desktop_mac.result == 'success' &&
       needs.fork_nix.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -563,7 +636,19 @@ jobs:
           name: desktop-win-x64
           path: incoming/windows
 
-      - name: Verify both installers and prepare a build-only artifact
+      - name: Download macOS app build
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: desktop-mac-arm64
+          path: incoming/mac
+
+      - name: Download Linux AppImage build
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: desktop-linux-x64
+          path: incoming/linux
+
+      - name: Verify installers and prepare a build-only artifact
         env:
           EXPECTED_VERSION: ${{ needs.fork_preflight.outputs.version }}
           EXPECTED_SHA: ${{ needs.fork_preflight.outputs.sha }}
@@ -616,6 +701,21 @@ jobs:
           cp "$android_meta" release-assets/metadata.json
           cp "$windows_meta" release-assets/windows-metadata.json
 
+          # Update feeds name their files, so installers keep electron-builder's
+          # names; a missing file fails cp here. release-desktop.yml suffixes the
+          # Windows feed per arch for upstream's merge; the fork ships x64 only.
+          cp "incoming/windows/$windows_name.blockmap" release-assets/
+          cp incoming/windows/latest-win-x64.yml release-assets/latest.yml
+          mac_base="T3-Code-${EXPECTED_VERSION}-arm64"
+          for file in "$mac_base.dmg" "$mac_base.dmg.blockmap" "$mac_base.zip" "$mac_base.zip.blockmap" latest-mac.yml; do
+            cp "incoming/mac/$file" release-assets/
+          done
+          cp incoming/linux/T3-Code-x86_64.AppImage incoming/linux/latest-linux.yml release-assets/
+          (cd release-assets && for installer in "$mac_base.dmg" "$mac_base.zip" T3-Code-x86_64.AppImage; do
+            sha256sum "$installer" > "$installer.sha256"
+          done)
+          cp .github/scripts/install-macos.sh release-assets/install-macos.sh
+
           EXPECTED_SHA="$EXPECTED_SHA" UPSTREAM_BASE="$UPSTREAM_BASE" UPSTREAM_TAG="$UPSTREAM_TAG" BUILD_RUN_ID="$BUILD_RUN_ID" BUILD_RUN_ATTEMPT="$BUILD_RUN_ATTEMPT" node - <<'NODE'
           const fs = require("node:fs");
           const { buildForkArtifactSourceMetadata } = require("./.github/scripts/fork-release.cjs");
@@ -641,7 +741,7 @@ jobs:
           }
           fs.writeFileSync("release-assets/nix-build.json", `${JSON.stringify({
             package: "t3code",
-            version: process.env.EXPECTED_VERSION,
+            version: storePath.replace(/^.*-t3code-/, ""),
             gitSha: process.env.EXPECTED_SHA,
             storePath,
             ...buildForkArtifactSourceMetadata({
@@ -690,7 +790,35 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload Windows and Android installers
+      - name: Verify the complete release asset set
+        env:
+          EXPECTED_VERSION: ${{ needs.fork_preflight.outputs.version }}
+          EXPECTED_SHA: ${{ needs.fork_preflight.outputs.sha }}
+          UPSTREAM_BASE: ${{ needs.fork_preflight.outputs.upstream_base }}
+          UPSTREAM_TAG: ${{ needs.fork_preflight.outputs.upstream_tag }}
+          SOURCE_BRANCH: ${{ needs.fork_preflight.outputs.source_branch }}
+          BUILD_RUN_ID: ${{ github.run_id }}
+          BUILD_RUN_ATTEMPT: ${{ github.run_attempt }}
+        shell: bash
+        run: |
+          node - <<'NODE'
+          const { verifyForkBuildArtifactAssets } = require("./.github/scripts/fork-release.cjs");
+          verifyForkBuildArtifactAssets({
+            directory: "release-assets",
+            version: process.env.EXPECTED_VERSION,
+            sha: process.env.EXPECTED_SHA,
+            upstreamBase: process.env.UPSTREAM_BASE,
+            upstreamTag: process.env.UPSTREAM_TAG,
+            sourceBranch: process.env.SOURCE_BRANCH,
+            buildRunId: process.env.BUILD_RUN_ID,
+            buildRunAttempt: process.env.BUILD_RUN_ATTEMPT,
+          }).catch((error) => {
+            console.error(error.message);
+            process.exitCode = 1;
+          });
+          NODE
+
+      - name: Upload desktop and Android installers
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ needs.fork_preflight.outputs.artifact_name }}
@@ -876,7 +1004,7 @@ jobs:
             buildRunId: process.env.BUILD_ARTIFACT_RUN_ID,
             buildRunAttempt: process.env.BUILD_ARTIFACT_RUN_ATTEMPT,
           }).then(() => {
-            process.stdout.write("Verified exact Windows, Android, and Nix build artifacts.\n");
+            process.stdout.write("Verified exact desktop, Android, and Nix build artifacts and update feeds.\n");
           }).catch((error) => {
             console.error(error.message);
             process.exitCode = 1;

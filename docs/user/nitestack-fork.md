@@ -6,8 +6,8 @@ and adds runtime support for [aix](https://github.com/Nitestack/aix) API-key pro
 project-level Personal and Work scopes.
 
 It uses the same T3 Code app name, `t3` and `t3code-desktop` commands, and default state directory
-as upstream, so install it instead of upstream T3 Code, not next to it. Android is the exception:
-its hidden package ID differs, so both Android apps can be installed.
+as upstream, so install it instead of upstream T3 Code, not next to it. The Android app also uses
+the official package ID, so it replaces the Play Store app.
 
 ## aix profiles
 
@@ -15,7 +15,7 @@ Configure aix itself with the [aix setup and profile guide](https://github.com/N
 To use its profiles in T3, start the fork's server with `aix` on its `PATH` and `T3CODE_AIX=1` in
 its environment. Without that variable the server behaves like upstream T3, and instances it created
 for aix earlier are disabled. Your own Codex, Claude, and other provider sign-ins are not changed.
-The Nix build and the Windows desktop app's WSL backend set `T3CODE_AIX=1` for you; set
+The Nix build and the fork's desktop app set `T3CODE_AIX=1` for you; set
 `T3CODE_AIX=0` to turn it off.
 
 T3 reads the profile list from aix and asks aix for each profile's endpoint and key inside the server
@@ -93,10 +93,10 @@ works, which means it replaces the Play Store app: uninstall that first, then up
 APK appears with its SHA-256 checksum and build metadata; there is no store listing. Its `vX.Y.Z` tag points to the fork
 integration merge commit on `main`, whose tree contains fork changes and upstream through the
 matching stable tag. The upstream tag commit is recorded only as the stable base. The release
-workflow also builds a Windows x64 installer and the matching Nix package. Windows signing status is recorded in
+workflow also builds a Windows x64 installer, an Apple Silicon macOS app, a Linux x64 AppImage, and the matching Nix package. Windows signing status is recorded in
 the artifact metadata; current fork builds are expected to be unsigned. Before public publication,
 the Windows installer and APK can be downloaded from the build-only Actions artifact described in
-the [install guide](./install.md#t3-code-fork-windows-and-android). See the
+the [install guide](./install.md#t3-code-fork-desktop-and-android). See the
 [Android build guide](../operations/android-fork-apk.md).
 
 The official Android and iOS apps are unchanged upstream clients. aix profiles reach them as regular
@@ -117,7 +117,7 @@ Compared with upstream T3 Code at
 - The Usage page's Work tab includes Work-scoped Codex records and Claude sessions matched to aix
   profile instances, along with aix budgets, cost, and tokens.
 - Project-level Personal/Work scopes on web, desktop, and the fork's Android app.
-- A separately signed Android APK with its own package ID, and no fork iOS build.
+- A separately signed Android APK that replaces the Play Store app, and no fork iOS build.
 - A Nix flake with the `t3code-<version>` package and the usual T3 Code commands.
 - Upstream sync limited to stable releases and proposed as reviewable pull requests.
 
@@ -160,7 +160,8 @@ integration commit before the existing release workflow builds the Windows insta
 and same-version Nix package. The tag and build source are that fork commit; the upstream tag's
 peeled commit is recorded as the stable base. The workflow defaults to an Actions artifact without
 a tag or GitHub release. Public publication requires explicit authorization and keeps the upstream
-version, tag, and release title. See the [fork release runbook](../operations/fork-release.md) for
+version, tag, and release title. Fork fixes released between upstream releases are versioned
+`X.Y.(Z+1)-aix.N`, so installed apps update to them and later to the next upstream release. See the [fork release runbook](../operations/fork-release.md) for
 details. Each successful publication advances the `release` branch only when the new commit is a
 fast-forward.
 
@@ -178,7 +179,8 @@ vp i
 Then restart with the same `T3CODE_HOME`. Before upgrading, keep a copy of that data directory;
 checking out older source does not roll back database migrations. To return to a known-good source
 revision, stop the server and run `git switch --detach <known-good-commit>`, then `vp i` and restart.
-Do not use the upstream desktop updater or Nix package to update this fork.
+Installed fork desktop apps (Windows, macOS, and the Linux AppImage) update themselves from fork
+releases through the in-app updater. Do not install upstream T3 Code or its Nix package over the fork.
 
 For connection and pairing help, see [remote access](./remote-access.md) and
 [T3 Connect troubleshooting](./t3-connect-troubleshooting.md). For existing provider and thread
