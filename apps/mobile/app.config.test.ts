@@ -52,10 +52,12 @@ it.each([
 });
 
 it.each([
-  ["2.3.0", 2_003_000],
-  ["2.3.1", 2_003_001],
-  ["2.4.0", 2_004_000],
-  ["3.0.0", 3_000_000],
+  ["2.3.0", 200_300_099],
+  ["2.3.1-aix.1", 200_300_101],
+  ["2.3.1-aix.12", 200_300_112],
+  ["2.3.1", 200_300_199],
+  ["2.4.0", 200_400_099],
+  ["3.0.0", 300_000_099],
 ])("versions the Android fork as %s without changing its identity", async (version, code) => {
   vi.stubEnv("T3CODE_MOBILE_VERSION", version);
   const config = await loadConfig("android-fork");
@@ -68,7 +70,16 @@ it.each([
   expect(config.android?.versionCode).toBe(code);
 });
 
-it.each(["2.3.0-preview.1", "2.03.0", "2.1000.0", "2.3.1000", "2100.0.1", "0.0.0"])(
+it.each([
+  "2.3.0-preview.1",
+  "2.3.1-aix.0",
+  "2.3.1-aix.99",
+  "2.03.0",
+  "2.1000.0",
+  "2.3.1000",
+  "22.0.0",
+  "0.0.0",
+])(
   "rejects an Android fork version that cannot produce an ordered version code: %s",
   async (version) => {
     vi.stubEnv("T3CODE_MOBILE_VERSION", version);

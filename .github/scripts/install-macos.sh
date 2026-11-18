@@ -20,7 +20,7 @@ if [[ -z "$version" ]]; then
   latest="$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/$repo/releases/latest")"
   version="${latest##*/v}"
 fi
-[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "could not resolve a release version (got '$version')."
+[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-aix\.[0-9]+)?$ ]] || fail "could not resolve a release version (got '$version')."
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT

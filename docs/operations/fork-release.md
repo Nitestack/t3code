@@ -7,7 +7,7 @@ Android APK, a Windows installer, the macOS install script, a Linux AppImage, so
 
 The Nix package is `t3code-<version>` and uses the upstream `t3` and `t3code-desktop` commands,
 T3 Code app name, and default state directory. Install it instead of upstream T3 Code; the Android
-APK is the exception and can coexist because its hidden package ID differs.
+APK uses the official package ID and replaces the store app.
 
 ## Release checklist
 
@@ -63,6 +63,22 @@ node --test scripts/upstream-stable-sync.test.mjs
 
 Each package also has `vp run typecheck`. Web browser tests on NixOS need the
 [devenv shell](./devenv.md).
+
+## Fork fixes between upstream releases
+
+Release fork fixes the same way, from `main`, without editing any manifest. Preflight derives the
+version: a source whose upstream base `vX.Y.Z` is already published for another commit becomes
+`X.Y.(Z+1)-aix.N`, with `N` one past the highest existing fork tag of that patch (at most 98).
+Rerunning on a commit that already has a fork tag reuses that version. This sorts above the base
+release and below upstream's next stable, so installed desktop apps update to the fork fix and
+later to the upstream sync. The desktop feed stays on channel `latest`; electron-builder would
+otherwise name a `-aix.N` feed after its prerelease tag.
+
+Builds are stamped with the fork version at release time, so upstream sync merges never conflict on
+it. The Nix flake versions itself from source and still builds `t3code-<X.Y.Z>`; the pinned flake
+ref uses the fork tag. Android version codes are `(major*1e6 + minor*1e3 + patch)*100` plus `N`
+for a fork fix or 99 for a plain release, as `fork-release.cjs` and `apps/mobile/app.config.ts`
+compute.
 
 ## Stable upstream sync
 

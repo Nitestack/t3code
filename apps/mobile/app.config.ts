@@ -127,19 +127,25 @@ function resolveAppVariant(value: string | undefined): AppVariant {
   }
 }
 
+// A fork fix X.Y.(Z+1)-aix.N must install over X.Y.Z and under upstream X.Y.(Z+1), so the last two
+// digits are N for a fork fix and 99 for a plain release. fork-release.cjs verifies the same formula.
 function androidForkVersionCode(version: string): number {
-  const parts = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(version);
-  if (parts === null) throw new Error("Android fork version must be stable MAJOR.MINOR.PATCH.");
+  const parts = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-aix\.([1-9]\d*))?$/.exec(version);
+  if (parts === null) {
+    throw new Error("Android fork version must be MAJOR.MINOR.PATCH or MAJOR.MINOR.PATCH-aix.N.");
+  }
   const major = Number(parts[1]);
   const minor = Number(parts[2]);
   const patch = Number(parts[3]);
-  const code = major * 1_000_000 + minor * 1_000 + patch;
+  const revision = parts[4] === undefined ? 99 : Number(parts[4]);
+  const code = (major * 1_000_000 + minor * 1_000 + patch) * 100 + revision;
   if (
     !Number.isSafeInteger(code) ||
-    code <= 0 ||
+    code <= 99 ||
     code > 2_100_000_000 ||
     minor > 999 ||
-    patch > 999
+    patch > 999 ||
+    (parts[4] !== undefined && revision > 98)
   ) {
     throw new Error("Android fork version exceeds the ordered Android versionCode range.");
   }

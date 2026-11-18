@@ -160,7 +160,8 @@ integration commit before the existing release workflow builds the Windows insta
 and same-version Nix package. The tag and build source are that fork commit; the upstream tag's
 peeled commit is recorded as the stable base. The workflow defaults to an Actions artifact without
 a tag or GitHub release. Public publication requires explicit authorization and keeps the upstream
-version, tag, and release title. See the [fork release runbook](../operations/fork-release.md) for
+version, tag, and release title. Fork fixes released between upstream releases are versioned
+`X.Y.(Z+1)-aix.N`, so installed apps update to them and later to the next upstream release. See the [fork release runbook](../operations/fork-release.md) for
 details. Each successful publication advances the `release` branch only when the new commit is a
 fast-forward.
 

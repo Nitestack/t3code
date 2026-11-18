@@ -535,16 +535,29 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         undefined,
       );
 
+      const forkFix = yield* createBuildConfig(
+        "mac",
+        "dmg",
+        "0.0.34-aix.1",
+        false,
+        false,
+        undefined,
+        undefined,
+      );
+
       assert.isNull(preview.publish);
       assert.isNull(previewChannel.publish);
-      assert.deepStrictEqual(release.publish, [
+      const stableFeed = [
         {
           provider: "github",
           owner: "pingdotgg",
           repo: "t3code",
           releaseType: "release",
+          channel: "latest",
         },
-      ]);
+      ];
+      assert.deepStrictEqual(release.publish, stableFeed);
+      assert.deepStrictEqual(forkFix.publish, stableFeed);
     }).pipe(
       Effect.provide(
         ConfigProvider.layer(

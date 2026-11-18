@@ -6,10 +6,54 @@ const { createReadStream } = require("node:fs");
 const RELEASE_REPOSITORY = "Nitestack/t3code";
 const STABLE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const COMMIT_SHA = /^[0-9a-f]{40}$/i;
+// A fork fix on upstream X.Y.Z is X.Y.(Z+1)-aix.N: newer than its base, older than upstream's next.
+const FORK_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-aix\.([1-9]\d*))?$/;
 const BUILD_ONLY_JOBS = Object.freeze([
   "Build versioned fork Nix package",
   "Verify and package fork installers",
 ]);
+
+function forkBaseVersion(version) {
+  const match = FORK_VERSION.exec(version ?? "");
+  if (!match || (match[4] !== undefined && match[3] === "0")) {
+    throw new Error(
+      `Fork version must be X.Y.Z or X.Y.Z-aix.N on a released X.Y.(Z-1): ${version}`,
+    );
+  }
+  return match[4] === undefined ? version : `${match[1]}.${match[2]}.${Number(match[3]) - 1}`;
+}
+
+// Same formula as androidForkVersionCode in apps/mobile/app.config.ts; a fork fix sorts below X.Y.Z.
+function forkAndroidVersionCode(version) {
+  const match = FORK_VERSION.exec(version);
+  const [major, minor, patch] = match.slice(1, 4).map(Number);
+  return (
+    (major * 1_000_000 + minor * 1_000 + patch) * 100 +
+    (match[4] === undefined ? 99 : Number(match[4]))
+  );
+}
+
+// baseReleaseSha is the commit of the published v<baseVersion> release, or "" when there is none.
+function resolveForkReleaseVersion({ baseVersion, sha, baseReleaseSha = "", forkTags = [] }) {
+  if (!STABLE_VERSION.test(baseVersion ?? "") || !COMMIT_SHA.test(sha ?? "")) {
+    throw new Error("Fork release version needs a stable base version and a full source SHA.");
+  }
+  if (baseReleaseSha === "" || baseReleaseSha.toLowerCase() === sha.toLowerCase())
+    return baseVersion;
+  const [major, minor, patch] = baseVersion.split(".").map(Number);
+  const core = `${major}.${minor}.${patch + 1}`;
+  let latest = 0;
+  for (const tag of forkTags) {
+    const match = FORK_VERSION.exec(tag.version);
+    if (!match || match[4] === undefined || `${match[1]}.${match[2]}.${match[3]}` !== core)
+      continue;
+    if (tag.sha.toLowerCase() === sha.toLowerCase()) return tag.version;
+    latest = Math.max(latest, Number(match[4]));
+  }
+  if (latest >= 98)
+    throw new Error(`No fork revision left for ${core}; the Android version code allows 98.`);
+  return `${core}-aix.${latest + 1}`;
+}
 
 function checksummedReleaseAssets(version) {
   return [
@@ -221,7 +265,7 @@ function buildForkBuildInfo({
     "The macOS Apple Silicon DMG and zip are signed with the fork's self-signed certificate, not notarized, and passed a launch check on a GitHub macOS runner.",
     "The Linux x64 AppImage passed a launch check on the standard Ubuntu runner.",
     "latest.yml, latest-mac.yml, and latest-linux.yml are the desktop update feeds; every file they list was checked against its SHA-512.",
-    `The matching ${markdownCode(`t3code-${version}`)} Nix package was built successfully; its exact source and store path are in nix-build.json.`,
+    `The matching ${markdownCode(`t3code-${forkBaseVersion(version)}`)} Nix package was built successfully; its exact source and store path are in nix-build.json.`,
     "",
     publicationMode === "authorized-auto-publish"
       ? "This build is part of an explicitly authorized stable release run."
@@ -235,7 +279,7 @@ function buildForkBuildInfo({
     "After an authorized release publishes its matching tag, install it with:",
     "",
     "```sh",
-    `nix profile add 'github:Nitestack/t3code/${upstreamTag}'`,
+    `nix profile add 'github:Nitestack/t3code/v${version}'`,
     "```",
     "",
   ].join("\n");
@@ -323,7 +367,7 @@ function validateForkBuildOnlyRun({ run, jobs, artifacts, expectedRunId, version
   const runId = Number(expectedRunId);
   const artifactName = `t3-code-installers-${version}-${sha.slice(0, 12)}`;
   if (
-    !STABLE_VERSION.test(version) ||
+    !FORK_VERSION.test(version) ||
     !COMMIT_SHA.test(sha) ||
     !Number.isSafeInteger(runId) ||
     runId < 1 ||
@@ -442,7 +486,11 @@ async function verifyForkBuildArtifactAssets({
   buildRunId = "",
   buildRunAttempt = "",
 }) {
-  if (upstreamTag !== `v${version}` || !COMMIT_SHA.test(sha) || !COMMIT_SHA.test(upstreamBase)) {
+  if (
+    upstreamTag !== `v${forkBaseVersion(version)}` ||
+    !COMMIT_SHA.test(sha) ||
+    !COMMIT_SHA.test(upstreamBase)
+  ) {
     throw new Error(
       "Build artifact source identity has an invalid version or upstream stable base.",
     );
@@ -481,8 +529,7 @@ async function verifyForkBuildArtifactAssets({
   const androidMetadata = readJson("metadata.json");
   const windowsMetadata = readJson("windows-metadata.json");
   const nixMetadata = readJson("nix-build.json");
-  const [major, minor, patch] = version.split(".").map(Number);
-  const expectedAndroidVersionCode = major * 1_000_000 + minor * 1_000 + patch;
+  const expectedAndroidVersionCode = forkAndroidVersionCode(version);
   const nixStorePath = typeof nixMetadata.storePath === "string" ? nixMetadata.storePath : "";
   const nixStoreName = nixStorePath.startsWith("/nix/store/")
     ? nixStorePath.slice("/nix/store/".length)
@@ -503,7 +550,7 @@ async function verifyForkBuildArtifactAssets({
     windowsMetadata.sha256 !== windowsHash ||
     !["signed", "unsigned"].includes(windowsMetadata.windowsSigning) ||
     nixMetadata.package !== "t3code" ||
-    nixMetadata.version !== version ||
+    nixMetadata.version !== forkBaseVersion(version) ||
     nixMetadata.gitSha?.toLowerCase() !== sha.toLowerCase() ||
     [androidMetadata, windowsMetadata, nixMetadata].some((metadata) =>
       Object.entries(sourceMetadata).some(
@@ -511,7 +558,7 @@ async function verifyForkBuildArtifactAssets({
       ),
     ) ||
     !/^[a-z0-9]{32}$/.test(nixStoreHash) ||
-    nixStoreName.slice(33) !== `t3code-${version}`
+    nixStoreName.slice(33) !== `t3code-${forkBaseVersion(version)}`
   ) {
     throw new Error(
       "Existing release metadata does not match the fork source, version, or installer contents.",
@@ -575,6 +622,7 @@ function resolveForkRelease({
   channel,
   requestedVersion = "",
   manifestVersions,
+  forkVersion = "",
   sha,
   sourceBranch = "",
   upstreamBase = "",
@@ -602,9 +650,13 @@ function resolveForkRelease({
   if (versions.length === 0 || versions.some((version) => version !== versions[0])) {
     throw new Error("Server, desktop, web, and contracts must have the same application version.");
   }
-  const version = versions[0];
-  if (!STABLE_VERSION.test(version))
-    throw new Error(`Application version must be stable MAJOR.MINOR.PATCH: ${version}`);
+  const baseVersion = versions[0];
+  if (!STABLE_VERSION.test(baseVersion))
+    throw new Error(`Application version must be stable MAJOR.MINOR.PATCH: ${baseVersion}`);
+  const version = forkVersion || baseVersion;
+  if (forkBaseVersion(version) !== baseVersion) {
+    throw new Error(`Fork version ${version} is not based on application version ${baseVersion}.`);
+  }
   if (requestedVersion && requestedVersion !== version) {
     throw new Error(
       `Requested version ${requestedVersion} does not match application version ${version}.`,
@@ -617,8 +669,10 @@ function resolveForkRelease({
   if (!COMMIT_SHA.test(upstreamBase)) {
     throw new Error("Release upstream base must be a full 40-character commit SHA.");
   }
-  if (upstreamTag !== tag) {
-    throw new Error(`Upstream stable tag ${upstreamTag || "(missing)"} does not match ${tag}.`);
+  if (upstreamTag !== `v${baseVersion}`) {
+    throw new Error(
+      `Upstream stable tag ${upstreamTag || "(missing)"} does not match v${baseVersion}.`,
+    );
   }
   if (!upstreamBaseIsAncestor) {
     throw new Error("The upstream stable base must be an ancestor of the fork release source.");
@@ -680,6 +734,9 @@ function resolveForkRelease({
 
 module.exports = {
   RELEASE_REPOSITORY,
+  forkAndroidVersionCode,
+  forkBaseVersion,
+  resolveForkReleaseVersion,
   analyzeForkUpstreamHistory,
   assertForkReleaseTagTarget,
   assertExistingForkReleaseMetadata,

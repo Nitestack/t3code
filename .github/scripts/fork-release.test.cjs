@@ -13,9 +13,12 @@ const {
   buildForkNixBuildSummary,
   buildForkReleaseNotes,
   decideReleaseBranchUpdate,
+  forkAndroidVersionCode,
+  forkBaseVersion,
   requiredReleaseAssets,
   resolveForkUpstreamBase,
   resolveForkRelease,
+  resolveForkReleaseVersion,
   validateForkBuildOnlyRun,
   validateForkPublicationMode,
   verifyForkBuildArtifactAssets,
@@ -198,6 +201,44 @@ test("release tags derive from the synchronized application version and cannot s
   assert.throws(
     () => resolveForkRelease({ ...dispatch, upstreamBaseIsAncestor: false }),
     /must be an ancestor of the fork release source/,
+  );
+});
+
+test("sources past a published release become ordered fork fixes of the next patch", () => {
+  const other = "1111111111111111111111111111111111111111";
+  const resolve = (input) => resolveForkReleaseVersion({ baseVersion: "0.1.9", sha, ...input });
+
+  assert.equal(resolve({}), "0.1.9");
+  assert.equal(resolve({ baseReleaseSha: sha }), "0.1.9");
+  assert.equal(resolve({ baseReleaseSha: other }), "0.1.10-aix.1");
+  const forkTags = [
+    { version: "0.1.10-aix.1", sha: other },
+    { version: "0.1.10-aix.2", sha },
+    { version: "0.1.9-aix.7", sha: other },
+  ];
+  assert.equal(resolve({ baseReleaseSha: other, forkTags }), "0.1.10-aix.2");
+  assert.equal(resolve({ baseReleaseSha: other, forkTags: forkTags.slice(0, 1) }), "0.1.10-aix.2");
+  assert.throws(
+    () => resolve({ baseReleaseSha: other, forkTags: [{ version: "0.1.10-aix.98", sha: other }] }),
+    /No fork revision left/,
+  );
+
+  assert.equal(forkBaseVersion("0.1.10-aix.2"), "0.1.9");
+  assert.equal(forkBaseVersion("0.1.9"), "0.1.9");
+  assert.throws(() => forkBaseVersion("0.2.0-aix.1"), /Fork version must be/);
+  const codes = ["0.1.9", "0.1.10-aix.1", "0.1.10-aix.2", "0.1.10"].map(forkAndroidVersionCode);
+  assert.deepEqual(codes, [100_999, 101_001, 101_002, 101_099]);
+
+  assert.deepEqual(resolveForkRelease({ ...dispatch, forkVersion: "0.1.10-aix.1" }), {
+    version: "0.1.10-aix.1",
+    tag: "v0.1.10-aix.1",
+    sha,
+    releaseName: "T3 Code v0.1.10-aix.1",
+    runner: "ubuntu-latest",
+  });
+  assert.throws(
+    () => resolveForkRelease({ ...dispatch, forkVersion: "0.1.11-aix.1" }),
+    /not based on application version 0\.1\.9/,
   );
 });
 
@@ -611,7 +652,7 @@ test("existing release assets must have matching source metadata and file checks
       JSON.stringify({
         applicationId: "com.t3tools.t3code",
         versionName: "0.1.9",
-        versionCode: 1009,
+        versionCode: 100_999,
         gitSha: sha,
         sha256: digest(androidBytes),
         ...buildForkArtifactSourceMetadata({
@@ -774,7 +815,7 @@ test("manual version overrides cannot diverge from product versions", () => {
       resolveForkRelease({
         ...dispatch,
         manifestVersions: Object.fromEntries(
-          Object.keys(manifestVersions).map((key) => [key, "0.1.9-fork.1"]),
+          Object.keys(manifestVersions).map((key) => [key, "0.1.9-aix.1"]),
         ),
       }),
     /must be stable MAJOR.MINOR.PATCH/,

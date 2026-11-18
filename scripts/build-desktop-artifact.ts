@@ -2718,7 +2718,8 @@ export const resolveGitHubPublishConfig = Effect.fn("resolveGitHubPublishConfig"
     owner,
     repo,
     releaseType: updateChannel === "nightly" ? "prerelease" : "release",
-    ...(updateChannel === "nightly" ? { channel: "nightly" as const } : {}),
+    // Explicit, so electron-builder does not name a fork fix's feed after its "-aix.N" prerelease tag.
+    channel: updateChannel,
   };
 });
 

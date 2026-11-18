@@ -73,6 +73,7 @@ jobs:
       contents: read
     outputs:
       version: ${{ steps.resolve.outputs.version }}
+      base_version: ${{ steps.resolve.outputs.base_version }}
       tag: ${{ steps.resolve.outputs.tag }}
       release_name: ${{ steps.resolve.outputs.release_name }}
       sha: ${{ steps.resolve.outputs.sha }}
@@ -234,7 +235,31 @@ jobs:
             echo "::error::Fork source contains $count upstream-main commit(s) beyond $upstream_tag: $short_shas. Main accepts stable upstream tags only."
             exit 1
           fi
-          tag="v${tag_version:-$manifest_version}"
+          # A source past the published v<base> release becomes the next fork fix (X.Y.(Z+1)-aix.N).
+          base_release_sha=""
+          if gh api "repos/$GITHUB_REPOSITORY/releases/tags/v$manifest_version" > /dev/null 2>"$RUNNER_TEMP/base-release-error"; then
+            base_release_sha="$(git rev-parse --verify "refs/tags/v$manifest_version^{commit}")"
+          elif ! grep -q "HTTP 404" "$RUNNER_TEMP/base-release-error"; then
+            echo "Could not verify whether release v$manifest_version exists." >&2
+            exit 1
+          fi
+          git for-each-ref --format='%(refname:strip=2) %(*objectname)%(objectname)' 'refs/tags/v*-aix.*' > "$RUNNER_TEMP/fork-tags.txt"
+          fork_version="$(SOURCE_SHA="$source_sha" MANIFEST_VERSION="$manifest_version" BASE_RELEASE_SHA="$base_release_sha" node - "$RUNNER_TEMP/fork-tags.txt" <<'NODE'
+          const fs = require("node:fs");
+          const { resolveForkReleaseVersion } = require("./.github/scripts/fork-release.cjs");
+          const forkTags = fs.readFileSync(process.argv[2], "utf8").split(/\r?\n/).filter(Boolean).map((line) => {
+            const [tag, objects] = line.split(" ");
+            return { version: tag.replace(/^v/, ""), sha: objects.slice(0, 40) };
+          });
+          process.stdout.write(resolveForkReleaseVersion({
+            baseVersion: process.env.MANIFEST_VERSION,
+            sha: process.env.SOURCE_SHA,
+            baseReleaseSha: process.env.BASE_RELEASE_SHA,
+            forkTags,
+          }));
+          NODE
+          )"
+          tag="v${tag_version:-$fork_version}"
           remote_refs="$(git ls-remote origin "refs/tags/$tag" "refs/tags/$tag^{}")"
           existing_tag_sha="$(printf '%s\n' "$remote_refs" | awk '$2 ~ /\^\{\}$/ { print $1; exit }')"
           if [[ -z "$existing_tag_sha" ]]; then
@@ -257,13 +282,13 @@ jobs:
             existing_release_path="$RUNNER_TEMP/existing-fork-release.json"
             existing_assets_dir="$RUNNER_TEMP/existing-fork-release-assets"
             printf '%s' "$existing_release" > "$existing_release_path"
-            SOURCE_SHA="$source_sha" UPSTREAM_BASE="$upstream_base" UPSTREAM_TAG="$upstream_tag" MANIFEST_VERSION="$manifest_version" node - \
+            SOURCE_SHA="$source_sha" UPSTREAM_BASE="$upstream_base" UPSTREAM_TAG="$upstream_tag" FORK_VERSION="$fork_version" node - \
               "$existing_release_path" <<'NODE'
           const fs = require("node:fs");
           const { assertExistingForkReleaseMetadata } = require("./.github/scripts/fork-release.cjs");
           assertExistingForkReleaseMetadata({
             release: JSON.parse(fs.readFileSync(process.argv[2], "utf8")),
-            version: process.env.MANIFEST_VERSION,
+            version: process.env.FORK_VERSION,
             sha: process.env.SOURCE_SHA,
             upstreamBase: process.env.UPSTREAM_BASE,
             upstreamTag: process.env.UPSTREAM_TAG,
@@ -271,14 +296,14 @@ jobs:
           });
           NODE
             gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir "$existing_assets_dir"
-            SOURCE_SHA="$source_sha" UPSTREAM_BASE="$upstream_base" UPSTREAM_TAG="$upstream_tag" MANIFEST_VERSION="$manifest_version" node - \
+            SOURCE_SHA="$source_sha" UPSTREAM_BASE="$upstream_base" UPSTREAM_TAG="$upstream_tag" FORK_VERSION="$fork_version" node - \
               "$existing_release_path" "$existing_assets_dir" <<'NODE'
           const fs = require("node:fs");
           const { verifyExistingForkReleaseAssets } = require("./.github/scripts/fork-release.cjs");
           verifyExistingForkReleaseAssets({
             release: JSON.parse(fs.readFileSync(process.argv[2], "utf8")),
             directory: process.argv[3],
-            version: process.env.MANIFEST_VERSION,
+            version: process.env.FORK_VERSION,
             sha: process.env.SOURCE_SHA,
             upstreamBase: process.env.UPSTREAM_BASE,
             upstreamTag: process.env.UPSTREAM_TAG,
@@ -293,10 +318,11 @@ jobs:
           export EXISTING_RELEASE="$existing_release"
           export EXISTING_ASSETS_VERIFIED="$existing_assets_verified"
           export UPSTREAM_BASE="$upstream_base"
-          export UPSTREAM_TAG="$upstream_tag"
+          export UPSTREAM_TAG="$upstream_tag" MANIFEST_VERSION="$manifest_version"
           export UPSTREAM_BASE_IS_ANCESTOR="$upstream_base_is_ancestor"
           export UPSTREAM_HISTORY_JSON="$history_json"
           export PUBLICATION_MODE="$publication_mode"
+          export FORK_VERSION="$fork_version"
           node - "$manifest_versions" <<'NODE' >> "$GITHUB_OUTPUT"
           const { resolveForkRelease } = require("./.github/scripts/fork-release.cjs");
           const result = resolveForkRelease({
@@ -306,6 +332,7 @@ jobs:
             channel: process.env.RELEASE_CHANNEL,
             requestedVersion: process.env.REQUESTED_VERSION,
             manifestVersions: JSON.parse(process.argv[2]),
+            forkVersion: process.env.FORK_VERSION,
             sha: process.env.SOURCE_SHA,
             sourceBranch: process.env.SOURCE_BRANCH,
             upstreamBase: process.env.UPSTREAM_BASE,
@@ -328,6 +355,7 @@ jobs:
             artifact_name: `t3-code-installers-${result.version}-${result.sha.slice(0, 12)}`,
             upstream_base: process.env.UPSTREAM_BASE,
             upstream_tag: process.env.UPSTREAM_TAG,
+            base_version: process.env.MANIFEST_VERSION,
             source_branch: process.env.SOURCE_BRANCH,
             publication_mode: process.env.PUBLICATION_MODE,
           })) {
@@ -530,7 +558,8 @@ jobs:
       - name: Build and verify the matching Nix package
         id: build
         env:
-          EXPECTED_VERSION: ${{ needs.fork_preflight.outputs.version }}
+          # The flake versions itself from source, so a fork fix builds t3code-<base version>.
+          EXPECTED_VERSION: ${{ needs.fork_preflight.outputs.base_version }}
           EXPECTED_SHA: ${{ needs.fork_preflight.outputs.sha }}
         shell: bash
         run: |
@@ -712,7 +741,7 @@ jobs:
           }
           fs.writeFileSync("release-assets/nix-build.json", `${JSON.stringify({
             package: "t3code",
-            version: process.env.EXPECTED_VERSION,
+            version: storePath.replace(/^.*-t3code-/, ""),
             gitSha: process.env.EXPECTED_SHA,
             storePath,
             ...buildForkArtifactSourceMetadata({
