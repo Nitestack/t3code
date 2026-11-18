@@ -58,6 +58,13 @@ export const ServerProviderUsageLimits = Schema.Struct({
   windows: ForwardCompatibleArray(ServerProviderUsageWindow),
   /** Profile identity remains available when an AIX budget probe returns no window. */
   profileName: Schema.optional(TrimmedNonEmptyString),
+  /** AI Hub Gateway project budget metadata for grouping Work keys in newer clients. */
+  aixProject: Schema.optional(
+    Schema.Struct({
+      id: TrimmedNonEmptyString,
+      amounts: Schema.optional(ServerProviderUsageAmounts),
+    }),
+  ),
   /** A $0 monthly spend cap has no percentage, so it cannot be a window. */
   zeroSpendCap: Schema.optional(Schema.Boolean),
   credentialFingerprint: Schema.optional(TrimmedNonEmptyString),

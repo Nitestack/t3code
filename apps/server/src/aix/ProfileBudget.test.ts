@@ -28,6 +28,35 @@ const litellm = (profileName: string, endpoint = "https://gateway.test"): Resolv
 const keyInfo = (info: Record<string, unknown>) =>
   Option.getOrThrow(ProfileBudget.decodeKeyInfo({ key: "hashed", info }));
 
+const gatewayInfo = (input: {
+  readonly kind: "personal" | "project";
+  readonly projectId?: string | null;
+  readonly layers: ReadonlyArray<{
+    readonly scope: "key" | "personal" | "project" | "tenant";
+    readonly budget: string | null;
+    readonly spent: string;
+    readonly periodStart?: string;
+  }>;
+}) => ({
+  kind: input.kind,
+  project_id: input.projectId ?? null,
+  remaining_usd: "1.00",
+  limited_by: "key",
+  key_spent_usd: "1.00",
+  layers: input.layers.map((layer) => ({
+    scope: layer.scope,
+    budget_usd: layer.budget,
+    spent_usd: layer.spent,
+    remaining_usd: layer.budget === null ? null : "1.00",
+    period_start: layer.periodStart ?? "2026-11-01T00:00:00.000Z",
+  })),
+  expires_at: null,
+  free_models_unaffected: true,
+  key_id: "key-1",
+  name: "test",
+  source: "gateway",
+});
+
 const fakeHttp = (
   respond: (request: HttpClientRequest.HttpClientRequest) => Response | "transport-error",
 ) => {
@@ -164,6 +193,104 @@ it.each([
 });
 
 it.each([
+  {
+    name: "a project key",
+    info: gatewayInfo({
+      kind: "project",
+      projectId: "6dc2eb8d-45c5-4cbe-884f-127fbb7d18cc",
+      layers: [
+        { scope: "key", budget: "175.00", spent: "175.00" },
+        { scope: "project", budget: "500", spent: "250" },
+        { scope: "tenant", budget: null, spent: "300" },
+      ],
+    }),
+    expected: {
+      usedPercent: 100,
+      amounts: { currency: "USD", spent: 175, total: 175 },
+      aixProject: {
+        id: "6dc2eb8d-45c5-4cbe-884f-127fbb7d18cc",
+        amounts: { currency: "USD", spent: 250, total: 500 },
+      },
+    },
+  },
+  {
+    name: "a personal key with an uncapped key layer",
+    info: gatewayInfo({
+      kind: "personal",
+      layers: [
+        { scope: "key", budget: null, spent: "1" },
+        { scope: "personal", budget: "50", spent: "12.5" },
+        { scope: "tenant", budget: null, spent: "99" },
+      ],
+    }),
+    expected: {
+      usedPercent: 25,
+      amounts: { currency: "USD", spent: 12.5, total: 50 },
+    },
+  },
+])("maps AI Hub Gateway $name budgets", ({ info, expected }) => {
+  const limits = ProfileBudget.aiHubKeyInfoUsageLimits({
+    profileName: "ac",
+    keyInfo: Option.getOrThrow(ProfileBudget.decodeAiHubKeyInfo(info)),
+    checkedAt: CHECKED_AT,
+  });
+  expect(limits.windows[0]).toMatchObject({
+    id: "aix-budget:ac",
+    usedPercent: expected.usedPercent,
+    amounts: expected.amounts,
+    resetsAt: "2026-12-01T00:00:00.000Z",
+    windowDurationMins: 43200,
+  });
+  if ("aixProject" in expected) expect(limits.aixProject).toEqual(expected.aixProject);
+  else expect(limits.aixProject).toBeUndefined();
+});
+
+it("keeps an AI Hub Gateway budget with an empty project, an unknown layer and no period start", () => {
+  const limits = ProfileBudget.aiHubKeyInfoUsageLimits({
+    profileName: "ac",
+    keyInfo: Option.getOrThrow(
+      ProfileBudget.decodeAiHubKeyInfo({
+        project_id: "",
+        layers: [
+          { scope: "key", budget_usd: "100", spent_usd: "25", period_start: null },
+          { scope: "region", budget_usd: null, spent_usd: "3" },
+        ],
+      }),
+    ),
+    checkedAt: CHECKED_AT,
+  });
+  expect(limits.windows[0]).toMatchObject({
+    usedPercent: 25,
+    amounts: { currency: "USD", spent: 25, total: 100 },
+  });
+  expect(limits.windows[0]?.resetsAt).toBeUndefined();
+  expect(limits.aixProject).toBeUndefined();
+});
+
+it("reports an uncapped AI Hub Gateway key as unsupported without using the tenant layer", () => {
+  const limits = ProfileBudget.aiHubKeyInfoUsageLimits({
+    profileName: "ac",
+    keyInfo: Option.getOrThrow(
+      ProfileBudget.decodeAiHubKeyInfo(
+        gatewayInfo({
+          kind: "personal",
+          layers: [
+            { scope: "key", budget: null, spent: "1" },
+            { scope: "personal", budget: null, spent: "2" },
+            { scope: "tenant", budget: "100", spent: "99" },
+          ],
+        }),
+      ),
+    ),
+    checkedAt: CHECKED_AT,
+  });
+  expect(limits).toMatchObject({
+    windows: [],
+    unavailable: { reason: "unsupported", message: "This aix profile's key has no budget limit." },
+  });
+});
+
+it.each([
   { name: "no cap", info: { spend: 4 }, message: "This aix profile's key has no budget limit." },
   {
     name: "a null cap",
@@ -214,14 +341,24 @@ it.effect.each([
     expect(limits.windows[0]?.usedPercent).toBe(50);
     expect(
       http.requests.map((request) => Option.getOrThrow(HttpClientRequest.toUrl(request)).href),
-    ).toEqual([expected]);
+    ).toEqual([expected.replace("/key/info", "/v1/key/info"), expected]);
     expect(http.requests[0]?.headers.authorization).toBe(`Bearer ${SENTINEL_KEY}`);
   }),
 );
 
 it.effect("reads each profile once for all of its instances until the TTL passes", () =>
   Effect.gen(function* () {
-    const http = fakeHttp(() => Response.json({ info: { spend: 1, max_budget: 50 } }));
+    const http = fakeHttp(() =>
+      Response.json(
+        gatewayInfo({
+          kind: "personal",
+          layers: [
+            { scope: "key", budget: "50", spent: "1" },
+            { scope: "tenant", budget: null, spent: "1" },
+          ],
+        }),
+      ),
+    );
     const { service, resolves } = yield* budgetFor(http);
 
     yield* Effect.all(
@@ -405,6 +542,23 @@ it.effect("keeps the profile key out of usage limits and logs on every path", ()
   );
 });
 
+it.effect("falls back from the versioned route on 404", () =>
+  Effect.gen(function* () {
+    const http = fakeHttp((request) => {
+      const url = Option.getOrThrow(HttpClientRequest.toUrl(request)).pathname;
+      return url === "/v1/key/info"
+        ? new Response("missing", { status: 404 })
+        : Response.json({ info: { spend: "25", max_budget: "50" } });
+    });
+    const { service } = yield* budgetFor(http);
+    const limits = yield* service.usageLimits("legacy");
+    expect(limits.windows[0]?.amounts).toEqual({ currency: "USD", spent: 25, total: 50 });
+    expect(
+      http.requests.map((request) => Option.getOrThrow(HttpClientRequest.toUrl(request)).pathname),
+    ).toEqual(["/v1/key/info", "/key/info"]);
+  }),
+);
+
 const provider = (overrides: Partial<ServerProvider> = {}): ServerProvider =>
   ({
     instanceId: ProviderInstanceId.make("codex"),
@@ -471,7 +625,17 @@ it.effect("replaces usage limits only on an enabled Claude budget owner", () =>
 
 it.effect("applies the fallback budget only to the designated Claude instance", () =>
   Effect.gen(function* () {
-    const http = fakeHttp(() => Response.json({ info: { spend: 16, max_budget: 100 } }));
+    const http = fakeHttp(() =>
+      Response.json(
+        gatewayInfo({
+          kind: "personal",
+          layers: [
+            { scope: "key", budget: "100", spent: "16" },
+            { scope: "tenant", budget: null, spent: "16" },
+          ],
+        }),
+      ),
+    );
     const { service } = yield* budgetFor(http);
     const run = (snapshot: ServerProvider) =>
       ProfileBudget.withAixProfileBudget(

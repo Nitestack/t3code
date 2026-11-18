@@ -50,6 +50,7 @@ import {
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { UsageLimitsPooled } from "./UsageLimitsPooled";
+import { UsageLimitsWork } from "./UsageLimitsWork";
 import { PROVIDER_PRESENTATION } from "./usageProviders";
 
 const PACE: Record<LimitPace, { readonly label: string; readonly icon: typeof GaugeIcon }> = {
@@ -424,12 +425,19 @@ export function UsageLimitsSection({
   const profileLabels = usageAixProfileLabels(selected);
   return (
     <div className="space-y-5">
-      <UsageLimitsPooled
-        presentations={filterLimitPresentationsByGroup(selected, scope)}
-        aixProfileLabels={profileLabels}
-        now={now}
-        emptyMessage={usageLimitEmptyMessage(scope)}
-      />
+      {scope === "work" ? (
+        <UsageLimitsWork
+          presentations={filterLimitPresentationsByGroup(selected, scope)}
+          now={now}
+        />
+      ) : (
+        <UsageLimitsPooled
+          presentations={filterLimitPresentationsByGroup(selected, scope)}
+          aixProfileLabels={profileLabels}
+          now={now}
+          emptyMessage={usageLimitEmptyMessage(scope)}
+        />
+      )}
     </div>
   );
 }

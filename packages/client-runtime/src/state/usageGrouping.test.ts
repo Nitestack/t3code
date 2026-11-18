@@ -14,6 +14,8 @@ import {
   filterLimitPresentationsByGroup,
   filterUsageBucketsByScope,
   filterUsageSummaryByScope,
+  composerWorkUsage,
+  groupWorkUsage,
   groupLimitAccounts,
   resolveUsageLimitGroup,
   usageLimitGroupForProvider,
@@ -60,7 +62,129 @@ function account(profileName?: string, providerInstanceId?: string): LimitAccoun
   };
 }
 
+function workAccount(input: {
+  readonly key: string;
+  readonly label: string;
+  readonly project?: { readonly id: string; readonly spent: number; readonly total: number };
+  readonly fingerprint?: string;
+  readonly spent?: number;
+  readonly total?: number;
+  readonly usedPercent?: number;
+  readonly checkedAt?: string;
+}): LimitAccount {
+  const spent = input.spent ?? 0;
+  const total = input.total ?? 100;
+  const usedPercent = input.usedPercent ?? (total > 0 ? (spent / total) * 100 : 0);
+  return {
+    ...account(input.key),
+    key: input.key,
+    displayName: input.label,
+    profileName: input.key,
+    profileLabel: input.label,
+    limits: {
+      checkedAt: input.checkedAt ?? checkedAt,
+      ...(input.fingerprint === undefined ? {} : { credentialFingerprint: input.fingerprint }),
+      ...(input.project === undefined
+        ? {}
+        : {
+            aixProject: {
+              id: input.project.id,
+              amounts: {
+                currency: "USD",
+                spent: input.project.spent,
+                total: input.project.total,
+              },
+            },
+          }),
+      windows:
+        total <= 0
+          ? []
+          : [
+              {
+                id: `aix-budget:${input.key}`,
+                kind: "other",
+                label: input.label,
+                usedPercent,
+                amounts: { currency: "USD", spent, total },
+                resetsAt: "2026-09-05T20:20:00.000Z",
+                windowDurationMins: 1000,
+              },
+            ],
+      ...(total <= 0
+        ? { unavailable: { reason: "unsupported" as const, message: "No budget" } }
+        : {}),
+    },
+  };
+}
+
 describe("usage limit grouping", () => {
+  it("groups Gateway keys by project and names it after its top-spending key", () => {
+    const grouped = groupWorkUsage(
+      [
+        workAccount({
+          key: "zeta",
+          label: "Zeta",
+          project: { id: "project-a", spent: 300, total: 500 },
+          spent: 30,
+        }),
+        workAccount({
+          key: "alpha",
+          label: "Alpha",
+          project: { id: "project-a", spent: 300, total: 500 },
+          spent: 20,
+        }),
+        workAccount({ key: "personal-key", label: "Personal key", spent: 10 }),
+      ],
+      Date.parse(checkedAt),
+    );
+
+    expect(grouped.flat).toBe(false);
+    expect(grouped.spent).toBe(60);
+    expect(grouped.groups.map((group) => [group.id, group.name])).toEqual([
+      ["project-a", "Zeta"],
+      [null, "No project"],
+    ]);
+    expect(grouped.groups[0]?.projectAmounts).toEqual({ currency: "USD", spent: 300, total: 500 });
+  });
+
+  it("keeps older server reports flat and deduplicates a credential across environments", () => {
+    const legacy = groupWorkUsage(
+      [
+        workAccount({ key: "same-a", label: "A", fingerprint: "shared", spent: 12 }),
+        workAccount({
+          key: "same-b",
+          label: "B",
+          fingerprint: "shared",
+          spent: 20,
+          checkedAt: "2026-09-06T12:00:00.000Z",
+        }),
+        workAccount({ key: "other", label: "Other", spent: 4 }),
+      ],
+      Date.parse(checkedAt),
+    );
+    expect(legacy.flat).toBe(true);
+    expect(legacy.groups).toHaveLength(1);
+    expect(legacy.groups[0]?.rows.map((row) => row.label)).toEqual(["B", "Other"]);
+    expect(legacy.spent).toBe(24);
+  });
+
+  it("sorts keys by used percent and reports near-limit and over-pace thresholds", () => {
+    const result = groupWorkUsage(
+      [
+        workAccount({ key: "steady", label: "Steady", spent: 40 }),
+        workAccount({ key: "pace", label: "Pace", usedPercent: 60, spent: 60 }),
+        workAccount({ key: "near", label: "Near", usedPercent: 96, spent: 96 }),
+      ],
+      Date.parse("2026-09-05T20:20:00.000Z") - 30_000_000,
+    );
+    const rows = result.groups[0]?.rows ?? [];
+    expect(rows.map((row) => [row.label, row.status])).toEqual([
+      ["Near", "nearLimit"],
+      ["Pace", "overPace"],
+      ["Steady", null],
+    ]);
+  });
+
   it("filters usage by scope and treats buckets from older servers as Personal", () => {
     const bucket = (scope?: UsageBucket["scope"]): UsageBucket => ({
       day: UsageDay.make("2026-09-05"),
@@ -237,5 +361,55 @@ describe("usage limit grouping", () => {
     expect(resolveUsageLimitGroup(null, both, "work")).toBe("work");
     expect(resolveUsageLimitGroup("personal", workOnly, "personal")).toBe("work");
     expect(resolveUsageLimitGroup(null, new Set(), "work")).toBe("personal");
+  });
+});
+
+describe("composerWorkUsage", () => {
+  const reportAccount = (input: {
+    readonly profile: string;
+    readonly instanceId: string;
+    readonly project: string;
+    readonly spent: number;
+  }) => ({
+    id: `aix-profile:${input.profile}`,
+    driver: ProviderDriverKind.make("claudeAgent"),
+    label: input.profile,
+    instanceId: ProviderInstanceId.make(input.instanceId),
+    limits: {
+      checkedAt,
+      profileName: input.profile,
+      aixProject: {
+        id: input.project,
+        amounts: { currency: "USD" as const, spent: 500, total: 900 },
+      },
+      windows: [
+        {
+          id: `aix-budget:${input.profile}`,
+          kind: "other" as const,
+          label: input.profile,
+          usedPercent: input.spent,
+          amounts: { currency: "USD" as const, spent: input.spent, total: 100 },
+        },
+      ],
+    },
+  });
+
+  it("finds the thread's profile through a sibling driver instance and names the project after its top spender", () => {
+    const work = composerWorkUsage(
+      [
+        reportAccount({ profile: "other", instanceId: "aix-codex-other", project: "q", spent: 90 }),
+        reportAccount({
+          profile: "alpha",
+          instanceId: "aix-claudeAgent-alpha",
+          project: "p",
+          spent: 10,
+        }),
+        reportAccount({ profile: "beta", instanceId: "aix-codex-beta", project: "p", spent: 60 }),
+      ],
+      "aix-codex-alpha",
+    );
+    expect(work?.isThread).toBe(true);
+    expect(work?.ordered.map((account) => account.label)).toEqual(["alpha", "beta"]);
+    expect(work?.name).toBe("beta");
   });
 });
