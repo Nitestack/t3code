@@ -63,6 +63,8 @@ function checksummedReleaseAssets(version) {
     `T3-Code-${version}-arm64.zip`,
     // Unversioned: electron-updater replaces an installed AppImage in place only without x.y.z.
     "T3-Code-x86_64.AppImage",
+    // electron-builder lists the .deb in latest-linux.yml, so the feed needs it too.
+    `T3-Code-${version}-amd64.deb`,
   ];
 }
 
@@ -76,7 +78,7 @@ function updateManifests(version) {
 }
 
 function requiredReleaseAssets(version) {
-  const [windows, android, macDmg, macZip, linux] = checksummedReleaseAssets(version);
+  const [windows, android, macDmg, macZip, linux, deb] = checksummedReleaseAssets(version);
   return [
     windows,
     `${windows}.sha256`,
@@ -94,6 +96,8 @@ function requiredReleaseAssets(version) {
     "install-macos.sh",
     linux,
     `${linux}.sha256`,
+    deb,
+    `${deb}.sha256`,
     ...Object.keys(updateManifests(version)),
     "nix-build.json",
     "BUILD-INFO.md",
@@ -324,7 +328,7 @@ function buildForkReleaseNotes({
     "",
     `Tested build artifact run: ${markdownCode(buildArtifactRunId)} (attempt: ${markdownCode(buildArtifactRunAttempt)})`,
     "",
-    `The Windows installer, macOS Apple Silicon app, Linux AppImage, signed Android APK, and versioned Nix package are built from the fork commit and include fork changes plus upstream through ${upstreamTag}. Checksums and build metadata are attached. Installed desktop apps update themselves from fork releases.`,
+    `The Windows installer, macOS Apple Silicon app, Linux AppImage and Debian package, signed Android APK, and versioned Nix package are built from the fork commit and include fork changes plus upstream through ${upstreamTag}. Checksums and build metadata are attached. Installed desktop apps update themselves from fork releases.`,
     "",
     "On macOS (Apple Silicon), install only with this command. The app is not notarized, so a DMG or zip downloaded in a browser is blocked by Gatekeeper:",
     "",

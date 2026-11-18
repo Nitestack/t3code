@@ -175,7 +175,7 @@ file. For a pinned input, change the tag and update the lock file deliberately.
 ### T3 Code fork (desktop and Android)
 
 Published fork releases include `T3-Code-<version>-x64.exe` for Windows, `T3-Code-<version>.apk`
-for Android, and `T3-Code-x86_64.AppImage` for Linux x64. The desktop apps update themselves from
+for Android, and `T3-Code-x86_64.AppImage` or `T3-Code-<version>-amd64.deb` for Linux x64. The desktop apps update themselves from
 later fork releases.
 
 On an Apple Silicon Mac, install with the script; it is the only supported way, because the app is

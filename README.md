@@ -71,6 +71,9 @@ chmod +x ./T3-Code-x86_64.AppImage
 ./T3-Code-x86_64.AppImage
 ```
 
+On Debian or Ubuntu you can install `T3-Code-<version>-amd64.deb` instead, with
+`sudo apt install ./T3-Code-<version>-amd64.deb`. Both update themselves.
+
 On NixOS, or to manage T3 with Nix, install the fork's flake instead; Nix handles updates:
 
 ```sh
