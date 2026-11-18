@@ -11,9 +11,17 @@ const BUILD_ONLY_JOBS = Object.freeze([
   "Verify and package fork installers",
 ]);
 
+function checksummedReleaseAssets(version) {
+  return [
+    `T3-Code-${version}-x64.exe`,
+    `T3-Code-${version}.apk`,
+    `T3-Code-${version}-arm64.dmg`,
+    `T3-Code-${version}-arm64.zip`,
+  ];
+}
+
 function requiredReleaseAssets(version) {
-  const windows = `T3-Code-${version}-x64.exe`;
-  const android = `T3-Code-${version}.apk`;
+  const [windows, android, macDmg, macZip] = checksummedReleaseAssets(version);
   return [
     windows,
     `${windows}.sha256`,
@@ -21,6 +29,11 @@ function requiredReleaseAssets(version) {
     android,
     `${android}.sha256`,
     "metadata.json",
+    macDmg,
+    `${macDmg}.sha256`,
+    macZip,
+    `${macZip}.sha256`,
+    "install-macos.sh",
     "nix-build.json",
     "BUILD-INFO.md",
   ];
@@ -148,6 +161,7 @@ function buildForkBuildInfo({
     "",
     "The Windows x64 installer was built and its packaged native runtime was verified on the standard Windows 2025 runner. Windows signing status is recorded in windows-metadata.json.",
     "The Android APK was signed with the release upload certificate and verified by the Android build job.",
+    "The macOS Apple Silicon DMG and zip are not Developer ID signed; they passed a launch check on a GitHub macOS runner.",
     `The matching ${markdownCode(`t3code-${version}`)} Nix package was built successfully; its exact source and store path are in nix-build.json.`,
     "",
     publicationMode === "authorized-auto-publish"
@@ -207,7 +221,13 @@ function buildForkReleaseNotes({
     "",
     `Tested build artifact run: ${markdownCode(buildArtifactRunId)} (attempt: ${markdownCode(buildArtifactRunAttempt)})`,
     "",
-    `The Windows installer, signed Android APK, and versioned Nix package are built from the fork commit and include fork changes plus upstream through ${upstreamTag}. Checksums and build metadata are attached.`,
+    `The Windows installer, macOS Apple Silicon app, signed Android APK, and versioned Nix package are built from the fork commit and include fork changes plus upstream through ${upstreamTag}. Checksums and build metadata are attached.`,
+    "",
+    "Install or update on macOS (Apple Silicon). The app is not notarized; this installs it without a Gatekeeper prompt:",
+    "",
+    "```sh",
+    `curl -fsSL https://github.com/Nitestack/t3code/releases/download/${releaseTag}/install-macos.sh | bash`,
+    "```",
     "",
     "Install the matching Nix build from this release tag:",
     "",
@@ -385,16 +405,16 @@ async function verifyForkBuildArtifactAssets({
       "Build artifact does not contain the complete expected installer and Nix asset set.",
     );
   }
-  const windows = `T3-Code-${version}-x64.exe`;
-  const android = `T3-Code-${version}.apk`;
-  const windowsHash = parseChecksum(directory, windows);
-  const androidHash = parseChecksum(directory, android);
-  if (
-    (await hashFile(path.join(directory, windows))) !== windowsHash ||
-    (await hashFile(path.join(directory, android))) !== androidHash
-  ) {
-    throw new Error("Installer contents do not match their SHA-256 files.");
+  const [windows, android] = checksummedReleaseAssets(version);
+  const hashes = new Map();
+  for (const asset of checksummedReleaseAssets(version)) {
+    hashes.set(asset, parseChecksum(directory, asset));
+    if ((await hashFile(path.join(directory, asset))) !== hashes.get(asset)) {
+      throw new Error("Installer contents do not match their SHA-256 files.");
+    }
   }
+  const windowsHash = hashes.get(windows);
+  const androidHash = hashes.get(android);
 
   const readJson = (filename) =>
     JSON.parse(fs.readFileSync(path.join(directory, filename), "utf8"));

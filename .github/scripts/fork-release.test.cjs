@@ -538,6 +538,7 @@ test("existing release assets must have matching source metadata and file checks
   const directory = fs.mkdtempSync(path.join(gitCommonDir, "fork-release-assets-"));
   const windows = "T3-Code-0.1.9-x64.exe";
   const android = "T3-Code-0.1.9.apk";
+  const macZip = "T3-Code-0.1.9-arm64.zip";
   const digest = (contents) => crypto.createHash("sha256").update(contents).digest("hex");
   const baseMetadata = {
     tag_name: "v0.1.9",
@@ -558,6 +559,11 @@ test("existing release assets must have matching source metadata and file checks
   try {
     const windowsBytes = Buffer.from("windows installer bytes");
     const androidBytes = Buffer.from("signed apk bytes");
+    for (const mac of [macZip, "T3-Code-0.1.9-arm64.dmg"]) {
+      fs.writeFileSync(path.join(directory, mac), mac);
+      fs.writeFileSync(path.join(directory, `${mac}.sha256`), `${digest(mac)}  ${mac}\n`);
+    }
+    fs.writeFileSync(path.join(directory, "install-macos.sh"), "#!/bin/bash\n");
     fs.writeFileSync(path.join(directory, windows), windowsBytes);
     fs.writeFileSync(path.join(directory, android), androidBytes);
     fs.writeFileSync(
@@ -669,6 +675,18 @@ test("existing release assets must have matching source metadata and file checks
       }),
       /source identity/,
     );
+    fs.appendFileSync(path.join(directory, macZip), "tampered");
+    await assert.rejects(
+      verifyForkBuildArtifactAssets({
+        directory,
+        version: "0.1.9",
+        sha,
+        upstreamBase,
+        upstreamTag: "v0.1.9",
+      }),
+      /contents do not match/,
+    );
+    fs.writeFileSync(path.join(directory, macZip), macZip);
     fs.appendFileSync(path.join(directory, windows), "tampered");
     await assert.rejects(
       verifyExistingForkReleaseAssets({
