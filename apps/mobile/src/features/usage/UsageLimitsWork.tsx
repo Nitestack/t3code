@@ -77,40 +77,31 @@ export function UsageLimitsWork({
         </View>
       ) : (
         usage.groups.map((group) => (
-          <View
-            key={group.id ?? "no-project"}
-            className="rounded-[24px] border-continuous bg-grouped-card p-4"
-          >
-            {group.id ? (
-              <View className="mb-2 gap-1.5 border-b border-border-subtle pb-3">
-                <View className="flex-row items-baseline justify-between gap-3">
-                  <Text className="text-sm font-t3-medium text-foreground">{group.name}</Text>
-                  {group.projectAmounts ? (
-                    <Text className="text-sm tabular-nums text-foreground">
-                      {formatUsd(group.projectAmounts.spent)}
-                      <Text className="text-foreground-muted">
-                        {" "}
-                        / {formatUsd(group.projectAmounts.total)}
-                      </Text>
-                    </Text>
-                  ) : null}
-                </View>
-                {group.projectAmounts ? (
-                  <UsageBar
-                    usedPercent={
-                      group.projectAmounts.total > 0
-                        ? (group.projectAmounts.spent / group.projectAmounts.total) * 100
-                        : 0
-                    }
-                  />
-                ) : null}
-              </View>
-            ) : (
-              <Text className="mb-1 text-sm font-t3-medium text-foreground">No project</Text>
-            )}
-            {group.rows.map((row, index) => (
-              <KeyRow key={row.account.key} row={row} now={now} divider={index > 0} />
-            ))}
+          <View key={group.id ?? "no-project"} className="gap-3">
+            <View className="flex-row flex-wrap items-baseline justify-between gap-x-3 gap-y-1 px-1">
+              <Text
+                accessibilityRole="header"
+                className="shrink text-base font-t3-medium text-foreground"
+              >
+                {group.name}
+              </Text>
+              {group.projectAmounts ? (
+                <Text className="text-sm tabular-nums text-foreground-muted">
+                  <Text className="font-t3-medium text-foreground">
+                    {formatUsd(group.projectAmounts.spent)}
+                  </Text>{" "}
+                  of {formatUsd(group.projectAmounts.total)}
+                  {group.projectAmounts.total > 0
+                    ? ` · ${Math.round((group.projectAmounts.spent / group.projectAmounts.total) * 100)}%`
+                    : ""}
+                </Text>
+              ) : null}
+            </View>
+            <View className="rounded-[24px] border-continuous bg-grouped-card px-4 py-1">
+              {group.rows.map((row, index) => (
+                <KeyRow key={row.account.key} row={row} now={now} divider={index > 0} />
+              ))}
+            </View>
           </View>
         ))
       )}
@@ -123,35 +114,35 @@ function KeyRow({ row, now, divider }: { row: WorkUsageRow; now: number; divider
   const tick = window ? paceRemainingPercent(window, now) : null;
   const tone =
     row.status === "nearLimit" ? "destructive" : row.status === "overPace" ? "warning" : null;
+  const amounts = window?.amounts;
   return (
-    <View
-      className={`flex-row flex-wrap items-center justify-between gap-x-3 py-2 ${divider ? "border-t border-border-subtle" : ""}`}
-    >
-      <View className="min-w-0 flex-1 flex-row items-center gap-2">
-        <Text numberOfLines={1} className="shrink text-sm font-t3-medium text-foreground">
-          {row.label}
-        </Text>
-        {row.status ? (
-          <Text
-            className={`rounded-full bg-subtle px-2 py-0.5 text-3xs ${tone === "destructive" ? "text-destructive" : "text-warning"}`}
-          >
-            {row.status === "nearLimit" ? "Near limit" : "Over pace"}
+    <View className={`gap-1.5 py-2.5 ${divider ? "border-t border-border-subtle" : ""}`}>
+      <View className="flex-row flex-wrap items-center justify-between gap-x-3 gap-y-1">
+        <View className="min-w-0 shrink flex-row items-center gap-2">
+          <Text numberOfLines={1} className="shrink text-sm font-t3-medium text-foreground">
+            {row.label}
+          </Text>
+          {tone ? (
+            <View className="rounded-full bg-subtle px-2 py-0.5">
+              <Text
+                className={`text-xs font-t3-medium ${tone === "destructive" ? "text-danger-foreground" : "text-warning-foreground"}`}
+              >
+                {row.status === "nearLimit" ? "Near limit" : "Over pace"}
+              </Text>
+            </View>
+          ) : null}
+        </View>
+        {amounts ? (
+          <Text className="text-sm tabular-nums text-foreground-muted">
+            <Text className="font-t3-medium text-foreground">{formatUsd(amounts.spent)}</Text> /{" "}
+            {formatUsd(amounts.total)}
           </Text>
         ) : null}
       </View>
-      {window?.amounts ? (
-        <Text className="text-sm tabular-nums text-foreground">
-          {formatUsd(window.amounts.spent)}
-          <Text className="text-foreground-muted"> / {formatUsd(window.amounts.total)}</Text>
-        </Text>
-      ) : row.message ? (
+      {!amounts && row.message ? (
         <Text className="text-xs text-foreground-muted">{row.message}</Text>
       ) : null}
-      {window?.amounts ? (
-        <View className="w-full">
-          <UsageBar usedPercent={row.usedPercent} tick={tick} tone={tone} />
-        </View>
-      ) : null}
+      {amounts ? <UsageBar usedPercent={row.usedPercent} tick={tick} tone={tone} /> : null}
     </View>
   );
 }

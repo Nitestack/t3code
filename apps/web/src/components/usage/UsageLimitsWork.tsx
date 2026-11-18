@@ -96,37 +96,27 @@ export function UsageLimitsWork({
         </section>
       ) : (
         usage.groups.map((group) => (
-          <section key={group.id ?? "no-project"} className="rounded-xl border bg-card p-4">
-            {group.id ? (
-              <div className="mb-2 flex flex-col gap-1.5 border-b pb-3">
-                <div className="flex items-baseline justify-between gap-3">
-                  <h3 className="text-sm font-semibold text-foreground">{group.name}</h3>
-                  {group.projectAmounts ? (
-                    <span className="shrink-0 text-sm tabular-nums">
-                      <b>{formatUsd(group.projectAmounts.spent)}</b>
-                      <span className="text-muted-foreground">
-                        {" "}
-                        / {formatUsd(group.projectAmounts.total)}
-                      </span>
-                    </span>
-                  ) : null}
-                </div>
-                {group.projectAmounts ? (
-                  <UsageBar
-                    usedPercent={
-                      group.projectAmounts.total > 0
-                        ? (group.projectAmounts.spent / group.projectAmounts.total) * 100
-                        : 0
-                    }
-                  />
-                ) : null}
-              </div>
-            ) : (
-              <h3 className="mb-1 text-sm font-semibold text-foreground">No project</h3>
-            )}
-            {group.rows.map((row, index) => (
-              <KeyRow key={row.account.key} row={row} now={now} divider={index > 0} />
-            ))}
+          <section key={group.id ?? "no-project"} className="flex flex-col gap-3">
+            <div className="flex items-baseline justify-between gap-3 px-0.5">
+              <h2 className="truncate text-sm font-medium text-foreground">{group.name}</h2>
+              {group.projectAmounts ? (
+                <span className="shrink-0 text-sm tabular-nums">
+                  <b>{formatUsd(group.projectAmounts.spent)}</b>
+                  <span className="text-muted-foreground">
+                    {" "}
+                    of {formatUsd(group.projectAmounts.total)}
+                    {group.projectAmounts.total > 0
+                      ? ` · ${Math.round((group.projectAmounts.spent / group.projectAmounts.total) * 100)}%`
+                      : ""}
+                  </span>
+                </span>
+              ) : null}
+            </div>
+            <div className="rounded-xl border bg-card px-4 py-1">
+              {group.rows.map((row, index) => (
+                <KeyRow key={row.account.key} row={row} now={now} divider={index > 0} />
+              ))}
+            </div>
           </section>
         ))
       )}
