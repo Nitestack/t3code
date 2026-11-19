@@ -210,9 +210,9 @@ same default T3 state directory and desktop profile as upstream; install it in p
 T3 Code rather than running both against the same data.
 
 Nix only installs the pinned application build. It does not configure aix,
-resolve profiles, or place endpoints or API keys in the store. To use aix
-profiles, add `T3CODE_AIX=1` to the fork command's environment as described in
-the [fork guide](./nitestack-fork.md#aix-profiles).
+resolve profiles, or place endpoints or API keys in the store. The Nix package
+and the desktop app turn aix on for you; set `T3CODE_AIX=0` to turn it off. See
+[aix profiles](./aix-profiles.md#turn-on-aix).
 
 ### The `t3` command
 

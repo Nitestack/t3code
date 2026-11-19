@@ -2,7 +2,10 @@
 
 ## Using T3 Code
 
-- [get-aix/t3code fork: current capabilities and limits](./user/nitestack-fork.md)
+- [The get-aix/t3code fork: install, updates, and what it changes](./user/fork.md)
+- [aix profiles](./user/aix-profiles.md)
+- [Personal and Work](./user/work-personal.md)
+- [Gateway budgets](./user/aix-budgets.md)
 - [Install T3 Code](./user/install.md)
 - [Messages and context](./user/composer.md)
 - [Working with threads](./user/thread-sidebar.md)

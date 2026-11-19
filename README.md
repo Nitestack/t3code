@@ -1,119 +1,161 @@
-# T3 Code with aix support
+<p align="center"><img src="./assets/prod/t3-black-web-icon-192x192.png" width="96" alt="T3 Code"></p>
 
-A soft fork of [T3 Code](https://github.com/pingdotgg/t3code), created by pingdotgg and released under the [MIT License](./LICENSE). It keeps T3's provider, thread, and remote-work flows, and adds runtime support for [aix](https://github.com/get-aix/aix) API-key profiles and project-level Personal and Work scopes.
+<h1 align="center">T3 Code with aix</h1>
 
-[Upstream T3 Code](https://github.com/pingdotgg/t3code) · [aix setup and profiles](https://github.com/get-aix/aix#installation) · [Fork guide](./docs/user/nitestack-fork.md) · [Remote access](./docs/user/remote-access.md) · [Portable handoffs](./docs/user/portable-handoffs.md) · [MIT License](./LICENSE)
+<p align="center">Run Claude Code, Codex, and OpenCode on your team's AI gateway, next to your own subscriptions, in one app.</p>
 
-## What the fork adds
+<p align="center">
+  <a href="https://github.com/get-aix/t3code/releases/latest"><img src="https://img.shields.io/github/v/release/get-aix/t3code?label=release" alt="Latest release"></a>
+  <a href="https://github.com/pingdotgg/t3code"><img src="https://img.shields.io/badge/based%20on-T3%20Code-blue" alt="Based on T3 Code"></a>
+  <a href="https://github.com/get-aix/aix"><img src="https://img.shields.io/badge/profiles-aix-8a63d2" alt="Profiles from aix"></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License: MIT"></a>
+</p>
 
-- **aix profiles as providers.** Enable with `T3CODE_AIX=1` on the server host. Each API-key profile becomes a provider instance with its own gateway endpoint. Keys stay on the server.
-- **Conservative model routing.** Supported models are mapped to Codex, Claude Code, or the T3-managed OpenCode provider according to known-compatible routes. Unsupported combinations are omitted; a failed selection is not silently replaced with another provider or model.
-- **Model and gateway details.** When aix or the gateway supplies them, model details include family, context and output limits, prices, and reasoning levels. Missing values appear as Unknown. A profile's LiteLLM budget is shown on the Usage page when the gateway reports a cap; a reset time appears when supplied.
-- **Catalog refresh.** Refresh aix profiles and catalogs on demand; a failed refresh keeps the last catalog marked stale.
-- **Personal and Work scopes.** Each project is Personal or Work. On web, desktop, and the fork's Android app, the sidebar switch shows one scope's projects and threads, and the model picker starts in the project's scope: subscription providers for Personal, aix profiles for Work.
+> [!NOTE]
+> **This is a fork, not the official T3 Code.** It is a soft fork of
+> [pingdotgg/t3code](https://github.com/pingdotgg/t3code) that follows upstream's stable releases.
+> It uses the same app name and data directory, so install it **instead of** T3 Code, not next to it.
 
-T3's existing providers, threads, provider switching and handoffs, and remote access remain available. Without `T3CODE_AIX=1`, aix integration is off and normal T3 providers work as usual.
+<p align="center">
+  <img src="./.github/readme/fork/hero.png" width="100%" alt="T3 Code showing a finished agent thread in a Work project, with the Personal/Work switch at the top of the sidebar">
+</p>
 
-## In the app
+**T3 Code** is a fast, open-source app for running coding agents on your machine, from your
+desktop, the browser, or your phone. This fork connects it to [aix](https://github.com/get-aix/aix):
+every API-key profile you configure in aix becomes a set of agents in T3, routed through your AI
+gateway with its budgets and model details. A Personal/Work switch keeps work projects, their
+gateway models, and their spend apart from your own.
 
-Captured from the fork's web client with demo projects, demo profiles (Acme and Research), and a local fake gateway. Prices, budgets, and names are illustrative.
+## Why
 
-### aix profiles and model details
+Many teams give developers an API key for a LiteLLM gateway instead of a seat in each agent's
+subscription. The agents can use it, but each one wants different variables, the key lives in a
+password manager, and nothing tells you which models the gateway serves, what they cost, or how
+much of the budget is left. Meanwhile your personal Claude or ChatGPT subscription sits in the same
+tools, and it is easy to run work on the wrong account.
 
-In a Work project, the picker lists the selected profile's Codex, Claude Code, and OpenCode models. Model details show the context window, output limit, and pricing supplied by the gateway.
+This fork moves all of that into the app:
 
-![aix model picker in a Work project showing Gemma 4 31B IT and demo gateway metadata](./.github/readme/aix/aix-model-picker.png)
-
-Switch profiles from the picker footer.
-
-![Model picker footer with the Acme and Research profile menu open](./.github/readme/aix/aix-profile-menu.png)
-
-In Settings → Providers, the Personal/Work switch and profile menu list each profile's provider instances. aix supplies the models; you can still hide, reorder, and favorite them.
-
-![Provider settings showing the Research profile's OpenCode instance and its aix models](./.github/readme/aix/aix-provider-settings.png)
-
-### Gateway budgets
-
-The Usage page's Work tab shows the budget reported for each profile, including a reset time when the gateway supplies one.
-
-![Usage page Work tab with demo budgets for the Acme and Research profiles](./.github/readme/aix/aix-budget-windows.png)
-
-### Personal and Work scopes
-
-Move a project between Personal and Work from its sidebar menu, the command palette, or Project settings; the sidebar switch then filters projects and threads. The scope does not change server permissions or stop running agents.
-
-![Project settings listing demo projects with their Personal and Work scopes](./.github/readme/aix/work-personal-scope.png)
-
-## Install
-
-Download the fork from its [latest release](https://github.com/get-aix/t3code/releases/latest). It uses the same app name and data directory as upstream T3 Code, so install it **instead of** upstream T3 Code. Installed desktop apps update themselves from later fork releases.
-
-### Windows (x64)
-
-Download `T3-Code-<version>-x64.exe` and run it. The installer is not code-signed, so Windows may show "Windows protected your PC": choose **More info → Run anyway**.
-
-### macOS (Apple Silicon)
-
-Install with the script. It is the only supported way: the app is not notarized by Apple, so Gatekeeper blocks a DMG or zip downloaded in a browser.
-
-```sh
-curl -fsSL https://github.com/get-aix/t3code/releases/latest/download/install-macos.sh | bash
+```
+aix profile → gateway catalog → Claude Code / Codex / OpenCode → your thread
 ```
 
-The script checks the download's SHA-256, installs **T3 Code** into `/Applications` (or `~/Applications`), and opens it.
+## Example
 
-### Linux (x64)
+You have two aix profiles, `acme` for your employer's gateway and `research` for a lab project:
 
-Download `T3-Code-x86_64.AppImage`, then make it executable and start it:
+```toml
+# ~/.config/aix/aix.toml
+[profiles.acme]
+label = "Acme"
+base_url = "https://ai.acme.example"
+api_key = { command = "pass show aix/acme" }
 
-```sh
-chmod +x ./T3-Code-x86_64.AppImage
-./T3-Code-x86_64.AppImage
+[profiles.research]
+label = "Research Lab"
+base_url = "https://llm.lab.example"
+api_key = { env = "LAB_LLM_KEY" }
 ```
 
-On Debian or Ubuntu you can install `T3-Code-<version>-amd64.deb` instead, with
-`sudo apt install ./T3-Code-<version>-amd64.deb`. Both update themselves.
+Start the fork with aix on its `PATH`. The desktop app does this for you. Open a Work project,
+then pick a model:
 
-On NixOS, or to manage T3 with Nix, install the fork's flake instead; Nix handles updates:
+<p align="center">
+  <img src="./.github/readme/fork/model-details.png" width="600" alt="Model picker in a Work project on the Acme profile, with the details card for Claude Opus 5.5 showing context window, max output, prices, and reasoning levels">
+</p>
 
-```sh
-nix profile add 'github:get-aix/t3code/release'
-```
+Claude Opus 5.5 on the Acme gateway runs in Claude Code, GPT-6 runs in Codex, and Qwen3 Coder
+runs in an OpenCode that T3 configures for you. Switch to a Personal project, and the same picker
+offers your own Claude and Codex sign-ins instead.
 
-See the [fork Nix guide](./docs/user/install.md#t3-code-fork-nix) for NixOS and Home Manager.
+## Features
 
-### Android
+- **aix profiles as agents.** Each API-key profile becomes Claude Code, Codex, and OpenCode
+  providers named after the profile, such as `Acme · Claude Code`. Keys stay on the server.
+- **Every model in the right agent.** Claude models run in Claude Code, GPT models in Codex, and
+  `gpt-oss`, Gemma, Qwen, and other chat models in OpenCode. Embedding, image, and audio models
+  are left out. If a model stops working, the turn fails; T3 never quietly swaps in another one.
+- **Model details.** Family, context window, max output, input and output prices, and reasoning
+  levels, as the gateway reports them.
+- **Fresh catalogs.** Catalogs reload daily and on demand. If the gateway is down, you keep the
+  last catalog, marked stale.
+- **Gateway budgets.** The Usage page shows each key's dollar budget, what's spent, and when it
+  resets, grouped by gateway project.
+- **Personal and Work.** Every project is Personal or Work. The sidebar, the model picker, Settings,
+  and the Usage page all follow the switch.
+- **Switch mid-thread.** Change profile or model in a running thread; the next agent picks up
+  the conversation.
+- **Everything else from T3 Code.** Worktrees, diffs, checkpoints, remote access, T3 Connect, and
+  all of T3's other providers work as before.
+- **Fork builds for every platform.** Windows, Apple Silicon macOS, Linux, Nix, and an Android
+  app. Desktop apps update themselves from fork releases.
 
-Download `T3-Code-<version>.apk` and open it on your phone. It replaces the Play Store T3 Code app, so uninstall that first. Install later APKs from fork releases the same way.
+## Installation
 
-### Set up aix
+Download from the [latest release](https://github.com/get-aix/t3code/releases/latest).
 
-T3 runs agents through [aix](https://github.com/get-aix/aix) profiles on the **machine running the T3 server**, which is your computer when you use the desktop app (inside WSL if the Windows app runs its server there). Install aix there:
+| Platform              | How                                                                                                              |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Windows x64           | Run `T3-Code-<version>-x64.exe`. It is unsigned: choose **More info → Run anyway**.                              |
+| macOS (Apple Silicon) | `curl -fsSL https://github.com/get-aix/t3code/releases/latest/download/install-macos.sh \| bash`                 |
+| Linux x64             | `T3-Code-x86_64.AppImage` (`chmod +x`, then run it), or `sudo apt install ./T3-Code-<version>-amd64.deb`         |
+| Nix / NixOS           | `nix profile add 'github:get-aix/t3code/release'`, or the [flake input](./docs/user/install.md#t3-code-fork-nix) |
+| Android               | Install `T3-Code-<version>.apk`. It replaces the Play Store T3 Code app, so uninstall that first.                |
 
-```sh
-curl -fsSL https://github.com/get-aix/aix/releases/latest/download/install.sh | sh
-```
+The macOS script is the only supported way to install on a Mac, because the app is not notarized.
+It checks the download's SHA-256 and installs **T3 Code** into `/Applications`. Desktop apps update
+themselves; Nix installs update through Nix. There is no fork iOS app.
 
-Configure an API-key profile with aix's [profile guide](https://github.com/get-aix/aix#config-format) and check it with `aix profiles`. ChatGPT sign-in profiles are not supported. The fork's desktop app and Nix package turn aix on for you; set `T3CODE_AIX=0` to turn it off. Restart T3 after installing aix so it finds the command.
+[Install and update the fork](./docs/user/fork.md#install) has the details, including how to
+switch over from upstream T3 Code.
 
-To host T3 for other devices without the desktop app, run `t3 serve`; it prints pairing details. See [remote access](./docs/user/remote-access.md). To work on the fork itself, see the [development runbook](./docs/operations/development.md#first-checkout).
+## Quick start
 
-## A typical workflow
+1. Install [aix](https://github.com/get-aix/aix#installation) on the machine that runs T3. With
+   the desktop app, that's your computer.
 
-Select an aix profile's model from the thread model picker. The profile and model determine the gateway endpoint and supported agent route. Open model details to review the metadata the gateway provides. Use the picker refresh control after changing aix profiles or models; if the gateway cannot be reached, T3 keeps the last catalog and marks it stale.
+   ```sh
+   curl -fsSL https://github.com/get-aix/aix/releases/latest/download/install.sh | sh
+   ```
 
-For a LiteLLM API key with a reported budget, check its budget on the Usage page's Work tab. Put work projects in the Work scope to keep them out of the Personal view. The scope is an organizing aid, **not** an authentication or data boundary. For actual isolation, run separate servers with separate data directories.
+2. Add an API-key profile to aix (see aix's
+   [configuration guide](https://github.com/get-aix/aix#quick-start)), then check it:
 
-## Limits and downloads
+   ```sh
+   aix profiles
+   aix status acme
+   ```
 
-- aix integration requires API-key profiles. ChatGPT OAuth profiles remain unsupported; regular T3 provider sign-ins, including subscription-based providers, continue to work.
-- Native Codex and Claude Code routing is limited to combinations known to work. The OpenCode route covers supported chat models, but arbitrary gateway aliases and model compatibility are not guaranteed. T3 does not silently substitute another model or provider.
-- Model metadata may be absent. Budget windows and reset times are shown only when the gateway reports them.
-- The fork's Android app is signed separately, replaces the Play Store app, and includes the Personal/Work switch. The official iOS and Android apps have no scope switch or extended model details and have not been verified against a fork server. There is no fork iOS app.
-- Desktop builds cover Windows x64, Apple Silicon Macs, and Linux x64. The Nix flake builds from source for `x86_64-linux`.
-- [Fork releases](https://github.com/get-aix/t3code/releases) use upstream stable versions (for example, **T3 Code v0.1.10**). For Nix, `github:get-aix/t3code/release` follows the latest published release after the first one; pin a release tag for a reproducible version. `main` includes unreleased fork changes. The [fork release runbook](./docs/operations/fork-release.md) explains the process. Upstream download links below install original T3 Code, not this fork.
+3. Start T3 Code. The desktop app and Nix package turn aix on for you. If you run `t3` yourself,
+   set `T3CODE_AIX=1`. Restart T3 after installing aix so it finds the command.
 
-For provider details, remote connections, troubleshooting, and mobile boundaries, see the [fork guide](./docs/user/nitestack-fork.md), [provider setup](./docs/user/install.md#providers), [remote access](./docs/user/remote-access.md), and [T3 Connect troubleshooting](./docs/user/t3-connect-troubleshooting.md).
+4. Add a project, then move it to Work from the command palette (`Ctrl+K` / `⌘K`, **Move project
+   to Work**) or **Project settings → Project scope**.
+
+5. Open the model picker in that project, pick a profile from the footer, and choose a model.
+
+<p align="center">
+  <img src="./.github/readme/fork/provider-settings.png" width="100%" alt="Settings, Providers, with the Work scope and Acme profile selected, listing Codex, Claude, and OpenCode as Ready and the two Codex models aix supplies">
+</p>
+
+## Documentation
+
+|                                                   |                                                                                         |
+| ------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| [aix profiles](./docs/user/aix-profiles.md)       | Turning aix on, model routing, model details, refresh, key rotation, switching profiles |
+| [Personal and Work](./docs/user/work-personal.md) | Project scopes, moving projects, what the switch filters, and what it doesn't           |
+| [Gateway budgets](./docs/user/aix-budgets.md)     | Budgets on the Usage page, project grouping, reset times, the composer limits panel     |
+| [The fork](./docs/user/fork.md)                   | Install, updates, the Android app, releases, running from source, what changed          |
+| [Install T3 Code](./docs/user/install.md)         | Every platform, provider sign-in, WSL, Nix and Home Manager                             |
+| [Remote access](./docs/user/remote-access.md)     | Use T3 from a phone or another machine                                                  |
+| [All T3 Code docs](./docs/README.md)              | Threads, worktrees, source control, keyboard shortcuts, and more                        |
+
+Working on the fork itself? See the [development runbook](./docs/operations/development.md#first-checkout)
+and the [fork release runbook](./docs/operations/fork-release.md).
+
+## License
+
+[MIT](./LICENSE). T3 Code is created by [pingdotgg](https://github.com/pingdotgg/t3code).
 
 ## Original T3 Code README
 

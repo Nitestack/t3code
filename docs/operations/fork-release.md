@@ -3,7 +3,7 @@
 This runbook covers stable upstream syncs and version-matched Windows, macOS, Linux AppImage, Android, and Nix builds for
 `get-aix/t3code`. The fork has no store builds or iOS build. Users can install it from a signed
 Android APK, a Windows installer, the macOS install script, a Linux AppImage, source, or the latest-release or pinned Nix flake ref, as the
-[fork guide](../user/nitestack-fork.md) explains.
+[fork guide](../user/fork.md) explains.
 
 The Nix package is `t3code-<version>` and uses the upstream `t3` and `t3code-desktop` commands,
 T3 Code app name, and default state directory. Install it instead of upstream T3 Code; the Android
@@ -19,7 +19,7 @@ APK uses the official package ID and replaces the store app.
    `MAJOR.MINOR.PATCH` version. The Nix flake reads its package version from the server manifest.
 4. Run the redaction tests and the diff sweep from [Security checks](#security-checks).
 5. If user-visible behavior changed, update "What this fork changes" in the
-   [fork guide](../user/nitestack-fork.md#what-this-fork-changes).
+   [fork guide](../user/fork.md#what-this-fork-changes).
 6. In GitHub Actions, run `Release` from `main`, choose channel `stable`, and leave `publish`
    unchecked. Enter the matching application version if you want it shown in the Actions run title. The
    workflow builds the signed Android APK, Windows x64 installer, macOS arm64 app, Linux x64 AppImage, and Nix package from the exact
@@ -158,7 +158,7 @@ and open a pull request. Use the same manual path while Actions is unavailable.
 To roll back a merged sync, revert its merge commit on a branch with `git revert -m 1 <merge>` and
 merge that through a pull request. Users who already ran the newer server keep its database
 migrations, so tell them to restore the data directory backup the
-[update guide](../user/nitestack-fork.md#updates) asks for, rather than only checking out older
+[update guide](../user/fork.md#updates) asks for, rather than only checking out older
 source.
 
 ## Security checks
