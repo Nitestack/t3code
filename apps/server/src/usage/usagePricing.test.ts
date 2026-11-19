@@ -4,6 +4,7 @@ import { cursorRateModel } from "@t3tools/provider-cursor/server/accountUsage";
 import type { UsageSpeed } from "@t3tools/provider-core/server/usage";
 import {
   cacheSavingsUsd,
+  createGatewayRateTable,
   createOverrideRateTable,
   lookupRate,
   parseRateTable,
@@ -53,6 +54,37 @@ describe("usage pricing", () => {
       });
     }
     expect(cacheSavingsUsd(table, record("example-model"), overrides)).toBe(1.5);
+  });
+
+  it("prices with an agreed gateway price between custom and public rates", () => {
+    const table = parseRateTable({ "gateway-model": rate(1), "split-model": rate(1) });
+    const gateway = (input: number) => ({
+      inputCostPerMillionTokens: input,
+      outputCostPerMillionTokens: input * 4,
+      cacheReadCostPerMillionTokens: 0.5,
+      cacheWriteCostPerMillionTokens: 3,
+    });
+    const gatewayRates = createGatewayRateTable([
+      { model: "vendor/gateway-model", prices: gateway(2) },
+      { model: "gateway-model", prices: gateway(2) },
+      { model: "split-model", prices: gateway(2) },
+      { model: "split-model", prices: gateway(3) },
+      { model: "listed-unpriced", prices: gateway(2) },
+      { model: "listed-unpriced", prices: undefined },
+    ]);
+
+    expect([...gatewayRates.keys()].sort()).toEqual(["gateway-model", "vendor/gateway-model"]);
+    for (const reportedCostUsd of [null, 99]) {
+      expect(
+        priceUsage(table, record("gateway-model", reportedCostUsd), undefined, gatewayRates),
+      ).toMatchObject({ costUsd: 13.5, costSource: "modelPriced" });
+    }
+    expect(cacheSavingsUsd(table, record("gateway-model"), undefined, gatewayRates)).toBe(1.5);
+    expect(priceUsage(table, record("split-model"), undefined, gatewayRates).costUsd).toBe(
+      priceUsage(table, record("split-model")).costUsd,
+    );
+    const overrides = createOverrideRateTable({ "gateway-model": gateway(1) });
+    expect(priceUsage(table, record("gateway-model"), overrides, gatewayRates).costUsd).toBe(8.5);
   });
 
   it("prices Cursor cache savings at the base model rate", () => {

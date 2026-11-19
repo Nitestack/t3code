@@ -1,209 +1,59 @@
 import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@t3tools/contracts";
 import { expect, it } from "@effect/vitest";
-import * as Cause from "effect/Cause";
-import * as Digest from "effect/crypto/Digest";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
-import * as Logger from "effect/Logger";
-import * as Option from "effect/Option";
 import * as TestClock from "effect/testing/TestClock";
-import * as Tracer from "effect/Tracer";
-import { HttpClient, HttpClientError, HttpClientResponse } from "effect/http";
-import * as HttpClientRequest from "effect/http/HttpClientRequest";
-import * as NodeUtil from "node:util";
 
-import { AixDiscoveryError, type ResolvedEnvironment } from "../provider/AixDiscovery.ts";
+import {
+  AixDiscoveryError,
+  type AixBudgetLayer,
+  type AixBudgetStatus,
+} from "../provider/AixDiscovery.ts";
 import * as ProfileBudget from "./ProfileBudget.ts";
 
-const SENTINEL_KEY = "sk-aix-budget-sentinel-do-not-leak";
 const CHECKED_AT = "2026-11-15T12:00:00.000Z";
+const FINGERPRINT = "31856f096850388598e6fd0e9f8558421534a68ebe848a79679f5119bdad7315";
 
-const litellm = (profileName: string, endpoint = "https://gateway.test"): ResolvedEnvironment => ({
-  profileName,
-  endpoint,
-  endpointKind: "unknown",
-  apiKey: SENTINEL_KEY,
+const layer = (
+  scope: string,
+  budget: number | null,
+  spent: number,
+  reset: { readonly resets_at?: string | null; readonly budget_duration?: string | null } = {
+    resets_at: "2026-12-01T00:00:00Z",
+    budget_duration: "1mo",
+  },
+): AixBudgetLayer => ({ scope, budget_usd: budget, spent_usd: spent, ...reset });
+
+const budget = (overrides: Partial<AixBudgetStatus> = {}): AixBudgetStatus => ({
+  status: "available",
+  project_id: null,
+  layers: [layer("key", 50, 25), layer("tenant", null, 900)],
+  key_fingerprint: FINGERPRINT,
+  gateway: { gateway: "aihub" },
+  ...overrides,
 });
-
-const keyInfo = (info: Record<string, unknown>) =>
-  Option.getOrThrow(ProfileBudget.decodeKeyInfo({ key: "hashed", info }));
-
-const gatewayInfo = (input: {
-  readonly kind: "personal" | "project";
-  readonly projectId?: string | null;
-  readonly layers: ReadonlyArray<{
-    readonly scope: "key" | "personal" | "project" | "tenant";
-    readonly budget: string | null;
-    readonly spent: string;
-    readonly periodStart?: string;
-  }>;
-}) => ({
-  kind: input.kind,
-  project_id: input.projectId ?? null,
-  remaining_usd: "1.00",
-  limited_by: "key",
-  key_spent_usd: "1.00",
-  layers: input.layers.map((layer) => ({
-    scope: layer.scope,
-    budget_usd: layer.budget,
-    spent_usd: layer.spent,
-    remaining_usd: layer.budget === null ? null : "1.00",
-    period_start: layer.periodStart ?? "2026-11-01T00:00:00.000Z",
-  })),
-  expires_at: null,
-  free_models_unaffected: true,
-  key_id: "key-1",
-  name: "test",
-  source: "gateway",
-});
-
-const fakeHttp = (
-  respond: (request: HttpClientRequest.HttpClientRequest) => Response | "transport-error",
-) => {
-  const requests: Array<HttpClientRequest.HttpClientRequest> = [];
-  const client = HttpClient.make((request) => {
-    requests.push(request);
-    const response = respond(request);
-    return response === "transport-error"
-      ? Effect.fail(
-          new HttpClientError.HttpClientError({
-            reason: new HttpClientError.TransportError({
-              request,
-              cause: new Error(`connect failed for Bearer ${SENTINEL_KEY}`),
-            }),
-          }),
-        )
-      : Effect.succeed(HttpClientResponse.fromWeb(request, response));
-  });
-  return { client, requests };
-};
 
 const budgetFor = (
-  http: ReturnType<typeof fakeHttp>,
-  resolve: (profileName: string) => Effect.Effect<ResolvedEnvironment, AixDiscoveryError> = (
-    profileName,
-  ) => Effect.succeed(litellm(profileName)),
+  read: (profileName: string) => Effect.Effect<AixBudgetStatus, AixDiscoveryError> = () =>
+    Effect.succeed(budget()),
 ) => {
-  let resolves = 0;
+  const reads: Array<string> = [];
   return ProfileBudget.make({
-    resolveEnvironment: (profileName) => {
-      resolves += 1;
-      return resolve(profileName);
-    },
-  }).pipe(
-    Effect.provideService(HttpClient.HttpClient, http.client),
-    Effect.provide(Digest.layerWebCrypto),
-    Effect.map((service) => ({ service, resolves: () => resolves })),
-  );
+    readBudget: (profileName) =>
+      Effect.suspend(() => {
+        reads.push(profileName);
+        return read(profileName);
+      }),
+  }).pipe(Effect.map((service) => ({ service, reads })));
 };
-
-it("decodes LiteLLM key info amounts sent as strings or numbers", () => {
-  expect(keyInfo({ spend: "123.81", max_budget: "150.0000000000" }).info).toMatchObject({
-    spend: 123.81,
-    max_budget: 150,
-  });
-  expect(keyInfo({ spend: 0.37, max_budget: 150 }).info).toMatchObject({
-    spend: 0.37,
-    max_budget: 150,
-  });
-  expect(keyInfo({ spend: 1, max_budget: null, expires: null }).info.max_budget).toBeNull();
-  expect(keyInfo({}).info).toEqual({});
-  expect(ProfileBudget.decodeKeyInfo({ info: { max_budget: "lots" } })).toEqual(Option.none());
-  expect(ProfileBudget.decodeKeyInfo({ detail: "missing" })).toEqual(Option.none());
-});
-
-it.each([
-  {
-    name: "spend against a cap",
-    info: { spend: "123.81", max_budget: "150.0000000000" },
-    usedPercent: (123.81 / 150) * 100,
-    amounts: { currency: "USD", spent: 123.81, total: 150 },
-  },
-  {
-    name: "overspend as a full bar",
-    info: { spend: 210, max_budget: 200 },
-    usedPercent: 100,
-    amounts: { currency: "USD", spent: 210, total: 200 },
-  },
-  {
-    name: "a reported budget window and reset",
-    info: {
-      spend: 5,
-      max_budget: 50,
-      budget_duration: "30d",
-      budget_reset_at: "2026-12-01T00:00:00+00:00",
-    },
-    usedPercent: 10,
-    amounts: { currency: "USD", spent: 5, total: 50 },
-    resetsAt: "2026-12-01T00:00:00.000Z",
-    windowDurationMins: 43200,
-  },
-  {
-    name: "a period start alone as a monthly reset",
-    info: { spend: 5, max_budget: 50, budget_period_start: "2026-11-01T00:00:00Z" },
-    usedPercent: 10,
-    amounts: { currency: "USD", spent: 5, total: 50 },
-    resetsAt: "2026-12-01T00:00:00.000Z",
-    windowDurationMins: 43200,
-  },
-  {
-    name: "a stale period start as the next monthly reset",
-    info: { spend: 5, max_budget: 50, budget_period_start: "2026-09-15T00:00:00Z" },
-    usedPercent: 10,
-    amounts: { currency: "USD", spent: 5, total: 50 },
-    resetsAt: "2026-12-15T00:00:00.000Z",
-    windowDurationMins: 43200,
-  },
-  {
-    name: "a reported reset over the monthly default",
-    info: {
-      spend: 5,
-      max_budget: 50,
-      budget_reset_at: "2026-11-20T00:00:00Z",
-      budget_period_start: "2026-11-01T00:00:00Z",
-    },
-    usedPercent: 10,
-    amounts: { currency: "USD", spent: 5, total: 50 },
-    resetsAt: "2026-11-20T00:00:00.000Z",
-  },
-  {
-    name: "an unreadable duration and reset as absent",
-    info: { spend: 5, max_budget: 50, budget_duration: "weekly", budget_reset_at: "soon" },
-    usedPercent: 10,
-    amounts: { currency: "USD", spent: 5, total: 50 },
-  },
-])("maps $name to one stable budget window", ({ name: _name, info, usedPercent, ...expected }) => {
-  const limits = ProfileBudget.keyInfoUsageLimits({
-    profileName: "ac",
-    keyInfo: keyInfo(info),
-    checkedAt: CHECKED_AT,
-  });
-  expect(limits).toEqual({
-    checkedAt: CHECKED_AT,
-    windows: [
-      {
-        id: "aix-budget:ac",
-        kind: "other",
-        label: "Gateway budget · ac",
-        usedPercent: expect.closeTo(usedPercent, 6),
-        ...expected,
-      },
-    ],
-  });
-});
 
 it.each([
   {
     name: "a project key",
-    info: gatewayInfo({
-      kind: "project",
-      projectId: "6dc2eb8d-45c5-4cbe-884f-127fbb7d18cc",
-      layers: [
-        { scope: "key", budget: "175.00", spent: "175.00" },
-        { scope: "project", budget: "500", spent: "250" },
-        { scope: "tenant", budget: null, spent: "300" },
-      ],
-    }),
+    budget: {
+      project_id: "6dc2eb8d-45c5-4cbe-884f-127fbb7d18cc",
+      layers: [layer("key", 175, 175), layer("project", 500, 250), layer("tenant", null, 300)],
+    },
     expected: {
       usedPercent: 100,
       amounts: { currency: "USD", spent: 175, total: 175 },
@@ -215,27 +65,26 @@ it.each([
   },
   {
     name: "a personal key with an uncapped key layer",
-    info: gatewayInfo({
-      kind: "personal",
-      layers: [
-        { scope: "key", budget: null, spent: "1" },
-        { scope: "personal", budget: "50", spent: "12.5" },
-        { scope: "tenant", budget: null, spent: "99" },
-      ],
-    }),
-    expected: {
-      usedPercent: 25,
-      amounts: { currency: "USD", spent: 12.5, total: 50 },
+    budget: {
+      layers: [layer("key", null, 1), layer("personal", 50, 12.5), layer("tenant", null, 99)],
     },
+    expected: { usedPercent: 25, amounts: { currency: "USD", spent: 12.5, total: 50 } },
   },
-])("maps AI Hub Gateway $name budgets", ({ info, expected }) => {
-  const limits = ProfileBudget.aiHubKeyInfoUsageLimits({
+  {
+    name: "overspend",
+    budget: { layers: [layer("key", 200, 210)] },
+    expected: { usedPercent: 100, amounts: { currency: "USD", spent: 210, total: 200 } },
+  },
+])("maps $name to one budget window", ({ budget, expected }) => {
+  const limits = ProfileBudget.budgetUsageLimits({
     profileName: "ac",
-    keyInfo: Option.getOrThrow(ProfileBudget.decodeAiHubKeyInfo(info)),
+    budget,
     checkedAt: CHECKED_AT,
   });
-  expect(limits.windows[0]).toMatchObject({
+  expect(limits.windows[0]).toEqual({
     id: "aix-budget:ac",
+    kind: "other",
+    label: "Gateway budget · ac",
     usedPercent: expected.usedPercent,
     amounts: expected.amounts,
     resetsAt: "2026-12-01T00:00:00.000Z",
@@ -245,186 +94,118 @@ it.each([
   else expect(limits.aixProject).toBeUndefined();
 });
 
-it("keeps an AI Hub Gateway budget with an empty project, an unknown layer and no period start", () => {
-  const limits = ProfileBudget.aiHubKeyInfoUsageLimits({
-    profileName: "ac",
-    keyInfo: Option.getOrThrow(
-      ProfileBudget.decodeAiHubKeyInfo({
-        project_id: "",
-        layers: [
-          { scope: "key", budget_usd: "100", spent_usd: "25", period_start: null },
-          { scope: "region", budget_usd: null, spent_usd: "3" },
-        ],
-      }),
-    ),
-    checkedAt: CHECKED_AT,
-  });
-  expect(limits.windows[0]).toMatchObject({
-    usedPercent: 25,
-    amounts: { currency: "USD", spent: 25, total: 100 },
-  });
-  expect(limits.windows[0]?.resetsAt).toBeUndefined();
-  expect(limits.aixProject).toBeUndefined();
-});
-
-it("reports an uncapped AI Hub Gateway key as unsupported without using the tenant layer", () => {
-  const limits = ProfileBudget.aiHubKeyInfoUsageLimits({
-    profileName: "ac",
-    keyInfo: Option.getOrThrow(
-      ProfileBudget.decodeAiHubKeyInfo(
-        gatewayInfo({
-          kind: "personal",
-          layers: [
-            { scope: "key", budget: null, spent: "1" },
-            { scope: "personal", budget: null, spent: "2" },
-            { scope: "tenant", budget: "100", spent: "99" },
-          ],
-        }),
-      ),
-    ),
-    checkedAt: CHECKED_AT,
-  });
-  expect(limits).toMatchObject({
-    windows: [],
-    unavailable: { reason: "unsupported", message: "This aix profile's key has no budget limit." },
-  });
+it("takes the reset and window from aix and omits ones it cannot read", () => {
+  const window = (reset: Parameters<typeof layer>[3]) =>
+    ProfileBudget.budgetUsageLimits({
+      profileName: "ac",
+      budget: { project_id: "", layers: [layer("key", 100, 25, reset)] },
+      checkedAt: CHECKED_AT,
+    });
+  expect(
+    window({ resets_at: "2026-11-20T00:00:00+00:00", budget_duration: "30d" }).windows[0],
+  ).toMatchObject({ resetsAt: "2026-11-20T00:00:00.000Z", windowDurationMins: 43200 });
+  const unreadable = window({ resets_at: "soon", budget_duration: "weekly" });
+  expect(unreadable.windows[0]).toMatchObject({ usedPercent: 25 });
+  expect(unreadable.windows[0]?.resetsAt).toBeUndefined();
+  expect(unreadable.windows[0]?.windowDurationMins).toBeUndefined();
+  expect(unreadable.aixProject).toBeUndefined();
 });
 
 it.each([
-  { name: "no cap", info: { spend: 4 }, message: "This aix profile's key has no budget limit." },
   {
-    name: "a null cap",
-    info: { spend: 4, max_budget: null },
+    name: "an uncapped key without using the tenant layer",
+    layers: [layer("key", null, 1), layer("personal", null, 2), layer("tenant", 100, 99)],
     message: "This aix profile's key has no budget limit.",
   },
   {
     name: "a $0 cap",
-    info: { spend: "0", max_budget: "0" },
+    layers: [layer("key", 0, 0)],
     message: "This aix profile's key has a $0 budget.",
   },
-  {
-    name: "a negative cap",
-    info: { spend: 0, max_budget: -1 },
-    message: "This aix profile's key has a $0 budget.",
-  },
-])("reports $name without a window", ({ info, message }) => {
+])("reports $name without a window", ({ layers, message }) => {
   expect(
-    ProfileBudget.keyInfoUsageLimits({
-      profileName: "acs",
-      keyInfo: keyInfo(info),
+    ProfileBudget.budgetUsageLimits({
+      profileName: "ac",
+      budget: { layers },
       checkedAt: CHECKED_AT,
     }),
-  ).toEqual({
-    checkedAt: CHECKED_AT,
-    windows: [],
-    unavailable: { reason: "unsupported", message },
-  });
+  ).toMatchObject({ windows: [], unavailable: { reason: "unsupported", message } });
 });
-
-it.effect.each([
-  { endpoint: "https://gateway.test/v1/", expected: "https://gateway.test/key/info" },
-  { endpoint: "https://gateway.test?tenant=x", expected: "https://gateway.test/key/info?tenant=x" },
-  {
-    endpoint: "https://gateway.test/proxy/v1/?tenant=x",
-    expected: "https://gateway.test/proxy/key/info?tenant=x",
-  },
-])("reads key info from $endpoint with the profile key", ({ endpoint, expected }) =>
-  Effect.gen(function* () {
-    const http = fakeHttp(() => Response.json({ info: { spend: "25", max_budget: "50" } }));
-    const { service } = yield* budgetFor(http, (profileName) =>
-      Effect.succeed(litellm(profileName, endpoint)),
-    );
-    const limits = yield* service.usageLimits("p");
-
-    expect(limits.windows).toHaveLength(1);
-    expect(limits.windows[0]?.id).toMatch(/^aix-budget:p#credential:[a-f0-9]{64}$/u);
-    expect(limits.windows[0]?.usedPercent).toBe(50);
-    expect(
-      http.requests.map((request) => Option.getOrThrow(HttpClientRequest.toUrl(request)).href),
-    ).toEqual([expected.replace("/key/info", "/v1/key/info"), expected]);
-    expect(http.requests[0]?.headers.authorization).toBe(`Bearer ${SENTINEL_KEY}`);
-  }),
-);
 
 it.effect("reads each profile once for all of its instances until the TTL passes", () =>
   Effect.gen(function* () {
-    const http = fakeHttp(() =>
-      Response.json(
-        gatewayInfo({
-          kind: "personal",
-          layers: [
-            { scope: "key", budget: "50", spent: "1" },
-            { scope: "tenant", budget: null, spent: "1" },
-          ],
-        }),
-      ),
-    );
-    const { service, resolves } = yield* budgetFor(http);
+    const { service, reads } = yield* budgetFor();
 
     yield* Effect.all(
       [service.usageLimits("ac"), service.usageLimits("ac"), service.usageLimits("nim")],
       { concurrency: "unbounded" },
     );
     yield* service.usageLimits("ac");
-    expect(resolves()).toBe(2);
-    expect(http.requests).toHaveLength(2);
+    expect(reads).toEqual(["ac", "nim"]);
 
     yield* TestClock.adjust("1 minute");
-    yield* service.usageLimits("ac");
-    expect(resolves()).toBe(3);
-    expect(http.requests).toHaveLength(3);
+    const limits = yield* service.usageLimits("ac");
+    expect(reads).toHaveLength(3);
+    expect(limits.windows[0]).toMatchObject({
+      id: `aix-budget:ac#credential:${FINGERPRINT}`,
+      usedPercent: 50,
+    });
+    expect(limits.credentialFingerprint).toBe(FINGERPRINT);
   }),
 );
 
 it.effect.each([
-  ...[undefined, null].map((spend) => ({
-    name: `${spend} spend with a positive cap`,
-    respond: () => Response.json({ info: { spend, max_budget: 50 } }),
-    unavailable: {
-      reason: "probeFailed",
-      message: "The aix gateway returned an unrecognized budget.",
-    },
-  })),
   {
-    name: "a rejected key",
-    respond: () => new Response(`{"error":"invalid key ${SENTINEL_KEY}"}`, { status: 401 }),
-    unavailable: {
-      reason: "probeFailed",
-      message: "The aix gateway rejected this profile's key (HTTP 401).",
-    },
+    name: "a missing profile",
+    read: Effect.fail(new AixDiscoveryError({ reason: "profile-not-found" })),
+    unavailable: { reason: "probeFailed", message: "aix could not resolve this profile." },
   },
   {
-    name: "a server error",
-    respond: () => new Response("boom", { status: 500 }),
-    unavailable: {
-      reason: "probeFailed",
-      message: "The aix gateway budget could not be read (HTTP 500).",
-    },
+    name: "a rejected key",
+    read: Effect.fail(new AixDiscoveryError({ reason: "gateway-rejected" })),
+    unavailable: { reason: "probeFailed", message: "The aix gateway rejected this profile's key." },
   },
   {
     name: "an unreachable gateway",
-    respond: () => "transport-error" as const,
+    read: Effect.fail(new AixDiscoveryError({ reason: "gateway-unavailable" })),
     unavailable: { reason: "probeFailed", message: "The aix gateway could not be reached." },
   },
   {
-    name: "an unrecognized body",
-    respond: () => Response.json({ info: { max_budget: "plenty" } }),
+    name: "a stuck aix",
+    read: Effect.fail(new AixDiscoveryError({ reason: "timeout" })),
+    unavailable: { reason: "probeFailed", message: "The aix gateway budget request timed out." },
+  },
+  {
+    name: "unrecognized aix output",
+    read: Effect.fail(new AixDiscoveryError({ reason: "invalid-schema" })),
+    unavailable: { reason: "probeFailed", message: "aix returned an unrecognized budget." },
+  },
+  {
+    name: "a direct Anthropic profile",
+    read: Effect.succeed(
+      budget({ status: "unsupported", layers: null, gateway: { gateway: "anthropic" } }),
+    ),
     unavailable: {
-      reason: "probeFailed",
-      message: "The aix gateway returned an unrecognized budget.",
+      reason: "unsupported",
+      message: "This aix profile connects directly to Anthropic, which reports no gateway budget.",
     },
   },
   {
-    name: "a missing gateway route",
-    respond: () => new Response("not found", { status: 404 }),
+    name: "a gateway without budgets",
+    read: Effect.succeed(budget({ status: "unsupported", layers: null })),
     unavailable: {
-      reason: "probeFailed",
-      message: "The aix gateway budget could not be read (HTTP 404).",
+      reason: "unsupported",
+      message: "This aix gateway reports no budget for this profile's key.",
     },
   },
-])("reports $name without a window", ({ respond, unavailable }) =>
+  {
+    name: "an unreadable budget",
+    read: Effect.succeed(budget({ status: "unavailable", layers: null })),
+    unavailable: { reason: "probeFailed", message: "The aix gateway budget could not be read." },
+  },
+])("reports $name without a window", ({ read, unavailable }) =>
   Effect.gen(function* () {
-    const { service } = yield* budgetFor(fakeHttp(respond));
+    const { service } = yield* budgetFor(() => read);
     const limits = yield* service.usageLimits("ae");
     expect(limits.profileName).toBe("ae");
     expect(limits.windows).toEqual([]);
@@ -432,130 +213,14 @@ it.effect.each([
   }),
 );
 
-it.effect("reads one profile budget at a time and times out a stuck read", () =>
+it.effect("reads one profile budget at a time", () =>
   Effect.gen(function* () {
-    const requests: Array<HttpClientRequest.HttpClientRequest> = [];
-    const http = {
-      client: HttpClient.make((request) => {
-        requests.push(request);
-        return Effect.never;
-      }),
-      requests,
-    };
-    const { service } = yield* budgetFor(http);
-    const slow = yield* service.usageLimits("slow").pipe(Effect.forkChild);
-    yield* service.usageLimits("queued").pipe(Effect.forkChild);
-    yield* TestClock.adjust("20 seconds");
-    expect(requests).toHaveLength(1);
-    yield* TestClock.adjust("10 seconds");
-    const limits = yield* Fiber.join(slow);
-    expect(limits.unavailable).toEqual({
-      reason: "probeFailed",
-      message: "The aix gateway budget request timed out.",
-    });
-    expect(requests).toHaveLength(2);
-  }),
-);
-
-it.effect("does not query a direct Anthropic profile or one aix cannot resolve", () =>
-  Effect.gen(function* () {
-    const http = fakeHttp(() => Response.json({}));
-    const { service } = yield* budgetFor(http, (profileName) =>
-      profileName === "ae2"
-        ? Effect.succeed({
-            profileName,
-            endpoint: "https://api.anthropic.com",
-            endpointKind: "anthropic",
-            apiKey: SENTINEL_KEY,
-          })
-        : Effect.fail(new AixDiscoveryError({ reason: "profile-not-found" })),
-    );
-
-    expect((yield* service.usageLimits("ae2")).unavailable).toEqual({
-      reason: "unsupported",
-      message: "This aix profile connects directly to Anthropic, which reports no gateway budget.",
-    });
-    expect((yield* service.usageLimits("gone")).unavailable).toEqual({
-      reason: "probeFailed",
-      message: "aix could not resolve this profile.",
-    });
-    expect(http.requests).toEqual([]);
-  }),
-);
-
-it.effect("keeps the profile key out of usage limits and logs on every path", () => {
-  const lines: Array<string> = [];
-  const spans: Array<Tracer.NativeSpan> = [];
-  const tracer = Tracer.make({
-    span: (options) => {
-      const span = new Tracer.NativeSpan(options);
-      spans.push(span);
-      return span;
-    },
-  });
-  const querySentinel = "aix-budget-query-sentinel-do-not-leak";
-  const logger = Logger.make(({ message, cause }) => {
-    lines.push(NodeUtil.inspect(message, { depth: 10 }), Cause.pretty(cause));
-  });
-  return Effect.gen(function* () {
-    const responses: Record<string, () => Response | "transport-error"> = {
-      ok: () => Response.json({ key: SENTINEL_KEY, info: { spend: "1", max_budget: "2" } }),
-      rejected: () => new Response(SENTINEL_KEY, { status: 401 }),
-      broken: () => new Response(`{"info":"${SENTINEL_KEY}"}`, { status: 200 }),
-      offline: () => "transport-error",
-    };
-    const http = fakeHttp((request) => {
-      const profile = new URL(request.url).hostname.split(".")[0] ?? "";
-      return (responses[profile] ?? responses.ok!)();
-    });
-    const { service } = yield* budgetFor(http, (profileName) =>
-      Effect.succeed(
-        litellm(profileName, `https://${profileName}.gateway.test?credential=${querySentinel}`),
-      ),
-    );
-    const results = yield* Effect.forEach(Object.keys(responses), service.usageLimits);
-
-    expect(results.map((limits) => limits.unavailable?.reason)).toEqual([
-      undefined,
-      "probeFailed",
-      "probeFailed",
-      "probeFailed",
-    ]);
-    expect(JSON.stringify(results)).not.toContain(SENTINEL_KEY);
-    expect(lines.join("\n")).not.toContain(SENTINEL_KEY);
-    expect(spans.length).toBeGreaterThan(0);
-    const traceData = JSON.stringify(
-      spans.map((span) => ({
-        name: span.name,
-        attributes: Object.fromEntries(span.attributes),
-        events: span.events,
-      })),
-    );
-    expect(traceData).not.toContain(SENTINEL_KEY);
-    expect(traceData).not.toContain(querySentinel);
-    expect(JSON.stringify(results)).not.toContain(querySentinel);
-    expect(lines.join("\n")).not.toContain(querySentinel);
-  }).pipe(
-    Effect.withTracer(tracer),
-    Effect.withTracerEnabled(true),
-    Effect.provide(Logger.layer([logger], { mergeWithExisting: false })),
-  );
-});
-
-it.effect("falls back from the versioned route on 404", () =>
-  Effect.gen(function* () {
-    const http = fakeHttp((request) => {
-      const url = Option.getOrThrow(HttpClientRequest.toUrl(request)).pathname;
-      return url === "/v1/key/info"
-        ? new Response("missing", { status: 404 })
-        : Response.json({ info: { spend: "25", max_budget: "50" } });
-    });
-    const { service } = yield* budgetFor(http);
-    const limits = yield* service.usageLimits("legacy");
-    expect(limits.windows[0]?.amounts).toEqual({ currency: "USD", spent: 25, total: 50 });
-    expect(
-      http.requests.map((request) => Option.getOrThrow(HttpClientRequest.toUrl(request)).pathname),
-    ).toEqual(["/v1/key/info", "/key/info"]);
+    const { service, reads } = yield* budgetFor(() => Effect.never);
+    yield* service.usageLimits("slow").pipe(Effect.forkChild);
+    const queued = yield* service.usageLimits("queued").pipe(Effect.forkChild);
+    yield* TestClock.adjust("1 minute");
+    expect(reads).toEqual(["slow"]);
+    yield* Fiber.interrupt(queued);
   }),
 );
 
@@ -573,8 +238,9 @@ const provider = (overrides: Partial<ServerProvider> = {}): ServerProvider =>
 
 it.effect("replaces usage limits only on an enabled Claude budget owner", () =>
   Effect.gen(function* () {
-    const http = fakeHttp(() => Response.json({ info: { spend: 199.1, max_budget: 200 } }));
-    const { service } = yield* budgetFor(http);
+    const { service, reads } = yield* budgetFor(() =>
+      Effect.succeed(budget({ layers: [layer("key", 200, 199.1)] })),
+    );
     const run = (
       profileName: string | undefined,
       isBudgetOwner: boolean,
@@ -589,12 +255,13 @@ it.effect("replaces usage limits only on an enabled Claude budget owner", () =>
     expect(yield* run(undefined, false, manual)).toBe(manual);
     const disabled = provider({ enabled: false });
     expect(yield* run("nim4", true, disabled)).toBe(disabled);
-    expect(http.requests).toEqual([]);
-
     const codex = provider();
     expect(yield* run("nim4", true, codex)).toBe(codex);
+    const opencode = provider({ driver: ProviderDriverKind.make("opencode") });
+    expect(yield* run("nim4", true, opencode)).toBe(opencode);
     const notOwner = provider({ driver: ProviderDriverKind.make("claudeAgent") });
     expect(yield* run("nim4", false, notOwner)).toBe(notOwner);
+    expect(reads).toEqual([]);
 
     const managed = yield* run(
       "nim4",
@@ -602,93 +269,7 @@ it.effect("replaces usage limits only on an enabled Claude budget owner", () =>
       provider({ driver: ProviderDriverKind.make("claudeAgent") }),
     );
     expect(managed.usageLimits?.profileName).toBe("nim4");
-    expect(managed.usageLimits?.windows[0]?.id).toMatch(
-      /^aix-budget:nim4#credential:[a-f0-9]{64}$/u,
-    );
+    expect(managed.usageLimits?.windows[0]).toMatchObject({ label: "Gateway budget · nim4" });
     expect(managed.usageLimits?.windows[0]?.usedPercent).toBeCloseTo(99.55, 6);
-
-    const failedHttp = fakeHttp(() => new Response(null, { status: 500 }));
-    const failedBudget = yield* budgetFor(failedHttp);
-    const failed = yield* ProfileBudget.withAixProfileBudget(
-      "home",
-      true,
-    )(provider({ driver: ProviderDriverKind.make("claudeAgent") })).pipe(
-      Effect.provideService(ProfileBudget.AixProfileBudget, failedBudget.service),
-    );
-    expect(failed.usageLimits).toMatchObject({
-      profileName: "home",
-      windows: [],
-      unavailable: { reason: "probeFailed" },
-    });
   }),
-);
-
-it.effect("applies the fallback budget only to the designated Claude instance", () =>
-  Effect.gen(function* () {
-    const http = fakeHttp(() =>
-      Response.json(
-        gatewayInfo({
-          kind: "personal",
-          layers: [
-            { scope: "key", budget: "100", spent: "16" },
-            { scope: "tenant", budget: null, spent: "16" },
-          ],
-        }),
-      ),
-    );
-    const { service } = yield* budgetFor(http);
-    const run = (snapshot: ServerProvider) =>
-      ProfileBudget.withAixProfileBudget(
-        "adCare",
-        true,
-      )(snapshot).pipe(Effect.provideService(ProfileBudget.AixProfileBudget, service));
-
-    const codex = provider({ driver: ProviderDriverKind.make("codex") });
-    const claude = provider({ driver: ProviderDriverKind.make("claudeAgent") });
-    expect(yield* run(codex)).toBe(codex);
-    const claudeBudget = yield* run(claude);
-    expect(claudeBudget.usageLimits?.profileName).toBe("adCare");
-    expect(claudeBudget.usageLimits?.windows[0]).toMatchObject({
-      label: "Gateway budget · adCare",
-      usedPercent: 16,
-    });
-
-    const opencode = provider({ driver: ProviderDriverKind.make("opencode") });
-    expect(yield* run(opencode)).toBe(opencode);
-    expect(http.requests).toHaveLength(1);
-  }),
-);
-
-it.effect(
-  "uses a stable credential fingerprint to merge the same profile across environments",
-  () =>
-    Effect.gen(function* () {
-      const respond = () => Response.json({ info: { spend: 16, max_budget: 100 } });
-      const first = yield* budgetFor(fakeHttp(respond));
-      const sameCredential = yield* budgetFor(fakeHttp(respond));
-      const equivalentEndpoint = yield* budgetFor(fakeHttp(respond), (profileName) =>
-        Effect.succeed(litellm(profileName, "https://gateway.test/v1/")),
-      );
-      const otherProfile = yield* budgetFor(fakeHttp(respond));
-      const otherCredential = yield* budgetFor(fakeHttp(respond), (profileName) =>
-        Effect.succeed({ ...litellm(profileName), apiKey: "different-key" }),
-      );
-
-      const fingerprint = (yield* first.service.usageLimits("adCare")).credentialFingerprint;
-      const matchingFingerprint = (yield* sameCredential.service.usageLimits("adCare"))
-        .credentialFingerprint;
-      const equivalentEndpointFingerprint = (yield* equivalentEndpoint.service.usageLimits(
-        "adCare",
-      )).credentialFingerprint;
-      const otherProfileFingerprint = (yield* otherProfile.service.usageLimits("nim4"))
-        .credentialFingerprint;
-      const otherCredentialFingerprint = (yield* otherCredential.service.usageLimits("adCare"))
-        .credentialFingerprint;
-
-      expect(fingerprint).toMatch(/^[a-f0-9]{64}$/u);
-      expect(matchingFingerprint).toBe(fingerprint);
-      expect(equivalentEndpointFingerprint).toBe(fingerprint);
-      expect(otherProfileFingerprint).not.toBe(fingerprint);
-      expect(otherCredentialFingerprint).not.toBe(fingerprint);
-    }),
 );

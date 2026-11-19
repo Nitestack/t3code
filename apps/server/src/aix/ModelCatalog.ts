@@ -1,10 +1,4 @@
-import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
-import * as Schema from "effect/Schema";
-import { HttpClient, HttpClientRequest } from "effect/http";
-
-const MODEL_INFO_PAGE_SIZE = 100;
-const MODEL_INFO_MAX_PAGES = 100;
+import type { AixCatalogModel } from "../provider/AixDiscovery.ts";
 
 const REASONING_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
@@ -13,15 +7,16 @@ export interface ModelPricing {
   readonly inputPerMillionTokens?: number;
   readonly outputPerMillionTokens?: number;
   readonly cachedInputPerMillionTokens?: number;
+  readonly cacheWritePerMillionTokens?: number;
 }
 
 export interface CatalogModel {
-  /** LiteLLM's selectable ID. Keep it unchanged when formatting its display name. */
+  /** The gateway's selectable ID. Keep it unchanged when formatting its display name. */
   readonly id: string;
   readonly displayName: string;
   /** Display-only family inferred from the model ID, not an API compatibility hint. */
   readonly family?: string;
-  /** The upstream provider reported by LiteLLM; this does not imply an API protocol. */
+  /** The upstream provider reported by the gateway; this does not imply an API protocol. */
   readonly provider?: string;
   readonly contextTokens?: number;
   readonly maxOutputTokens?: number;
@@ -31,74 +26,6 @@ export interface CatalogModel {
     readonly defaultEffort?: ReasoningEffort;
   };
 }
-
-export type ModelCatalogFetchStage = "configuration" | "models" | "modelInfo" | "pagination";
-
-export class ModelCatalogFetchError extends Schema.TaggedError<ModelCatalogFetchError>()(
-  "ModelCatalogFetchError",
-  {
-    stage: Schema.Literals(["configuration", "models", "modelInfo", "pagination"]),
-    reason: Schema.Literals([
-      "configuration",
-      "request",
-      "status",
-      "invalidResponse",
-      "inconsistentPagination",
-    ]),
-    status: Schema.optional(Schema.Number),
-  },
-) {
-  override get message(): string {
-    const location = this.stage === "models" ? "/v1/models" : "/v2/model/info";
-    if (this.stage === "configuration") return "LiteLLM catalog base URL is invalid.";
-    if (this.reason === "status") return `LiteLLM ${location} returned HTTP ${this.status}.`;
-    if (this.reason === "inconsistentPagination")
-      return `LiteLLM ${location} pagination is incomplete or inconsistent.`;
-    if (this.reason === "invalidResponse")
-      return `LiteLLM ${location} returned an invalid response.`;
-    return `LiteLLM ${location} request failed.`;
-  }
-}
-
-const UnknownRecord = Schema.Record(Schema.String, Schema.Unknown);
-const decodeRecord = Schema.decodeUnknownOption(UnknownRecord);
-const decodeString = Schema.decodeUnknownOption(Schema.String);
-const decodeNumber = Schema.decodeUnknownOption(Schema.Number);
-const decodeBoolean = Schema.decodeUnknownOption(Schema.Boolean);
-const decodeStrings = Schema.decodeUnknownOption(Schema.Array(Schema.String));
-const decodeModelList = Schema.decodeUnknownOption(
-  Schema.Struct({ data: Schema.Array(Schema.Struct({ id: Schema.String })) }),
-);
-const decodeModelInfoPage = Schema.decodeUnknownOption(
-  Schema.Struct({ data: Schema.Array(Schema.Unknown) }),
-);
-
-const recordOf = (value: unknown): Record<string, unknown> =>
-  Option.getOrElse(decodeRecord(value), () => ({}));
-
-const stringAt = (record: Record<string, unknown>, key: string): string | undefined => {
-  const value = Option.getOrUndefined(decodeString(record[key]));
-  const trimmed = value?.trim();
-  return trimmed ? trimmed : undefined;
-};
-
-const numberAt = (
-  record: Record<string, unknown>,
-  key: string,
-  valid: (value: number) => boolean,
-) => {
-  const value = Option.getOrUndefined(decodeNumber(record[key]));
-  return value !== undefined && Number.isFinite(value) && valid(value) ? value : undefined;
-};
-
-const booleanAt = (record: Record<string, unknown>, key: string) =>
-  Option.getOrUndefined(decodeBoolean(record[key]));
-
-const stringsAt = (record: Record<string, unknown>, key: string) =>
-  Option.getOrUndefined(decodeStrings(record[key]));
-
-const isPositiveInteger = (value: number) => Number.isInteger(value) && value > 0;
-const isNonNegative = (value: number) => value >= 0;
 
 const CHAT_MODES = new Set(["chat", "responses"]);
 const NON_MODEL_PROVIDERS = new Set(["a2a"]);
@@ -129,184 +56,75 @@ export function knownNonChatId(id: string): boolean {
   );
 }
 
-interface Deployment {
-  readonly name: string;
-  readonly params: Record<string, unknown>;
-  readonly info: Record<string, unknown>;
-}
-
-function parseDeployment(value: unknown): Deployment | undefined {
-  const record = Option.getOrUndefined(decodeRecord(value));
-  if (!record) return undefined;
-  const name = stringAt(record, "model_name");
-  if (!name) return undefined;
-  return {
-    name,
-    params: recordOf(record.litellm_params),
-    info: recordOf(record.model_info),
-  };
-}
-
-function providerOf({ params, info }: Deployment): string | undefined {
-  const model = stringAt(params, "model");
-  const routedProvider = model?.includes("/") ? model.split("/")[0] : undefined;
-  return (
-    stringAt(info, "litellm_provider") ??
-    stringAt(params, "custom_llm_provider") ??
-    routedProvider
-  )?.toLowerCase();
-}
-
 const genericWildcard = (name: string) => name === "*" || name.endsWith("/*");
 
-const concreteWildcardId = (name: string): string | undefined => {
-  if (!name.endsWith("*") || name.indexOf("*") !== name.length - 1 || genericWildcard(name)) {
-    return undefined;
-  }
-  const id = name.slice(0, -1);
-  // A versioned id only: `claude-*` or `gpt-image*` name a family, not a selectable model.
-  return /[a-z0-9]$/i.test(id) && /\d/.test(modelName(id)) ? id : undefined;
-};
+/** A listed model with whatever metadata aix knows; an ID-only listing has none. */
+export type ListedModel = Pick<AixCatalogModel, "id"> & Partial<Omit<AixCatalogModel, "id">>;
 
-function unresolvedWildcard({ name, params }: Deployment): boolean {
-  if (!name.includes("*")) return false;
-  const concreteId = concreteWildcardId(name);
-  const model = stringAt(params, "model");
-  // Only a passthrough route may be listed: anything else substitutes another model.
-  return concreteId === undefined || model === undefined || modelName(model) !== modelName(name);
-}
+const isEffort = (value: string | null | undefined): value is ReasoningEffort =>
+  value != null && (REASONING_EFFORTS as readonly string[]).includes(value);
 
-const asEffort = (value: string | undefined): value is ReasoningEffort =>
-  value !== undefined && (REASONING_EFFORTS as readonly string[]).includes(value);
+const positiveInteger = (value: number | null | undefined) =>
+  value != null && Number.isInteger(value) && value > 0 ? value : undefined;
 
-const effortsOf = (values: readonly string[]) =>
-  REASONING_EFFORTS.filter((effort) => values.includes(effort));
-
-function reasoningOf(info: Record<string, unknown>): CatalogModel["reasoning"] {
-  if (booleanAt(info, "supports_reasoning") === false) return undefined;
-  const explicit = stringsAt(info, "reasoning_effort_levels");
-  const flags = {
-    none: booleanAt(info, "supports_none_reasoning_effort"),
-    minimal: booleanAt(info, "supports_minimal_reasoning_effort"),
-    low: booleanAt(info, "supports_low_reasoning_effort"),
-    medium: booleanAt(info, "supports_medium_reasoning_effort"),
-    high: booleanAt(info, "supports_high_reasoning_effort"),
-    xhigh: booleanAt(info, "supports_xhigh_reasoning_effort"),
-    max: booleanAt(info, "supports_max_reasoning_effort"),
-  };
-  const hasFlag = Object.values(flags).some((value) => value !== undefined);
-  if (explicit === undefined && !hasFlag) {
-    return booleanAt(info, "supports_reasoning") === true ? { efforts: [] } : undefined;
-  }
-  const efforts =
-    explicit !== undefined
-      ? effortsOf(explicit)
-      : REASONING_EFFORTS.filter((effort) => flags[effort] === true);
-  const defaultEffort = stringAt(info, "default_reasoning_effort");
-  return {
-    efforts,
-    ...(asEffort(defaultEffort) && efforts.includes(defaultEffort) ? { defaultEffort } : {}),
-  };
-}
-
-function agreed<T>(values: readonly (T | undefined)[]): T | undefined {
-  const first = values[0];
-  return first !== undefined && values.every((value) => value === first) ? first : undefined;
-}
-
-function smallest(values: readonly (number | undefined)[]): number | undefined {
-  return values.every((value) => value !== undefined)
-    ? Math.min(...(values as readonly number[]))
-    : undefined;
-}
-
-function perMillion(value: number): number | undefined {
-  const converted = value * 1_000_000;
-  if (!Number.isFinite(converted)) return undefined;
-  const scaled = converted * 1_000_000;
-  return Number.isFinite(scaled) ? Math.round(scaled) / 1_000_000 : converted;
-}
-
-function pricingOf(deployments: readonly Deployment[]): ModelPricing | undefined {
-  const fields = [
-    "input_cost_per_token",
-    "output_cost_per_token",
-    "cache_read_input_token_cost",
-  ] as const;
-  const converted = deployments.map((deployment) =>
-    fields.map((field) => {
-      const value = numberAt(deployment.info, field, isNonNegative);
-      return value === undefined ? undefined : perMillion(value);
+function pricingOf(pricing: ListedModel["pricing"]): ModelPricing | undefined {
+  if (pricing == null) return undefined;
+  const result = {
+    ...(pricing.input_per_million != null && { inputPerMillionTokens: pricing.input_per_million }),
+    ...(pricing.output_per_million != null && {
+      outputPerMillionTokens: pricing.output_per_million,
     }),
-  );
-  const allAgree = fields.every((_, index) =>
-    converted.every((deployment) => deployment[index] === converted[0]?.[index]),
-  );
-  if (!allAgree) return undefined;
-  const [inputPerMillionTokens, outputPerMillionTokens, cachedInputPerMillionTokens] =
-    converted[0] ?? [];
-  const pricing = {
-    ...(inputPerMillionTokens !== undefined && { inputPerMillionTokens }),
-    ...(outputPerMillionTokens !== undefined && { outputPerMillionTokens }),
-    ...(cachedInputPerMillionTokens !== undefined && { cachedInputPerMillionTokens }),
+    ...(pricing.cache_read_per_million != null && {
+      cachedInputPerMillionTokens: pricing.cache_read_per_million,
+    }),
+    ...(pricing.cache_write_per_million != null && {
+      cacheWritePerMillionTokens: pricing.cache_write_per_million,
+    }),
   };
-  return Object.keys(pricing).length > 0 ? pricing : undefined;
+  return Object.keys(result).length > 0 ? result : undefined;
 }
 
-function reasoningOfAll(
-  deployments: readonly Deployment[],
-  groupEfforts: readonly string[] | undefined,
-): CatalogModel["reasoning"] {
-  const each = deployments.map(({ info }) => reasoningOf(info));
-  const defaultEffort = agreed(
-    deployments.map(({ info }) => stringAt(info, "default_reasoning_effort")),
-  );
-  if (groupEfforts !== undefined) {
-    const efforts = effortsOf(groupEfforts);
-    return efforts.length > 0 || each.some((reasoning) => reasoning !== undefined)
-      ? {
-          efforts,
-          ...(asEffort(defaultEffort) && efforts.includes(defaultEffort) ? { defaultEffort } : {}),
-        }
-      : undefined;
-  }
-  if (each.some((reasoning) => reasoning === undefined)) return undefined;
-  const efforts = REASONING_EFFORTS.filter((effort) =>
-    each.every((reasoning) => reasoning!.efforts.includes(effort)),
-  );
+function toModel(model: ListedModel): CatalogModel {
+  const family = modelFamily(model.id);
+  const contextTokens = positiveInteger(model.context_tokens);
+  const maxOutputTokens = positiveInteger(model.max_output_tokens);
+  const pricing = pricingOf(model.pricing);
+  const efforts = REASONING_EFFORTS.filter((effort) => model.reasoning?.efforts.includes(effort));
+  const defaultEffort = model.reasoning?.default_effort;
+  const displayName = model.display_name?.trim();
   return {
-    efforts,
-    ...(asEffort(defaultEffort) && efforts.includes(defaultEffort) ? { defaultEffort } : {}),
-  };
-}
-
-function toModel(
-  id: string,
-  deployments: readonly Deployment[],
-  groupEfforts: readonly string[] | undefined,
-): CatalogModel {
-  const infos = deployments.map(({ info }) => info);
-  const pricing = pricingOf(deployments);
-  const reasoning = reasoningOfAll(deployments, groupEfforts);
-  const providers = deployments.map(providerOf);
-  const contextTokens = smallest(
-    infos.map((info) => numberAt(info, "max_input_tokens", isPositiveInteger)),
-  );
-  const maxOutputTokens = smallest(
-    infos.map((info) => numberAt(info, "max_output_tokens", isPositiveInteger)),
-  );
-  const provider = agreed(providers);
-  const family = modelFamily(id);
-  return {
-    id,
-    displayName: agreed(infos.map((info) => stringAt(info, "display_name"))) ?? formatModelName(id),
+    id: model.id,
+    displayName: displayName || formatModelName(model.id),
     ...(family !== undefined && { family }),
-    ...(provider !== undefined && { provider }),
+    ...(model.provider != null && { provider: model.provider }),
     ...(contextTokens !== undefined && { contextTokens }),
     ...(maxOutputTokens !== undefined && { maxOutputTokens }),
     ...(pricing && { pricing }),
-    ...(reasoning && { reasoning }),
+    ...(model.reasoning != null && {
+      reasoning: {
+        efforts,
+        ...(isEffort(defaultEffort) && efforts.includes(defaultEffort) && { defaultEffort }),
+      },
+    }),
   };
+}
+
+/** Models that cannot be selected as a coding chat model are omitted. */
+export function catalogModels(models: readonly ListedModel[]): CatalogModel[] {
+  return models
+    .filter(
+      (model) =>
+        !model.id.includes("*") &&
+        !knownNonChatId(model.id) &&
+        (model.provider == null || !NON_MODEL_PROVIDERS.has(model.provider)) &&
+        (model.mode == null || CHAT_MODES.has(model.mode)),
+    )
+    .map(toModel)
+    .sort(
+      (left, right) =>
+        left.displayName.localeCompare(right.displayName, "de", { numeric: true }) ||
+        left.id.localeCompare(right.id),
+    );
 }
 
 function modelFamily(id: string): string | undefined {
@@ -333,77 +151,6 @@ const MODEL_FAMILIES = new Map([
   ["jamba", "Jamba"],
   ["minimax", "MiniMax"],
 ]);
-
-/** Model names that cannot be selected as a coding chat model are omitted. */
-export function normalizeModelInfo(
-  entries: readonly unknown[],
-  groups?: ReadonlyMap<string, readonly string[]>,
-  modelIds?: readonly string[],
-): CatalogModel[] {
-  const byName = new Map<string, Deployment[]>();
-  const knownNames = new Set<string>();
-  const unresolved = new Set<string>();
-  const nonChat = new Set<string>();
-  const resolvedWildcards = new Set<string>();
-
-  for (const raw of entries) {
-    const deployment = parseDeployment(raw);
-    if (!deployment) continue;
-    knownNames.add(deployment.name);
-    if (unresolvedWildcard(deployment)) {
-      unresolved.add(deployment.name);
-      continue;
-    }
-    const id = concreteWildcardId(deployment.name) ?? deployment.name;
-    const provider = providerOf(deployment);
-    const mode = stringAt(deployment.info, "mode")?.toLowerCase();
-    if (
-      knownNonChatId(deployment.name) ||
-      (provider && NON_MODEL_PROVIDERS.has(provider)) ||
-      (mode !== undefined && !CHAT_MODES.has(mode))
-    ) {
-      nonChat.add(deployment.name);
-      continue;
-    }
-    if (id !== deployment.name) resolvedWildcards.add(deployment.name);
-    const deployments = byName.get(id) ?? [];
-    deployments.push(deployment);
-    byName.set(id, deployments);
-  }
-
-  const listed =
-    modelIds === undefined
-      ? undefined
-      : new Set(
-          modelIds.map((name) =>
-            resolvedWildcards.has(name) ? (concreteWildcardId(name) ?? name) : name,
-          ),
-        );
-  for (const name of listed ?? []) {
-    if (knownNonChatId(name) || name.includes("*")) continue;
-    if (knownNames.has(name) || unresolved.has(name) || byName.has(name)) continue;
-    byName.set(name, [{ name, params: {}, info: {} }]);
-  }
-
-  return [...byName.entries()]
-    .filter(
-      ([name]) =>
-        !unresolved.has(name) && !nonChat.has(name) && (listed === undefined || listed.has(name)),
-    )
-    .map(([name, deployments]) =>
-      toModel(
-        name,
-        deployments,
-        groups?.get(name) ??
-          (resolvedWildcards.has(`${name}*`) ? groups?.get(`${name}*`) : undefined),
-      ),
-    )
-    .sort(
-      (left, right) =>
-        left.displayName.localeCompare(right.displayName, "de", { numeric: true }) ||
-        left.id.localeCompare(right.id),
-    );
-}
 
 /** Provider paths and deployment tags are removed for display; the selectable ID remains intact. */
 function formatModelName(id: string): string {
@@ -476,180 +223,3 @@ function joinVersions(tokens: readonly string[]): string[] {
   }
   return result;
 }
-
-export interface FetchLiteLlmModelCatalogInput {
-  /** LiteLLM's API base URL ending in `/v1`, without credentials, query, or fragment. */
-  readonly baseURL: string;
-  readonly apiKey: string;
-}
-
-interface CatalogEndpoints {
-  readonly models: string;
-  readonly modelInfo: string;
-  readonly modelGroupInfo: string;
-}
-
-function catalogEndpoints(baseURL: string): CatalogEndpoints | undefined {
-  try {
-    const base = new URL(baseURL);
-    const path = base.pathname.replace(/\/+$/, "");
-    if (
-      !["http:", "https:"].includes(base.protocol) ||
-      base.username ||
-      base.password ||
-      base.search ||
-      base.hash ||
-      !path.endsWith("/v1")
-    )
-      return undefined;
-    const root = new URL(base.toString());
-    root.pathname = path.slice(0, -3);
-    root.search = "";
-    root.hash = "";
-    const api = new URL(base.toString());
-    api.pathname = path;
-    return {
-      models: new URL(
-        "models?return_wildcard_routes=true",
-        `${api.toString().replace(/\/$/, "")}/`,
-      ).toString(),
-      modelInfo: new URL("v2/model/info", `${root.toString().replace(/\/$/, "")}/`).toString(),
-      modelGroupInfo: new URL(
-        "model_group/info",
-        `${root.toString().replace(/\/$/, "")}/`,
-      ).toString(),
-    };
-  } catch {
-    return undefined;
-  }
-}
-
-const fail = (
-  stage: ModelCatalogFetchStage,
-  reason: ModelCatalogFetchError["reason"],
-  status?: number,
-) => new ModelCatalogFetchError({ stage, reason, ...(status !== undefined && { status }) });
-
-const requestJson = Effect.fn("AixModelCatalog.requestJson")(function* (
-  url: string,
-  apiKey: string,
-  stage: Exclude<ModelCatalogFetchStage, "configuration" | "pagination">,
-) {
-  const client = yield* HttpClient.HttpClient;
-  const response = yield* client
-    .execute(
-      HttpClientRequest.get(url).pipe(
-        HttpClientRequest.setHeader("authorization", `Bearer ${apiKey}`),
-        HttpClientRequest.setHeader("accept", "application/json"),
-      ),
-    )
-    .pipe(
-      Effect.timeout("10 seconds"),
-      Effect.mapError(() => fail(stage, "request")),
-    );
-  if (response.status < 200 || response.status >= 300) {
-    return yield* fail(stage, "status", response.status);
-  }
-  return yield* response.json.pipe(
-    Effect.timeout("10 seconds"),
-    Effect.mapError(() => fail(stage, "invalidResponse")),
-  );
-});
-
-const groupInfoSchema = Schema.Struct({ data: Schema.Array(Schema.Unknown) });
-const decodeGroupInfo = Schema.decodeUnknownOption(groupInfoSchema);
-
-function normalizeGroupEfforts(value: unknown): ReadonlyMap<string, readonly string[]> | undefined {
-  const body = Option.getOrUndefined(decodeGroupInfo(value));
-  if (!body) return undefined;
-  const efforts = new Map<string, readonly string[]>();
-  for (const raw of body.data) {
-    const record = Option.getOrUndefined(decodeRecord(raw));
-    if (!record) continue;
-    const name = stringAt(record, "model_group");
-    const values = stringsAt(record, "supported_reasoning_efforts");
-    if (!name || !values) continue;
-    const previous = efforts.get(name);
-    efforts.set(
-      name,
-      previous === undefined ? values : previous.filter((effort) => values.includes(effort)),
-    );
-  }
-  return efforts;
-}
-
-const readModelIds = Effect.fn("AixModelCatalog.readModelIds")(function* (
-  url: string,
-  apiKey: string,
-) {
-  const body = yield* requestJson(url, apiKey, "models");
-  const parsed = Option.getOrUndefined(decodeModelList(body));
-  if (!parsed || parsed.data.some(({ id }) => id.trim().length === 0)) {
-    return yield* fail("models", "invalidResponse");
-  }
-  return parsed.data.map(({ id }) => id);
-});
-
-const readModelInfoPage = Effect.fn("AixModelCatalog.readModelInfoPage")(function* (
-  url: string,
-  apiKey: string,
-  page: number,
-) {
-  const pageUrl = new URL(url);
-  pageUrl.searchParams.set("page", String(page));
-  pageUrl.searchParams.set("size", String(MODEL_INFO_PAGE_SIZE));
-  const body = yield* requestJson(pageUrl.toString(), apiKey, "modelInfo");
-  const parsed = Option.getOrUndefined(decodeModelInfoPage(body));
-  if (!parsed) return yield* fail("modelInfo", "invalidResponse");
-  const record = recordOf(body);
-  const total = numberAt(record, "total_pages", (value) => Number.isInteger(value) && value >= 0);
-  if (Object.hasOwn(record, "total_pages") && total === undefined) {
-    return yield* fail("pagination", "inconsistentPagination");
-  }
-  return { data: parsed.data, totalPages: total };
-});
-
-/** Fetches the two required endpoints and optional group reasoning metadata without retaining the key. */
-export const fetchLiteLlmModelCatalog = Effect.fn("AixModelCatalog.fetch")(function* ({
-  baseURL,
-  apiKey,
-}: FetchLiteLlmModelCatalogInput) {
-  const endpoints = catalogEndpoints(baseURL);
-  if (!endpoints || apiKey.length === 0) return yield* fail("configuration", "configuration");
-  const modelIds = yield* readModelIds(endpoints.models, apiKey);
-  const groupsEffect = requestJson(endpoints.modelGroupInfo, apiKey, "modelInfo").pipe(
-    Effect.map(normalizeGroupEfforts),
-    Effect.orElseSucceed(() => undefined),
-  );
-  const entries: unknown[] = [];
-  let expectedPages: number | undefined;
-  for (let page = 1; page <= MODEL_INFO_MAX_PAGES; page += 1) {
-    const result = yield* readModelInfoPage(endpoints.modelInfo, apiKey, page);
-    if (result.totalPages !== undefined) {
-      if (
-        result.totalPages > MODEL_INFO_MAX_PAGES ||
-        (result.totalPages < page && !(page === 1 && result.totalPages === 0)) ||
-        (expectedPages !== undefined && expectedPages !== result.totalPages)
-      ) {
-        return yield* fail("pagination", "inconsistentPagination");
-      }
-      expectedPages = result.totalPages;
-    }
-    entries.push(...result.data);
-    if (expectedPages !== undefined) {
-      if (expectedPages === 0) {
-        if (entries.length > 0) return yield* fail("pagination", "inconsistentPagination");
-        break;
-      }
-      if (result.data.length === 0 && (page > 1 || expectedPages > 1)) {
-        return yield* fail("pagination", "inconsistentPagination");
-      }
-      if (page >= expectedPages) break;
-    } else if (result.data.length < MODEL_INFO_PAGE_SIZE) {
-      break;
-    }
-    if (page === MODEL_INFO_MAX_PAGES) return yield* fail("pagination", "inconsistentPagination");
-  }
-  const groups = yield* groupsEffect;
-  return { models: normalizeModelInfo(entries, groups, modelIds) };
-});

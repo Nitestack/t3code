@@ -43,7 +43,7 @@ const withAix = <A>(
       ChildProcessSpawner.ChildProcessSpawner,
       ChildProcessSpawner.make((command) => {
         const args = (command as unknown as { readonly args: ReadonlyArray<string> }).args;
-        const profile = args[1] ?? "";
+        const profile = args[args.indexOf("env") + 1] ?? "";
         const result = response(profile);
         return Effect.succeed(mockResult(result.stdout, result.code, result.stderr));
       }),

@@ -36,7 +36,7 @@ const withAixProfiles = <A, E>(
       ChildProcessSpawner.ChildProcessSpawner,
       ChildProcessSpawner.make((command) => {
         const args = (command as unknown as { readonly args: ReadonlyArray<string> }).args;
-        const profile = args[1];
+        const profile = args[args.indexOf("env") + 1];
         const response = profiles[profile ?? ""];
         return Effect.succeed(
           ChildProcessSpawner.makeHandle({

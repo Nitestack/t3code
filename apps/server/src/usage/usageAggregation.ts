@@ -70,6 +70,8 @@ export interface AggregateOptions {
   readonly untilDay: string;
   readonly rates: RateTable;
   readonly priceOverrides?: RateTable;
+  /** Gateway prices for aix (work) records, which ran through an aix profile. */
+  readonly gatewayRates?: RateTable;
   readonly modelAliases?: ReadonlyMap<string, string>;
   readonly rateModel?: (provider: UsageRecord["provider"], model: string) => string | undefined;
   readonly modelFilter?: UsageModelFilter;
@@ -310,7 +312,13 @@ export class UsageAggregator {
   }
 
   #accumulate(bucket: MutableBucket, record: UsageRecord): void {
-    const priced = priceUsage(this.#options.rates, record, this.#options.priceOverrides);
+    const gatewayRates = bucket.scope === "work" ? this.#options.gatewayRates : undefined;
+    const priced = priceUsage(
+      this.#options.rates,
+      record,
+      this.#options.priceOverrides,
+      gatewayRates,
+    );
 
     const totals = bucket.totals;
     totals.uncachedInputTokens += record.totals.uncachedInputTokens;
@@ -339,6 +347,7 @@ export class UsageAggregator {
       this.#options.rates,
       record,
       this.#options.priceOverrides,
+      gatewayRates,
     );
     bucket.records += 1;
     if (priced.costSource === "unpriced") {

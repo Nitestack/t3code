@@ -52,13 +52,13 @@ const mockOutput = (stdout: string, code = 0, stderr = "") =>
     getOutputFd: () => Stream.empty,
   });
 
-// Fakes only the `aix env <profile>` call; the profile name is argv[1].
+// Fakes only the `aix env <profile>` call.
 const fakeAix = (
   respond: (profile: string) => { stdout: string; code?: number; stderr?: string },
 ) =>
   ChildProcessSpawner.make((command) => {
     const args = (command as unknown as { readonly args: ReadonlyArray<string> }).args;
-    const result = respond(args[1] ?? "");
+    const result = respond(args[args.indexOf("env") + 1] ?? "");
     return Effect.succeed(mockOutput(result.stdout, result.code, result.stderr));
   });
 

@@ -263,6 +263,26 @@ describe("UsageAggregator", () => {
     expect(result.buckets[0]?.totals.outputTokens).toBe(50);
   });
 
+  it("prices only work records with gateway rates", () => {
+    const gatewayRates: RateTable = new Map([
+      ["claude-fable-5", { ...rates.get("claude-fable-5")!, outputCostPerToken: 0 }],
+    ]);
+    const aggregator = new UsageAggregator({
+      timeZone: "UTC",
+      sinceDay: "2026-08-01",
+      untilDay: "2026-08-31",
+      rates,
+      gatewayRates,
+    });
+    aggregator.add(record({ scope: "work" }));
+    aggregator.add(record({ sessionId: "session-b" }), undefined, "personal");
+    const costs = Object.fromEntries(
+      aggregator.finish().buckets.map((bucket) => [bucket.scope, bucket.categoryCostUsd?.output]),
+    );
+
+    expect(costs).toEqual({ work: 0, personal: expect.closeTo(0.0025) });
+  });
+
   it("prefers a reported cost over the rate table", () => {
     const result = aggregate([record({ reportedCostUsd: 1.25 })]);
 

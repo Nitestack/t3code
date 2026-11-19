@@ -6,53 +6,20 @@ import {
 } from "@t3tools/provider-core/server/usageLimits";
 import * as Cache from "effect/Cache";
 import * as Context from "effect/Context";
-import * as Digest from "effect/crypto/Digest";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import * as Hex from "effect/encoding/Hex";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
-import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
-import { HttpClient, HttpClientRequest } from "effect/http";
 import { ChildProcessSpawner } from "effect/process";
 
 import * as AixDiscovery from "../provider/AixDiscovery.ts";
 
-// Gateway budgets are decimal strings; legacy LiteLLM also accepts numeric amounts.
-const Amount = Schema.Union([Schema.Finite, Schema.FiniteFromString]);
-
-const KeyInfo = Schema.Struct({
-  info: Schema.Struct({
-    spend: Schema.optional(Schema.NullOr(Amount)),
-    max_budget: Schema.optional(Schema.NullOr(Amount)),
-    budget_duration: Schema.optional(Schema.NullOr(Schema.String)),
-    budget_reset_at: Schema.optional(Schema.NullOr(Schema.String)),
-    budget_period_start: Schema.optional(Schema.NullOr(Schema.String)),
-  }),
-});
-export type KeyInfo = typeof KeyInfo.Type;
-export const decodeKeyInfo = Schema.decodeUnknownOption(KeyInfo);
-
-const AiHubLayer = Schema.Struct({
-  // Unknown scopes are ignored, so a new gateway layer does not hide the budget.
-  scope: Schema.String,
-  budget_usd: Schema.NullOr(Amount),
-  spent_usd: Amount,
-  period_start: Schema.optional(Schema.NullOr(Schema.String)),
-});
-const AiHubKeyInfo = Schema.Struct({
-  project_id: Schema.optional(Schema.NullOr(Schema.String)),
-  layers: Schema.Array(AiHubLayer),
-});
-export type AiHubKeyInfo = typeof AiHubKeyInfo.Type;
-export const decodeAiHubKeyInfo = Schema.decodeUnknownOption(AiHubKeyInfo);
-
 const DURATION_MINUTES = { s: 1 / 60, m: 1, h: 60, d: 1440, w: 10080, mo: 43200 } as const;
 
-/** LiteLLM writes budget windows like `30d`, `1h` or `1mo`. */
+/** aix reports budget windows like `30d`, `1h` or `1mo`. */
 const durationMinutes = (value: string | null | undefined): number | undefined => {
   const match = /^(\d+)(mo|s|m|h|d|w)$/u.exec(value?.trim() ?? "");
   if (!match) return undefined;
@@ -67,113 +34,31 @@ const isoTime = (value: string | null | undefined): string | undefined =>
     ? undefined
     : Option.getOrUndefined(Option.map(DateTime.make(value), DateTime.formatIso));
 
-const MONTHLY_WINDOW_MINUTES = DURATION_MINUTES.mo;
-
-// Gateways that report only a period start (the AI Hub) reset monthly; explicit fields win.
-const monthlyResetAfter = (
-  periodStart: string | null | undefined,
-  checkedAt: string,
-): string | undefined => {
-  if (periodStart == null) return undefined;
-  const start = Option.getOrUndefined(DateTime.make(periodStart));
-  const now = Option.getOrUndefined(DateTime.make(checkedAt));
-  if (start === undefined || now === undefined) return undefined;
-  const months = Math.max(
-    1,
-    (DateTime.getPartUtc(now, "year") - DateTime.getPartUtc(start, "year")) * 12 +
-      DateTime.getPartUtc(now, "month") -
-      DateTime.getPartUtc(start, "month"),
-  );
-  const reset = DateTime.add(start, { months });
-  return DateTime.formatIso(
-    DateTime.isGreaterThan(reset, now) ? reset : DateTime.add(start, { months: months + 1 }),
-  );
-};
-
 const budgetWindowId = (profileName: string, credentialFingerprint?: string) =>
   `aix-budget:${profileName}${credentialFingerprint ? `#credential:${credentialFingerprint}` : ""}`;
 
-export function keyInfoUsageLimits(input: {
-  readonly profileName: string;
-  readonly keyInfo: KeyInfo;
-  readonly checkedAt: string;
-  readonly credentialFingerprint?: string;
-}): ServerProviderUsageLimits {
-  const {
-    spend,
-    max_budget: maxBudget,
-    budget_duration,
-    budget_reset_at,
-    budget_period_start,
-  } = input.keyInfo.info;
-  if (maxBudget == null) {
-    return makeUnavailableUsageLimits({
-      checkedAt: input.checkedAt,
-      reason: "unsupported",
-      message: "This aix profile's key has no budget limit.",
-    });
-  }
-  // A $0 cap has no percentage, so it cannot be a window.
-  if (maxBudget <= 0) {
-    return makeUnavailableUsageLimits({
-      checkedAt: input.checkedAt,
-      reason: "unsupported",
-      message: "This aix profile's key has a $0 budget.",
-    });
-  }
-  if (spend == null) {
-    return makeUnavailableUsageLimits({
-      checkedAt: input.checkedAt,
-      reason: "probeFailed",
-      message: "The aix gateway returned an unrecognized budget.",
-    });
-  }
-  const monthlyReset =
-    budget_reset_at == null && budget_duration == null
-      ? monthlyResetAfter(budget_period_start, input.checkedAt)
-      : undefined;
-  const resetsAt = isoTime(budget_reset_at) ?? monthlyReset;
-  const windowDurationMins =
-    durationMinutes(budget_duration) ??
-    (monthlyReset === undefined ? undefined : MONTHLY_WINDOW_MINUTES);
-  return {
-    ...makeUsageLimits({
-      checkedAt: input.checkedAt,
-      windows: [
-        {
-          id: budgetWindowId(input.profileName, input.credentialFingerprint),
-          kind: "other",
-          label: `Gateway budget · ${input.profileName}`,
-          usedPercent: clampPercent((spend / maxBudget) * 100),
-          amounts: { currency: "USD", spent: spend, total: maxBudget },
-          ...(resetsAt === undefined ? {} : { resetsAt }),
-          ...(windowDurationMins === undefined ? {} : { windowDurationMins }),
-        },
-      ],
-    }),
-    ...(input.credentialFingerprint === undefined
-      ? {}
-      : { credentialFingerprint: input.credentialFingerprint }),
-  };
+export interface AixBudget {
+  readonly project_id?: string | null | undefined;
+  readonly layers: ReadonlyArray<AixDiscovery.AixBudgetLayer>;
 }
 
-export function aiHubKeyInfoUsageLimits(input: {
+export function budgetUsageLimits(input: {
   readonly profileName: string;
-  readonly keyInfo: AiHubKeyInfo;
+  readonly budget: AixBudget;
   readonly checkedAt: string;
   readonly credentialFingerprint?: string;
 }): ServerProviderUsageLimits {
-  const layers = input.keyInfo.layers;
+  const layers = input.budget.layers;
   const keyLayer = layers.find((layer) => layer.scope === "key");
   const personalLayer = layers.find((layer) => layer.scope === "personal");
   const projectLayer = layers.find((layer) => layer.scope === "project");
   const selectedLayer =
-    keyLayer?.budget_usd !== null && keyLayer?.budget_usd !== undefined
+    keyLayer?.budget_usd != null
       ? keyLayer
-      : personalLayer?.budget_usd !== null && personalLayer?.budget_usd !== undefined
+      : personalLayer?.budget_usd != null
         ? personalLayer
         : undefined;
-  const projectId = input.keyInfo.project_id?.trim();
+  const projectId = input.budget.project_id?.trim();
   const aixProject = !projectId
     ? undefined
     : {
@@ -188,34 +73,28 @@ export function aiHubKeyInfoUsageLimits(input: {
               },
             }),
       };
-  if (!selectedLayer || selectedLayer.budget_usd === null) {
+  const extras = {
+    ...(aixProject === undefined ? {} : { aixProject }),
+    ...(input.credentialFingerprint === undefined
+      ? {}
+      : { credentialFingerprint: input.credentialFingerprint }),
+  };
+  const total = selectedLayer?.budget_usd;
+  if (selectedLayer === undefined || total == null || total <= 0) {
     return {
       ...makeUnavailableUsageLimits({
         checkedAt: input.checkedAt,
         reason: "unsupported",
-        message: "This aix profile's key has no budget limit.",
+        message:
+          total == null
+            ? "This aix profile's key has no budget limit."
+            : "This aix profile's key has a $0 budget.",
       }),
-      ...(aixProject === undefined ? {} : { aixProject }),
-      ...(input.credentialFingerprint === undefined
-        ? {}
-        : { credentialFingerprint: input.credentialFingerprint }),
+      ...extras,
     };
   }
-  const total = selectedLayer.budget_usd;
-  if (total <= 0) {
-    return {
-      ...makeUnavailableUsageLimits({
-        checkedAt: input.checkedAt,
-        reason: "unsupported",
-        message: "This aix profile's key has a $0 budget.",
-      }),
-      ...(aixProject === undefined ? {} : { aixProject }),
-      ...(input.credentialFingerprint === undefined
-        ? {}
-        : { credentialFingerprint: input.credentialFingerprint }),
-    };
-  }
-  const resetsAt = monthlyResetAfter(selectedLayer.period_start, input.checkedAt);
+  const resetsAt = isoTime(selectedLayer.resets_at);
+  const windowDurationMins = durationMinutes(selectedLayer.budget_duration);
   return {
     ...makeUsageLimits({
       checkedAt: input.checkedAt,
@@ -227,153 +106,77 @@ export function aiHubKeyInfoUsageLimits(input: {
           usedPercent: clampPercent((selectedLayer.spent_usd / total) * 100),
           amounts: { currency: "USD", spent: selectedLayer.spent_usd, total },
           ...(resetsAt === undefined ? {} : { resetsAt }),
-          ...(resetsAt === undefined ? {} : { windowDurationMins: MONTHLY_WINDOW_MINUTES }),
+          ...(windowDurationMins === undefined ? {} : { windowDurationMins }),
         },
       ],
     }),
-    ...(aixProject === undefined ? {} : { aixProject }),
-    ...(input.credentialFingerprint === undefined
-      ? {}
-      : { credentialFingerprint: input.credentialFingerprint }),
+    ...extras,
   };
 }
 
-const keyInfoUrl = (endpoint: string, versioned = false) => {
-  const url = new URL(endpoint);
-  const basePath = url.pathname.replace(/\/+$/u, "").replace(/\/v1$/u, "");
-  url.pathname = `${basePath}${versioned ? "/v1" : ""}/key/info`;
-  return url.href;
-};
-
-// The gateway answers key/info one at a time (about 1-2s each), and other T3 servers share it.
-const REQUEST_TIMEOUT = Duration.seconds(30);
-
-type BudgetFailure =
-  | { readonly _tag: "status"; readonly status: number }
-  | { readonly _tag: "request" | "timeout" | "decode" };
-
-/** Failure messages carry only an HTTP status, never the key, URL or response body. */
-const failureMessage = (failure: BudgetFailure) => {
-  switch (failure._tag) {
-    case "status":
-      return failure.status === 401 || failure.status === 403
-        ? `The aix gateway rejected this profile's key (HTTP ${failure.status}).`
-        : `The aix gateway budget could not be read (HTTP ${failure.status}).`;
+/** Failure messages carry only a failure kind, never the key, URL or aix output. */
+const failureMessage = (reason: AixDiscovery.AixDiscoveryError["reason"]) => {
+  switch (reason) {
+    case "profile-not-found":
+      return "aix could not resolve this profile.";
+    case "gateway-rejected":
+      return "The aix gateway rejected this profile's key.";
+    case "gateway-unavailable":
+      return "The aix gateway could not be reached.";
     case "timeout":
       return "The aix gateway budget request timed out.";
-    case "decode":
-      return "The aix gateway returned an unrecognized budget.";
-    case "request":
-      return "The aix gateway could not be reached.";
+    case "invalid-json":
+    case "invalid-schema":
+      return "aix returned an unrecognized budget.";
+    default:
+      return "The aix gateway budget could not be read.";
   }
 };
 
-const readJson = Effect.fn("AixProfileBudget.readJson")(function* (
-  environment: AixDiscovery.ResolvedEnvironment,
-  versioned: boolean,
-) {
-  const client = yield* HttpClient.HttpClient;
-  const request = HttpClientRequest.get(keyInfoUrl(environment.endpoint, versioned)).pipe(
-    HttpClientRequest.setHeader("authorization", `Bearer ${environment.apiKey}`),
-    HttpClientRequest.setHeader("accept", "application/json"),
-  );
-  const body = yield* client.execute(request).pipe(
-    // Endpoint queries may carry credentials; keep HTTP URL attributes out of traces.
-    Effect.withTracerEnabled(false),
-    Effect.mapError((): BudgetFailure => ({ _tag: "request" })),
-    Effect.flatMap((response) =>
-      response.status < 200 || response.status >= 300
-        ? Effect.fail<BudgetFailure>({ _tag: "status", status: response.status })
-        : response.json.pipe(Effect.mapError((): BudgetFailure => ({ _tag: "decode" }))),
-    ),
-  );
-  return body;
-});
-
-const readKeyInfo = Effect.fn("AixProfileBudget.readKeyInfo")(
-  function* (environment: AixDiscovery.ResolvedEnvironment) {
-    const versioned = yield* readJson(environment, true).pipe(Effect.result);
-    if (Result.isSuccess(versioned)) {
-      const decoded = decodeAiHubKeyInfo(versioned.success);
-      if (Option.isSome(decoded)) return { kind: "aiHub" as const, keyInfo: decoded.value };
-    } else if (
-      versioned.failure._tag !== "decode" &&
-      !(versioned.failure._tag === "status" && versioned.failure.status === 404)
-    ) {
-      return yield* Effect.fail(versioned.failure);
-    }
-
-    const legacy = yield* readJson(environment, false);
-    return yield* Option.match(decodeKeyInfo(legacy), {
-      onNone: () => Effect.fail<BudgetFailure>({ _tag: "decode" }),
-      onSome: (keyInfo) => Effect.succeed({ kind: "legacy" as const, keyInfo }),
-    });
-  },
-  // One budget for both requests, so the legacy fallback cannot double the wait.
-  Effect.timeoutOrElse({
-    duration: REQUEST_TIMEOUT,
-    orElse: () => Effect.fail<BudgetFailure>({ _tag: "timeout" }),
-  }),
-);
-
-/** Seam for tests: production resolves the profile through `aix env`. */
+/** Seam for tests: production shells out to `aix spend`. */
 export interface AixBudgetSource {
-  readonly resolveEnvironment: (
+  readonly readBudget: (
     profileName: string,
-  ) => Effect.Effect<AixDiscovery.ResolvedEnvironment, AixDiscovery.AixDiscoveryError>;
+  ) => Effect.Effect<AixDiscovery.AixBudgetStatus, AixDiscovery.AixDiscoveryError>;
 }
 
 const readProfileBudget = Effect.fn("AixProfileBudget.read")(function* (
   source: AixBudgetSource,
   profileName: string,
-  digest: Digest.Digest["Service"],
   serialize: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>,
 ) {
   const checkedAt = DateTime.formatIso(yield* DateTime.now);
-  const environment = yield* source.resolveEnvironment(profileName).pipe(Effect.option);
-  if (Option.isNone(environment)) {
+  const read = yield* serialize(source.readBudget(profileName)).pipe(Effect.result);
+  if (Result.isFailure(read)) {
     return makeUnavailableUsageLimits({
       checkedAt,
       reason: "probeFailed",
-      message: "aix could not resolve this profile.",
+      message: failureMessage(read.failure.reason),
     });
   }
-  if (environment.value.endpointKind === "anthropic") {
+  const budget = read.success;
+  if (budget.status === "unsupported") {
     return makeUnavailableUsageLimits({
       checkedAt,
       reason: "unsupported",
-      message: "This aix profile connects directly to Anthropic, which reports no gateway budget.",
+      message:
+        budget.gateway.gateway === "anthropic"
+          ? "This aix profile connects directly to Anthropic, which reports no gateway budget."
+          : "This aix gateway reports no budget for this profile's key.",
     });
   }
-  const keyInfo = yield* serialize(readKeyInfo(environment.value)).pipe(Effect.result);
-  if (Result.isSuccess(keyInfo)) {
-    const credentialFingerprint = yield* digest
-      .digest(
-        Digest.sha256,
-        new TextEncoder().encode(
-          `aix-profile-budget\0${profileName}\0${keyInfoUrl(environment.value.endpoint)}\0${environment.value.apiKey}`,
-        ),
-      )
-      .pipe(Effect.map(Hex.encode), Effect.orDie);
-    return keyInfo.success.kind === "aiHub"
-      ? aiHubKeyInfoUsageLimits({
-          profileName,
-          keyInfo: keyInfo.success.keyInfo,
-          checkedAt,
-          credentialFingerprint,
-        })
-      : keyInfoUsageLimits({
-          profileName,
-          keyInfo: keyInfo.success.keyInfo,
-          checkedAt,
-          credentialFingerprint,
-        });
+  if (budget.status === "unavailable" || budget.layers === null) {
+    return makeUnavailableUsageLimits({
+      checkedAt,
+      reason: "probeFailed",
+      message: "The aix gateway budget could not be read.",
+    });
   }
-  const failure = keyInfo.failure;
-  return makeUnavailableUsageLimits({
+  return budgetUsageLimits({
+    profileName,
+    budget: { project_id: budget.project_id, layers: budget.layers },
     checkedAt,
-    reason: "probeFailed",
-    message: failureMessage(failure),
+    ...(budget.key_fingerprint === null ? {} : { credentialFingerprint: budget.key_fingerprint }),
   });
 });
 
@@ -388,14 +191,10 @@ export class AixProfileBudget extends Context.Service<
 >()("t3/aix/ProfileBudget/AixProfileBudget") {}
 
 export const make = Effect.fn("AixProfileBudget.make")(function* (source: AixBudgetSource) {
-  const http = yield* HttpClient.HttpClient;
-  const digest = yield* Digest.Digest;
+  // The gateway answers key/info one at a time, and other T3 servers share it.
   const gateway = yield* Semaphore.make(1);
   const cache = yield* Cache.make({
-    lookup: (profileName: string) =>
-      readProfileBudget(source, profileName, digest, gateway.withPermits(1)).pipe(
-        Effect.provideService(HttpClient.HttpClient, http),
-      ),
+    lookup: (profileName: string) => readProfileBudget(source, profileName, gateway.withPermits(1)),
     capacity: 64,
     timeToLive: BUDGET_TTL,
   });
@@ -411,8 +210,8 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     return yield* make({
-      resolveEnvironment: (profileName) =>
-        AixDiscovery.resolveEnvironment(profileName).pipe(
+      readBudget: (profileName) =>
+        AixDiscovery.readBudget(profileName).pipe(
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         ),
     });

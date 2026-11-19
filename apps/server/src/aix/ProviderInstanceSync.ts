@@ -22,7 +22,6 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import * as Digest from "effect/crypto/Digest";
 import * as Hex from "effect/encoding/Hex";
-import { HttpClient } from "effect/http";
 import { ChildProcessSpawner } from "effect/process";
 
 import * as AixDiscovery from "../provider/AixDiscovery.ts";
@@ -30,14 +29,7 @@ import { OPENCODE_AIX_PROVIDER_ID } from "../provider/OpenCodeAixLaunch.ts";
 import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import * as AixCatalogCache from "./AixCatalogCache.ts";
-import {
-  type CatalogModel,
-  type FetchLiteLlmModelCatalogInput,
-  fetchLiteLlmModelCatalog,
-  ModelCatalogFetchError,
-  modelName,
-  normalizeModelInfo,
-} from "./ModelCatalog.ts";
+import { type CatalogModel, catalogModels, modelName } from "./ModelCatalog.ts";
 import { type AixModelRoute, routeCatalogModel } from "./ModelRouting.ts";
 
 /** Set to `1` on the server host to let aix profiles create provider instances. */
@@ -190,6 +182,59 @@ export function aixDesiredInstances(
   return desired;
 }
 
+const OwnedModels = Schema.Struct({
+  customModels: Schema.Array(
+    Schema.Struct({
+      slug: Schema.String,
+      catalogMetadata: Schema.optional(
+        Schema.Struct({
+          pricing: Schema.optional(
+            Schema.Struct({
+              inputPerMillionTokens: Schema.optional(Schema.Finite),
+              outputPerMillionTokens: Schema.optional(Schema.Finite),
+              cachedInputPerMillionTokens: Schema.optional(Schema.Finite),
+              cacheWritePerMillionTokens: Schema.optional(Schema.Finite),
+            }),
+          ),
+        }),
+      ),
+    }),
+  ),
+});
+const decodeOwnedModels = Schema.decodeUnknownOption(OwnedModels);
+const OPENCODE_SLUG_PREFIX = `${OPENCODE_AIX_PROVIDER_ID}/`;
+
+/** The gateway price of every model an aix-owned instance lists; unpriced models carry none. */
+export function aixGatewayModelPrices(instances: ProviderInstanceConfigMap) {
+  return Object.values(instances).flatMap((instance) => {
+    if (ownerProfile(instance) === undefined) return [];
+    const models = Option.getOrUndefined(decodeOwnedModels(instance.config))?.customModels ?? [];
+    return models.map(({ slug, catalogMetadata }) => {
+      const pricing = catalogMetadata?.pricing;
+      const input = pricing?.inputPerMillionTokens;
+      const output = pricing?.outputPerMillionTokens;
+      return {
+        model: slug.startsWith(OPENCODE_SLUG_PREFIX)
+          ? slug.slice(OPENCODE_SLUG_PREFIX.length)
+          : slug,
+        prices:
+          input === undefined || output === undefined
+            ? undefined
+            : {
+                inputCostPerMillionTokens: input,
+                outputCostPerMillionTokens: output,
+                ...(pricing?.cachedInputPerMillionTokens === undefined
+                  ? {}
+                  : { cacheReadCostPerMillionTokens: pricing.cachedInputPerMillionTokens }),
+                ...(pricing?.cacheWritePerMillionTokens === undefined
+                  ? {}
+                  : { cacheWriteCostPerMillionTokens: pricing.cacheWritePerMillionTokens }),
+              },
+      };
+    });
+  });
+}
+
 const sameOwnedFields = (left: ProviderInstanceConfig, right: ProviderInstanceConfig) =>
   NodeUtil.isDeepStrictEqual(
     {
@@ -257,7 +302,7 @@ export function planAixInstanceSync(input: {
   return mutations;
 }
 
-/** Process-boundary seam: production wires aix and LiteLLM; tests inject fakes. */
+/** Process-boundary seam: production shells out to aix; tests inject fakes. */
 export interface AixSyncSource {
   readonly listProfiles: Effect.Effect<
     ReadonlyArray<{ readonly name: string; readonly label: string }>,
@@ -269,35 +314,23 @@ export interface AixSyncSource {
   readonly listModels: (
     profileName: string,
   ) => Effect.Effect<ReadonlyArray<{ readonly id: string }>, AixDiscovery.AixDiscoveryError>;
-  readonly fetchLiteLlmCatalog: (
-    input: FetchLiteLlmModelCatalogInput,
-  ) => Effect.Effect<{ readonly models: ReadonlyArray<CatalogModel> }, ModelCatalogFetchError>;
+  readonly listCatalog: (
+    profileName: string,
+    refresh: boolean,
+  ) => Effect.Effect<ReadonlyArray<AixDiscovery.AixCatalogModel>, AixDiscovery.AixDiscoveryError>;
 }
-
-const litellmApiBaseUrl = (endpoint: string) => `${endpoint.replace(/\/+$/u, "")}/v1`;
 
 const observeProfile = Effect.fn("AixProviderInstanceSync.observeProfile")(function* (
   source: AixSyncSource,
   profile: { readonly name: string },
   environment: AixDiscovery.ResolvedEnvironment,
+  refresh: boolean,
 ) {
   if (environment.endpointKind === "anthropic") {
-    const listed = yield* source.listModels(profile.name);
-    return routeAixModels(
-      "anthropic",
-      normalizeModelInfo(
-        [],
-        undefined,
-        listed.map((model) => model.id),
-      ),
-    );
+    return routeAixModels("anthropic", catalogModels(yield* source.listModels(profile.name)));
   }
   // Only a successful LiteLLM catalog read classifies the endpoint; an unknown one is never assumed.
-  const catalog = yield* source.fetchLiteLlmCatalog({
-    baseURL: litellmApiBaseUrl(environment.endpoint),
-    apiKey: environment.apiKey,
-  });
-  return routeAixModels("litellm", catalog.models);
+  return routeAixModels("litellm", catalogModels(yield* source.listCatalog(profile.name, refresh)));
 });
 
 type AixProfileListing = ReadonlyArray<{ readonly name: string; readonly label: string }>;
@@ -349,9 +382,8 @@ const routeCacheKey = Effect.fn("AixProviderInstanceSync.routeCacheKey")(functio
   return `${profileName}\0${Hex.encode(fingerprint)}`;
 });
 
-/** Only the reason and HTTP status: aix and LiteLLM error bodies can echo credentials. */
-const failureCode = (error: { readonly reason: string; readonly status?: number | undefined }) =>
-  error.status === undefined ? error.reason : `${error.reason}-${error.status}`;
+/** Only the reason: aix error output can echo credentials. */
+const failureCode = (error: AixDiscovery.AixDiscoveryError) => error.reason;
 
 /**
  * Reconciles managed aix instances with settings. Writes only what differs. When aix is off, it
@@ -425,7 +457,7 @@ export const syncAixProviderInstances = Effect.fn("AixProviderInstanceSync.sync"
             const key = yield* routeCacheKey(profile.name, environment.success, digest);
             const previousKey = previousRouteKeys.get(profile.name);
             const routes = yield* cache.routes
-              .read(key, observeProfile(input.source, profile, environment.success), {
+              .read(key, observeProfile(input.source, profile, environment.success, force), {
                 force,
                 failureCode,
                 ...(previousKey !== undefined && previousKey !== key
@@ -493,7 +525,6 @@ export const syncAixProviderInstances = Effect.fn("AixProviderInstanceSync.sync"
 
 const liveSource = Effect.gen(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const http = yield* HttpClient.HttpClient;
   return {
     listProfiles: AixDiscovery.listProfiles().pipe(
       Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
@@ -506,8 +537,10 @@ const liveSource = Effect.gen(function* () {
       AixDiscovery.listModels(profileName).pipe(
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
       ),
-    fetchLiteLlmCatalog: (input) =>
-      fetchLiteLlmModelCatalog(input).pipe(Effect.provideService(HttpClient.HttpClient, http)),
+    listCatalog: (profileName, refresh) =>
+      AixDiscovery.listCatalog(profileName, refresh).pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+      ),
   } satisfies AixSyncSource;
 });
 

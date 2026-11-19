@@ -32,6 +32,7 @@ import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
 import { formatMalformedUsageWarning } from "@t3tools/shared/usageFormat";
 import * as ServerConfig from "../config.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import { aixGatewayModelPrices } from "../aix/ProviderInstanceSync.ts";
 import { BUILT_IN_USAGE_DRIVERS, type BuiltInUsageReadersEnv } from "../provider/builtInDrivers.ts";
 import type { ProviderDriver } from "@t3tools/provider-core/server/driver";
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
@@ -42,6 +43,7 @@ import type {
 } from "@t3tools/provider-core/server/usage";
 import { canonicalModelFilter, resolveModelAliases, UsageAggregator } from "./usageAggregation.ts";
 import {
+  createGatewayRateTable,
   createOverrideRateTable,
   isUnlistedModel,
   parseRateTable,
@@ -967,6 +969,7 @@ export const make = Effect.gen(function* () {
       { concurrency: 2 },
     );
     const priceOverrides = createOverrideRateTable(settings.usagePriceOverrides);
+    const gatewayRates = createGatewayRateTable(aixGatewayModelPrices(settings.providerInstances));
     const modelAliases = resolveModelAliases(settings.usageModelAliases);
     const sources: UsageSource[] = [];
 
@@ -1083,6 +1086,7 @@ export const make = Effect.gen(function* () {
       ...hourlyWindow,
       rates,
       priceOverrides,
+      gatewayRates,
       modelAliases,
       rateModel: (provider, model) => providerRateModels.get(provider)?.(model),
       ...(input.modelFilter === undefined ? {} : { modelFilter: input.modelFilter }),

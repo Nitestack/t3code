@@ -9,7 +9,14 @@ import * as TestClock from "effect/testing/TestClock";
 import { ChildProcessSpawner } from "effect/process";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
-import { AixDiscoveryError, listModels, listProfiles, resolveEnvironment } from "./AixDiscovery.ts";
+import {
+  AixDiscoveryError,
+  listCatalog,
+  listModels,
+  listProfiles,
+  readBudget,
+  resolveEnvironment,
+} from "./AixDiscovery.ts";
 
 const secretSentinel = "aix-secret-sentinel-do-not-leak";
 const encoder = new TextEncoder();
@@ -45,10 +52,19 @@ function withAix<A>(
 ): Effect.Effect<A, AixDiscoveryError> {
   const spawner = ChildProcessSpawner.make((command) => {
     const args = (command as unknown as { readonly args: ReadonlyArray<string> }).args;
-    return Effect.succeed(mockHandle(handler(args)));
+    assert.deepEqual(args.slice(0, 2), ["--error-format", "json"]);
+    return Effect.succeed(mockHandle(handler(args.slice(2))));
   });
   return effect.pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner));
 }
+
+/** What `aix --error-format json` writes to stderr; messages may echo secrets. */
+const aixError = (code: string, category: string) =>
+  JSON.stringify({
+    schema_version: 1,
+    command: "env",
+    error: { code, category, exit_code: 2, message: `failed with ${secretSentinel}` },
+  });
 
 const profilesJson = JSON.stringify({
   schema_version: 1,
@@ -132,21 +148,23 @@ it.effect("resolves distinct LiteLLM endpoints and the official Anthropic endpoi
   }),
 );
 
-it.effect("requires an explicit LiteLLM override for an otherwise unknown endpoint", () =>
+it.effect("classifies an otherwise unknown endpoint by the gateway kind aix reports", () =>
   Effect.gen(function* () {
-    const result = yield* withAix(
-      resolveEnvironment("gateway-one", { endpointKind: "litellm" }),
-      () => ({
+    const kind = (gatewayKind: string) =>
+      withAix(resolveEnvironment("gateway-one"), () => ({
         stdout: JSON.stringify({
           AIX_PROFILE: "gateway-one",
+          AIX_GATEWAY_KIND: gatewayKind,
           ANTHROPIC_API_KEY: secretSentinel,
           ANTHROPIC_BASE_URL: "https://gateway-one.example.test",
           OPENAI_API_KEY: secretSentinel,
           OPENAI_BASE_URL: "https://gateway-one.example.test/v1",
         }),
-      }),
+      })).pipe(Effect.map((result) => result.endpointKind));
+    assert.deepEqual(
+      [yield* kind("litellm"), yield* kind("anthropic"), yield* kind("aihub")],
+      ["litellm", "anthropic", "unknown"],
     );
-    assert.equal(result.endpointKind, "litellm");
   }),
 );
 
@@ -155,15 +173,15 @@ it.effect("reports safe errors for missing profiles, OAuth profiles, and invalid
     const missing = yield* Effect.result(
       withAix(resolveEnvironment("missing"), () => ({
         stdout: "",
-        stderr: "Profile 'missing' not found",
+        stderr: aixError("profile_not_found", "config"),
         code: 2,
       })),
     );
     const oauth = yield* Effect.result(
       withAix(resolveEnvironment("chatgpt"), () => ({
         stdout: "",
-        stderr: `ChatGPT OAuth profile has no API key (${secretSentinel})`,
-        code: 3,
+        stderr: aixError("chatgpt_unsupported", "config"),
+        code: 2,
       })),
     );
     const invalidEndpoint = yield* Effect.result(
@@ -238,7 +256,7 @@ it.effect("distinguishes a missing aix executable and an unavailable gateway", (
     const gatewayDown = yield* Effect.result(
       withAix(listModels("gateway-one"), () => ({
         stdout: "",
-        stderr: `connection refused ${secretSentinel}`,
+        stderr: aixError("gateway_unreachable", "network"),
         code: 5,
       })),
     );
@@ -249,6 +267,155 @@ it.effect("distinguishes a missing aix executable and an unavailable gateway", (
       "gateway-unavailable",
     );
     assert.equal(JSON.stringify([missingAix, gatewayDown]).includes(secretSentinel), false);
+  }),
+);
+
+it.effect("reads the budget from aix spend and classifies failures by error code", () =>
+  Effect.gen(function* () {
+    const calls: Array<ReadonlyArray<string>> = [];
+    const budget = yield* withAix(readBudget("ac"), (args) => {
+      calls.push(args);
+      return {
+        stdout: JSON.stringify({
+          schema_version: 1,
+          command: "spend",
+          data: {
+            spend: 159.03,
+            max_budget: 175,
+            status: "available",
+            key_spent_usd: 159.03,
+            remaining_usd: 15.96,
+            limited_by: "key",
+            layers: [
+              {
+                scope: "key",
+                budget_usd: 175,
+                spent_usd: 159.03,
+                remaining_usd: 15.96,
+                period_start: "2026-11-01T00:00:00Z",
+                resets_at: "2026-12-01T00:00:00Z",
+                budget_duration: "1mo",
+                reset_source: "inferred_monthly",
+              },
+            ],
+            expires_at: null,
+            project_id: "project-1",
+            cache: { source: "cache", age_seconds: 12, fetched_at: "2026-11-19T14:29:40Z" },
+            profile: { name: "ac", label: "adCare" },
+            key_fingerprint: "f".repeat(64),
+            gateway: { gateway: "aihub", provider: null, detected_from: "response" },
+          },
+        }),
+      };
+    });
+    assert.deepEqual(calls, [
+      ["--json", "--non-interactive", "--timeout", "20s", "spend", "ac", "--max-age", "60s"],
+    ]);
+    assert.deepEqual(budget.layers?.[0]?.resets_at, "2026-12-01T00:00:00Z");
+    assert.deepEqual(
+      [budget.project_id, budget.key_fingerprint, budget.gateway.gateway],
+      ["project-1", "f".repeat(64), "aihub"],
+    );
+
+    const failure = (code: string, category: string) =>
+      withAix(readBudget("ac"), () => ({
+        stdout: "",
+        stderr: aixError(code, category),
+        code: 4,
+      })).pipe(
+        Effect.flip,
+        Effect.map((error) => error.reason),
+      );
+    const reasons = yield* Effect.all([
+      failure("gateway_auth_failed", "authentication"),
+      failure("gateway_unreachable", "network"),
+      failure("gateway_timeout", "network"),
+      failure("internal", "internal"),
+    ]);
+    assert.deepEqual(reasons, [
+      "gateway-rejected",
+      "gateway-unavailable",
+      "timeout",
+      "command-failed",
+    ]);
+    const unstructured = yield* withAix(readBudget("ac"), () => ({
+      stdout: "",
+      stderr: `profile not found ${secretSentinel}`,
+      code: 2,
+    })).pipe(Effect.flip);
+    assert.equal(unstructured.reason, "command-failed");
+  }),
+);
+
+it.effect("reads the detailed catalog through aix and rejects one without model info", () =>
+  Effect.gen(function* () {
+    const model = {
+      id: "claude-opus-5-5",
+      route: "claude-opus-5-5*",
+      mode: "chat",
+      provider: "google",
+      display_name: null,
+      deployments: 1,
+      context_tokens: 1000000,
+      max_output_tokens: 128000,
+      capabilities: {},
+      reasoning: { efforts: ["low", "max"], default_effort: null },
+      pricing: {
+        input_per_million: 5,
+        output_per_million: 25,
+        cache_read_per_million: 0.5,
+        cache_write_per_million: 6.25,
+      },
+    };
+    const calls: Array<ReadonlyArray<string>> = [];
+    const catalog = (refresh: boolean, modelInfo = true) =>
+      withAix(listCatalog("ac", refresh), (args) => {
+        calls.push(args);
+        return {
+          stdout: JSON.stringify({
+            schema_version: 1,
+            command: "models",
+            data: {
+              models: [model],
+              filter: null,
+              wildcard_routes: [],
+              sources: { model_info: modelInfo, model_group_info: false },
+              cache: { source: "live", age_seconds: null, fetched_at: "2026-11-19T17:04:07Z" },
+            },
+          }),
+        };
+      });
+    const models = yield* catalog(false);
+    yield* catalog(true);
+    assert.deepEqual(calls, [
+      [
+        "--json",
+        "--non-interactive",
+        "--timeout",
+        "20s",
+        "models",
+        "ac",
+        "--detailed",
+        "--max-age",
+        "1h",
+      ],
+      [
+        "--json",
+        "--non-interactive",
+        "--timeout",
+        "20s",
+        "models",
+        "ac",
+        "--detailed",
+        "--refresh",
+      ],
+    ]);
+    assert.deepEqual(
+      models.map(({ id, pricing }) => [id, pricing?.input_per_million]),
+      [["claude-opus-5-5", 5]],
+    );
+    const idsOnly = yield* catalog(false, false).pipe(Effect.flip);
+    assert.equal(idsOnly.reason, "catalog-unsupported");
   }),
 );
 

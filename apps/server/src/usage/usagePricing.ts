@@ -35,29 +35,62 @@ export interface ModelRate extends SpeedRates {
 
 export type RateTable = ReadonlyMap<string, ModelRate>;
 
+function flatRate(prices: UsageModelPriceOverride): ModelRate {
+  const cacheCreationCostPerToken =
+    (prices.cacheWriteCostPerMillionTokens ?? prices.inputCostPerMillionTokens) / 1_000_000;
+  return {
+    inputCostPerToken: prices.inputCostPerMillionTokens / 1_000_000,
+    outputCostPerToken: prices.outputCostPerMillionTokens / 1_000_000,
+    cacheReadCostPerToken:
+      (prices.cacheReadCostPerMillionTokens ?? prices.inputCostPerMillionTokens) / 1_000_000,
+    cacheCreationCostPerToken,
+    cacheCreation1hCostPerToken: cacheCreationCostPerToken,
+    fast: null,
+    ultrafast: null,
+    contextTiers: [],
+  };
+}
+
 export function createOverrideRateTable(
   overrides: Readonly<Record<string, UsageModelPriceOverride>>,
 ): RateTable {
   return new Map(
-    Object.entries(overrides).map(([model, prices]) => {
-      const cacheCreationCostPerToken =
-        (prices.cacheWriteCostPerMillionTokens ?? prices.inputCostPerMillionTokens) / 1_000_000;
-      return [
-        model.trim(),
-        {
-          inputCostPerToken: prices.inputCostPerMillionTokens / 1_000_000,
-          outputCostPerToken: prices.outputCostPerMillionTokens / 1_000_000,
-          cacheReadCostPerToken:
-            (prices.cacheReadCostPerMillionTokens ?? prices.inputCostPerMillionTokens) / 1_000_000,
-          cacheCreationCostPerToken,
-          cacheCreation1hCostPerToken: cacheCreationCostPerToken,
-          fast: null,
-          ultrafast: null,
-          contextTiers: [],
-        },
-      ];
-    }),
+    Object.entries(overrides).map(([model, prices]) => [model.trim(), flatRate(prices)]),
   );
+}
+
+export interface GatewayModelPrice {
+  readonly model: string;
+  /** Undefined when the gateway listed the model without both input and output prices. */
+  readonly prices: UsageModelPriceOverride | undefined;
+}
+
+/**
+ * Prices from the gateways aix profiles route through, keyed like the public table and by bare
+ * name. A name whose listings disagree, or that one listing leaves unpriced, is left out, so its
+ * records keep the public price rather than one gateway's.
+ */
+export function createGatewayRateTable(models: Iterable<GatewayModelPrice>): RateTable {
+  const listings = new Map<string, Array<UsageModelPriceOverride | undefined>>();
+  for (const { model, prices } of models) {
+    const key = stripVariantSuffix(normalizeRateKey(model));
+    for (const name of new Set([key, bareModelName(key)])) {
+      if (name.length === 0 || UNPRICEABLE_MODELS.has(name)) continue;
+      listings.set(name, [...(listings.get(name) ?? []), prices]);
+    }
+  }
+  const table = new Map<string, ModelRate>();
+  for (const [name, [first, ...rest]] of listings) {
+    if (first === undefined) continue;
+    const same = (prices: UsageModelPriceOverride | undefined) =>
+      prices !== undefined &&
+      prices.inputCostPerMillionTokens === first.inputCostPerMillionTokens &&
+      prices.outputCostPerMillionTokens === first.outputCostPerMillionTokens &&
+      prices.cacheReadCostPerMillionTokens === first.cacheReadCostPerMillionTokens &&
+      prices.cacheWriteCostPerMillionTokens === first.cacheWriteCostPerMillionTokens;
+    if (rest.every(same)) table.set(name, flatRate(first));
+  }
+  return table;
 }
 
 type LiteLlmEntry = Readonly<Record<string, unknown>>;
@@ -335,6 +368,18 @@ function recordRate(table: RateTable, record: PricedRecord): ModelRate | null {
   return rate ?? lookupRate(table, record.model);
 }
 
+/** A user override, then the gateway's price; either replaces the provider-reported cost. */
+function priceOverride(
+  record: PricedRecord,
+  overrides: RateTable | undefined,
+  gatewayRates: RateTable | undefined,
+): ModelRate | undefined {
+  return (
+    overrides?.get(record.model.trim()) ??
+    (gatewayRates === undefined ? undefined : (recordRate(gatewayRates, record) ?? undefined))
+  );
+}
+
 export interface PricedUsage {
   readonly costUsd: number;
   readonly costSource: UsageCostSource;
@@ -364,9 +409,10 @@ export function priceUsage(
   table: RateTable,
   record: PricedRecord,
   overrides?: RateTable,
+  gatewayRates?: RateTable,
 ): PricedUsage {
-  const { model, totals, reportedCostUsd } = record;
-  const override = overrides?.get(model.trim());
+  const { totals, reportedCostUsd } = record;
+  const override = priceOverride(record, overrides, gatewayRates);
   const reported =
     override === undefined && reportedCostUsd !== null && Number.isFinite(reportedCostUsd)
       ? reportedCostUsd
@@ -407,8 +453,9 @@ export function cacheSavingsUsd(
   table: RateTable,
   record: PricedRecord,
   overrides?: RateTable,
+  gatewayRates?: RateTable,
 ): number {
-  const rate = overrides?.get(record.model.trim()) ?? recordRate(table, record);
+  const rate = priceOverride(record, overrides, gatewayRates) ?? recordRate(table, record);
   if (rate === null) return 0;
   const rates = ratesAt(rate, record.speed, record.totals);
   return record.totals.cachedInputTokens * (rates.inputCostPerToken - rates.cacheReadCostPerToken);

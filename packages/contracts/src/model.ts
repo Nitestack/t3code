@@ -117,6 +117,9 @@ export const CatalogModelMetadata = Schema.Struct({
       cachedInputPerMillionTokens: Schema.optional(
         Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)),
       ),
+      cacheWritePerMillionTokens: Schema.optional(
+        Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)),
+      ),
     }),
   ),
   reasoning: Schema.optional(

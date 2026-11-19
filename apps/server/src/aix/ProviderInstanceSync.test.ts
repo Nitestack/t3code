@@ -27,13 +27,14 @@ import * as TestClock from "effect/testing/TestClock";
 import { describe, expect, it } from "vite-plus/test";
 
 import { OpenCodeSettings } from "@t3tools/provider-opencode/settings";
-import { AixDiscoveryError } from "../provider/AixDiscovery.ts";
+import { type AixCatalogModel, AixDiscoveryError } from "../provider/AixDiscovery.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
-import { type CatalogModel, ModelCatalogFetchError, normalizeModelInfo } from "./ModelCatalog.ts";
+import { type CatalogModel, catalogModels } from "./ModelCatalog.ts";
 import {
   type AixSyncCache,
   type AixSyncSource,
   aixDesiredInstances,
+  aixGatewayModelPrices,
   aixInstanceId,
   makeAixSyncCache,
   planAixInstanceSync,
@@ -65,6 +66,23 @@ const LITELLM_MODELS: ReadonlyArray<CatalogModel> = [
   { id: "google/gemma-4-31b-it", displayName: "Gemma 4 31B IT" },
   { id: "text-embedding-3-large", displayName: "Text Embedding 3 Large" },
 ];
+
+const aixModel = (id: string, overrides: Partial<AixCatalogModel> = {}): AixCatalogModel => ({
+  id,
+  mode: "chat",
+  provider: null,
+  display_name: null,
+  context_tokens: null,
+  max_output_tokens: null,
+  reasoning: null,
+  pricing: null,
+  ...overrides,
+});
+
+/** What `aix models --detailed` reports for LITELLM_MODELS. */
+const LITELLM_LISTING = LITELLM_MODELS.map(({ id, displayName }) =>
+  aixModel(id, { display_name: displayName }),
+);
 
 const must = <T>(value: T | undefined): T => {
   if (value === undefined) throw new Error("fixture missing");
@@ -136,18 +154,10 @@ describe("routeAixModels", () => {
       "claude-sonnet-5-5*",
       "gpt-6.1-sol*",
     ];
-    const entries = gatewayIds.map((id) => ({
-      model_name: id,
-      litellm_params: { model: id },
-      model_info: { litellm_provider: "Google", mode: "chat" },
-    }));
-    entries.push({
-      model_name: "claude-opus-5-5",
-      litellm_params: { model: "claude-opus-5-5" },
-      model_info: { litellm_provider: "Google", mode: "chat" },
-    });
-
-    const models = normalizeModelInfo(entries, undefined, gatewayIds);
+    // aix lists a passthrough wildcard route by its concrete ID.
+    const models = catalogModels(
+      gatewayIds.map((id) => aixModel(id.replace(/\*$/u, ""), { provider: "google" })),
+    );
     const routes = routeAixModels("litellm", models);
 
     expect(
@@ -169,7 +179,6 @@ describe("routeAixModels", () => {
       "claude-sonnet-5-5",
     ]);
     expect(routes.get(CODEX)?.map(({ id }) => id)).toEqual(["gpt-6.1-sol"]);
-    expect(models.filter(({ id }) => id === "claude-opus-5-5")).toHaveLength(1);
   });
 
   it("never routes non-chat models to OpenCode", () => {
@@ -657,6 +666,44 @@ describe("planAixInstanceSync", () => {
   });
 });
 
+describe("aixGatewayModelPrices", () => {
+  it("reads gateway prices from aix-owned instances by upstream model ID", () => {
+    const priced = {
+      inputPerMillionTokens: 2,
+      outputPerMillionTokens: 8,
+      cacheWritePerMillionTokens: 3,
+    };
+    const desired = aixDesiredInstances([
+      {
+        name: "work",
+        label: "Work",
+        routes: routeAixModels("litellm", [
+          { id: "gpt-6.1-sol", displayName: "GPT-6.1 Sol", pricing: priced },
+          { id: "google/gemma-4-31b-it", displayName: "Gemma 4 31B IT", pricing: priced },
+          { id: "gpt-oss-120b", displayName: "GPT-OSS 120B" },
+        ]),
+      },
+    ]);
+    const instances = {
+      ...Object.fromEntries(desired),
+      manual: { ...manualCodex(), config: { customModels: [{ slug: "gpt-6.1-sol" }] } },
+    };
+    const prices = {
+      inputCostPerMillionTokens: 2,
+      outputCostPerMillionTokens: 8,
+      cacheWriteCostPerMillionTokens: 3,
+    };
+
+    expect(
+      aixGatewayModelPrices(instances).sort((left, right) => left.model.localeCompare(right.model)),
+    ).toEqual([
+      { model: "google/gemma-4-31b-it", prices },
+      { model: "gpt-6.1-sol", prices },
+      { model: "gpt-oss-120b", prices: undefined },
+    ]);
+  });
+});
+
 describe("syncAixProviderInstances", () => {
   const sourceFor = (overrides: Partial<AixSyncSource> = {}): AixSyncSource => ({
     listProfiles: Effect.succeed([
@@ -680,7 +727,7 @@ describe("syncAixProviderInstances", () => {
             },
       ),
     listModels: () => Effect.succeed([{ id: "claude-opus-5-5" }, { id: "claude-sonnet-5-5" }]),
-    fetchLiteLlmCatalog: () => Effect.succeed({ models: LITELLM_MODELS }),
+    listCatalog: () => Effect.succeed(LITELLM_LISTING),
     ...overrides,
   });
 
@@ -723,7 +770,7 @@ describe("syncAixProviderInstances", () => {
       const afterFirst = yield* Ref.get(writes);
       yield* sync;
 
-      expect(afterFirst).toEqual(["aix-codex-work", "aix-opencode-work", "aix-claudeAgent-claude"]);
+      expect(afterFirst).toEqual(["aix-opencode-work", "aix-codex-work", "aix-claudeAgent-claude"]);
       expect(yield* Ref.get(writes)).toEqual(afterFirst);
       const settings = yield* (yield* ServerSettingsService).getSettings;
       expect(Object.keys(settings.providerInstances).sort()).toEqual([
@@ -770,7 +817,7 @@ describe("syncAixProviderInstances", () => {
       yield* Fiber.join(concurrent);
 
       expect(yield* Ref.get(maxActiveReads)).toBe(1);
-      expect(yield* Ref.get(writes)).toEqual(["aix-codex-work", "aix-opencode-work"]);
+      expect(yield* Ref.get(writes)).toEqual(["aix-opencode-work", "aix-codex-work"]);
     }).pipe(Effect.provide(aixTestLayer)),
   );
 
@@ -840,8 +887,8 @@ describe("syncAixProviderInstances", () => {
 
         yield* sync(
           sourceFor({
-            fetchLiteLlmCatalog: () =>
-              Effect.fail(new ModelCatalogFetchError({ stage: "models", reason: "request" })),
+            listCatalog: () =>
+              Effect.fail(new AixDiscoveryError({ reason: "gateway-unavailable" })),
           }),
         );
 
@@ -860,16 +907,16 @@ describe("syncAixProviderInstances", () => {
       yield* syncAixProviderInstances({
         enabled: true,
         source: sourceFor({
-          fetchLiteLlmCatalog: (input) =>
+          listCatalog: (profileName) =>
             Effect.sync(() => {
-              seenKeys.push(input.apiKey);
-              return { models: LITELLM_MODELS };
+              seenKeys.push(profileName);
+              return LITELLM_LISTING;
             }),
         }),
       }).pipe(Effect.provideService(ServerSettingsService, counted));
 
       const settings = yield* (yield* ServerSettingsService).getSettings;
-      expect(seenKeys).toEqual([SENTINEL_KEY]);
+      expect(seenKeys).toEqual(["work"]);
       expect((yield* Ref.get(payloads)).length).toBeGreaterThan(0);
       expect(JSON.stringify(settings.providerInstances)).not.toContain(SENTINEL_KEY);
       expect(JSON.stringify(yield* Ref.get(payloads))).not.toContain(SENTINEL_KEY);
@@ -903,10 +950,8 @@ describe("syncAixProviderInstances", () => {
           listProfiles: Ref.update(profileReads, (count) => count + 1).pipe(
             Effect.andThen(base.listProfiles),
           ),
-          fetchLiteLlmCatalog: () =>
-            Ref.update(catalogReads, (count) => count + 1).pipe(
-              Effect.as({ models: LITELLM_MODELS }),
-            ),
+          listCatalog: () =>
+            Ref.update(catalogReads, (count) => count + 1).pipe(Effect.as(LITELLM_LISTING)),
         });
 
         yield* refreshWith(counted, source, cache);
@@ -965,16 +1010,15 @@ describe("syncAixProviderInstances", () => {
         const publish = (profile: string) => Ref.update(published, (all) => [...all, profile]);
         const source = sourceFor();
         const failing = sourceFor({
-          fetchLiteLlmCatalog: () =>
-            Effect.fail(
-              new ModelCatalogFetchError({ stage: "models", reason: "request", status: 503 }),
-            ),
+          listCatalog: () => Effect.fail(new AixDiscoveryError({ reason: "gateway-unavailable" })),
         });
         yield* refreshWith(counted, source, cache, false, publish);
         expect(yield* Ref.get(published)).toEqual([]);
 
         yield* refreshWith(counted, failing, cache, true, publish);
-        expect((yield* Ref.get(cache.staleByProfile)).get("work")?.code).toBe("request-503");
+        expect((yield* Ref.get(cache.staleByProfile)).get("work")?.code).toBe(
+          "gateway-unavailable",
+        );
         expect(yield* Ref.get(published)).toEqual(["work"]);
 
         yield* TestClock.adjust("1 hour");
@@ -999,10 +1043,8 @@ describe("syncAixProviderInstances", () => {
         yield* refreshWith(
           counted,
           sourceFor({
-            fetchLiteLlmCatalog: () =>
-              Effect.fail(
-                new ModelCatalogFetchError({ stage: "models", reason: "status", status: 503 }),
-              ),
+            listCatalog: () =>
+              Effect.fail(new AixDiscoveryError({ reason: "gateway-unavailable" })),
           }),
           cache,
         );
@@ -1028,10 +1070,8 @@ describe("syncAixProviderInstances", () => {
         yield* refreshWith(
           counted,
           sourceFor({
-            fetchLiteLlmCatalog: () =>
-              Effect.succeed({
-                models: LITELLM_MODELS.filter((model) => model.id !== "gpt-6.1-sol"),
-              }),
+            listCatalog: () =>
+              Effect.succeed(LITELLM_LISTING.filter((model) => model.id !== "gpt-6.1-sol")),
           }),
           cache,
           true,
@@ -1118,9 +1158,10 @@ describe("syncAixProviderInstances", () => {
                   apiKey,
                 })),
               ),
-            fetchLiteLlmCatalog: (input) =>
-              Ref.update(seenKeys, (keys) => [...keys, input.apiKey]).pipe(
-                Effect.as({ models: LITELLM_MODELS }),
+            listCatalog: () =>
+              Ref.get(currentKey).pipe(
+                Effect.flatMap((apiKey) => Ref.update(seenKeys, (keys) => [...keys, apiKey])),
+                Effect.as(LITELLM_LISTING),
               ),
           });
 
@@ -1147,10 +1188,10 @@ describe("syncAixProviderInstances", () => {
             base
               .resolveEnvironment(profileName)
               .pipe(Effect.map((environment) => ({ ...environment, apiKey: key }))),
-          fetchLiteLlmCatalog: (input) =>
+          listCatalog: () =>
             Effect.sync(() => {
-              keys.push(input.apiKey);
-              return { models: LITELLM_MODELS };
+              keys.push(key);
+              return LITELLM_LISTING;
             }),
         });
 
@@ -1173,12 +1214,10 @@ describe("syncAixProviderInstances", () => {
             base
               .resolveEnvironment(profileName)
               .pipe(Effect.map((environment) => ({ ...environment, apiKey: key }))),
-          fetchLiteLlmCatalog: () =>
+          listCatalog: () =>
             key === "first-key"
-              ? Effect.succeed({ models: LITELLM_MODELS })
-              : Effect.fail(
-                  new ModelCatalogFetchError({ stage: "models", reason: "request", status: 503 }),
-                ),
+              ? Effect.succeed(LITELLM_LISTING)
+              : Effect.fail(new AixDiscoveryError({ reason: "gateway-unavailable" })),
         });
 
         yield* refreshWith(counted, source, cache);
@@ -1189,7 +1228,9 @@ describe("syncAixProviderInstances", () => {
         expect(
           settings.providerInstances[ProviderInstanceId.make("aix-codex-work")]?.config,
         ).toMatchObject({ customModels: [{ slug: "gpt-6.1-sol", name: "GPT-6.1 Sol" }] });
-        expect((yield* Ref.get(cache.staleByProfile)).get("work")?.code).toBe("request-503");
+        expect((yield* Ref.get(cache.staleByProfile)).get("work")?.code).toBe(
+          "gateway-unavailable",
+        );
       }).pipe(Effect.provide(aixTestLayer)),
     );
 
@@ -1217,14 +1258,10 @@ describe("syncAixProviderInstances", () => {
             failing
               ? Effect.fail(carryingKey(new AixDiscoveryError({ reason: "gateway-unavailable" })))
               : base.listModels(profileName),
-          fetchLiteLlmCatalog: (input) =>
+          listCatalog: (profileName, refresh) =>
             failing
-              ? Effect.fail(
-                  carryingKey(
-                    new ModelCatalogFetchError({ stage: "models", reason: "request", status: 401 }),
-                  ),
-                )
-              : base.fetchLiteLlmCatalog(input),
+              ? Effect.fail(carryingKey(new AixDiscoveryError({ reason: "gateway-rejected" })))
+              : base.listCatalog(profileName, refresh),
         });
 
         yield* refreshWith(counted, source, cache);
@@ -1349,14 +1386,14 @@ describe("syncAixProviderInstances", () => {
         yield* syncAixProviderInstances({
           enabled: true,
           source: sourceFor({
-            fetchLiteLlmCatalog: () =>
+            listCatalog: () =>
               settings
                 .updateProviderInstance({
                   operation: "upsert",
                   instanceId: id,
                   instance: manualCodex(),
                 })
-                .pipe(Effect.orDie, Effect.as({ models: LITELLM_MODELS })),
+                .pipe(Effect.orDie, Effect.as(LITELLM_LISTING)),
           }),
         });
 
