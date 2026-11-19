@@ -251,6 +251,10 @@
       "types": "./src/state/deviceHubAccess.ts",
       "default": "./src/state/deviceHubAccess.ts"
     },
+    "./state/modelLaneRequests": {
+      "types": "./src/state/modelLaneRequests.ts",
+      "default": "./src/state/modelLaneRequests.ts"
+    },
     "./state/peerLinks": {
       "types": "./src/state/peerLinks.ts",
       "default": "./src/state/peerLinks.ts"
