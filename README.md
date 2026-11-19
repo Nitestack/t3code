@@ -96,14 +96,16 @@ Download from the [latest release](https://github.com/get-aix/t3code/releases/la
 
 | Platform              | How                                                                                                              |
 | --------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Windows x64           | Run `T3-Code-<version>-x64.exe`. It is unsigned: choose **More info → Run anyway**.                              |
+| Windows x64           | `irm https://github.com/get-aix/t3code/releases/latest/download/install-windows.ps1 \| iex` in PowerShell        |
 | macOS (Apple Silicon) | `curl -fsSL https://github.com/get-aix/t3code/releases/latest/download/install-macos.sh \| bash`                 |
 | Linux x64             | `T3-Code-x86_64.AppImage` (`chmod +x`, then run it), or `sudo apt install ./T3-Code-<version>-amd64.deb`         |
 | Nix / NixOS           | `nix profile add 'github:get-aix/t3code/release'`, or the [flake input](./docs/user/install.md#t3-code-fork-nix) |
 | Android               | Install `T3-Code-<version>.apk`. It replaces the Play Store T3 Code app, so uninstall that first.                |
 
 The macOS script is the only supported way to install on a Mac, because the app is not notarized.
-It checks the download's SHA-256 and installs **T3 Code** into `/Applications`. Desktop apps update
+It checks the download's SHA-256 and installs **T3 Code** into `/Applications`. On Windows, the
+script installs for your user without admin rights and without the SmartScreen prompt that the
+unsigned `.exe` gets when you download it in a browser. Desktop apps update
 themselves; Nix installs update through Nix. There is no fork iOS app.
 
 [Install and update the fork](./docs/user/fork.md#install) has the details, including how to

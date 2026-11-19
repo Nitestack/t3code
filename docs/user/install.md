@@ -189,6 +189,16 @@ The script checks the download's SHA-256, installs **T3 Code** in `/Applications
 `~/Applications`), and opens it. Set `T3CODE_VERSION=<version>` to install a specific release.
 Later updates arrive in the app.
 
+On Windows, run this in a normal PowerShell window, not as administrator:
+
+```powershell
+irm https://github.com/get-aix/t3code/releases/latest/download/install-windows.ps1 | iex
+```
+
+It checks the download's SHA-256 and installs **T3 Code** for your user, without the admin or
+SmartScreen prompts the unsigned `.exe` gets when downloaded in a browser. Quit T3 Code first. Set
+`$env:T3CODE_VERSION = "<version>"` to install a specific release.
+
 Before a public fork release is authorized, collaborators can get installable test builds from the
 fork's GitHub Actions. Open **Actions → Release**, run it from `main` with channel `stable`, and
 leave **publish** unchecked. If the selected source has no upstream sync marker, enter the full

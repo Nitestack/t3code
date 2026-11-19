@@ -716,6 +716,7 @@ jobs:
             sha256sum "$installer" > "$installer.sha256"
           done)
           cp .github/scripts/install-macos.sh release-assets/install-macos.sh
+          cp .github/scripts/install-windows.ps1 release-assets/install-windows.ps1
 
           EXPECTED_SHA="$EXPECTED_SHA" UPSTREAM_BASE="$UPSTREAM_BASE" UPSTREAM_TAG="$UPSTREAM_TAG" BUILD_RUN_ID="$BUILD_RUN_ID" BUILD_RUN_ATTEMPT="$BUILD_RUN_ATTEMPT" node - <<'NODE'
           const fs = require("node:fs");

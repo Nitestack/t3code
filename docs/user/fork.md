@@ -19,7 +19,7 @@ Download from the fork's [latest release](https://github.com/get-aix/t3code/rele
 
 | Platform              | File or command                                                                                  |
 | --------------------- | ------------------------------------------------------------------------------------------------ |
-| Windows x64           | `T3-Code-<version>-x64.exe`                                                                      |
+| Windows x64           | `irm https://github.com/get-aix/t3code/releases/latest/download/install-windows.ps1 \| iex`      |
 | macOS (Apple Silicon) | `curl -fsSL https://github.com/get-aix/t3code/releases/latest/download/install-macos.sh \| bash` |
 | Linux x64             | `T3-Code-x86_64.AppImage` or `T3-Code-<version>-amd64.deb`                                       |
 | Nix / NixOS           | `nix profile add 'github:get-aix/t3code/release'`                                                |
@@ -27,7 +27,11 @@ Download from the fork's [latest release](https://github.com/get-aix/t3code/rele
 
 Notes per platform:
 
-- **Windows.** The installer is unsigned. When SmartScreen warns, choose **More info → Run anyway**.
+- **Windows.** Run the command in a normal PowerShell window, not as administrator. It checks the
+  download's SHA-256 and installs **T3 Code** for your user, with no admin or SmartScreen prompt.
+  Quit T3 Code first. Set `$env:T3CODE_VERSION = "<version>"` to install a specific release. The
+  `T3-Code-<version>-x64.exe` download also works, but it is unsigned: SmartScreen asks you to
+  choose **More info → Run anyway**, and a work PC may block it.
 - **macOS.** Use the script. The app is not notarized, so Gatekeeper blocks a DMG or zip downloaded
   in a browser. The script checks the download's SHA-256 and installs **T3 Code** into
   `/Applications` (or `~/Applications`). Set `T3CODE_VERSION=<version>` to install a specific

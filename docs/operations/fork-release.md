@@ -28,7 +28,7 @@ APK uses the official package ID and replaces the store app.
    `.github/upstream-stable.json` marker, provide `upstream_base` as the full peeled commit SHA for
    the matching upstream `v<version>` tag. An invalid or mismatched marker always blocks the run.
 7. Download `t3-code-installers-<version>-<12-char-source-sha>` from that Actions run.
-   It contains `T3-Code-<version>-x64.exe`, `T3-Code-<version>.apk`, `T3-Code-<version>-arm64.{dmg,zip}`, `T3-Code-x86_64.AppImage`, `T3-Code-<version>-amd64.deb`, their `.sha256` files, blockmaps, the `latest*.yml` update feeds, `install-macos.sh`, platform metadata, `nix-build.json`,
+   It contains `T3-Code-<version>-x64.exe`, `T3-Code-<version>.apk`, `T3-Code-<version>-arm64.{dmg,zip}`, `T3-Code-x86_64.AppImage`, `T3-Code-<version>-amd64.deb`, their `.sha256` files, blockmaps, the `latest*.yml` update feeds, `install-macos.sh`, `install-windows.ps1`, platform metadata, `nix-build.json`,
    and `BUILD-INFO.md`. All metadata names the fork integration commit as the built source and
    records the upstream stable tag and peeled base commit separately. The Windows runner records its Authenticode status; without fork Windows
    signing credentials it is expected to be unsigned. The macOS app is signed with the fork's self-signed `T3 Code Fork` certificate (secrets `MACOS_SELF_SIGNED_CERTIFICATE` and `MACOS_SELF_SIGNED_CERTIFICATE_PASSWORD`) and is not notarized. Keep that certificate: installed Macs accept in-app updates only from builds signed with the same one, so a new certificate means every Mac must reinstall with the script. The Android APK is signed with the fork's

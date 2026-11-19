@@ -617,6 +617,7 @@ test("existing release assets must have matching source metadata and file checks
       fs.writeFileSync(path.join(directory, `${blockmapped}.blockmap`), "blockmap");
     }
     fs.writeFileSync(path.join(directory, "install-macos.sh"), "#!/bin/bash\n");
+    fs.writeFileSync(path.join(directory, "install-windows.ps1"), "& {}\n");
     fs.writeFileSync(path.join(directory, windows), windowsBytes);
     const sha512 = (name) =>
       crypto
