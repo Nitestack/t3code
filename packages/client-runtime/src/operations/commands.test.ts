@@ -48,6 +48,7 @@ import {
   revertThreadCheckpoint,
   resumeThreadQueue,
   startThreadTurn,
+  updateProject,
   updateThreadMetadata,
 } from "./commands.ts";
 
@@ -202,6 +203,26 @@ describe("V2 environment commands", () => {
           allowedLanes: ["personal", "aix:work"],
         },
       ]);
+    }).pipe(Effect.provide(layerTestRandom)),
+  );
+
+  it.effect("sends and clears a project's work key", () =>
+    Effect.gen(function* () {
+      const projects: ProjectMutation[] = [];
+      const supervisor = yield* makeSupervisor({ commands: [], projects });
+      const projectId = ProjectId.make("project-1");
+
+      for (const homeAixProfile of ["work", null]) {
+        yield* updateProject({
+          commandId: CommandId.make("key-command"),
+          projectId,
+          homeAixProfile,
+        }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
+      }
+
+      expect(
+        projects.map((mutation) => mutation.type === "project.update" && mutation.homeAixProfile),
+      ).toEqual(["work", null]);
     }).pipe(Effect.provide(layerTestRandom)),
   );
 

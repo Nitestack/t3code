@@ -69,6 +69,7 @@ export interface UpdateProjectInput extends CommandMetadata {
   readonly projectId: ProjectId;
   readonly title?: string;
   readonly scope?: ProjectScope;
+  readonly homeAixProfile?: string | null;
   readonly workspaceRoot?: string;
   readonly defaultModelSelection?: ModelSelection | null;
   readonly autoPull?: boolean;
@@ -428,6 +429,7 @@ export const updateProject = Effect.fn("EnvironmentCommands.updateProject")(func
     commandId: yield* allocateCommandId(input),
     projectId: input.projectId,
     ...(input.scope === undefined ? {} : { scope: input.scope }),
+    ...(input.homeAixProfile === undefined ? {} : { homeAixProfile: input.homeAixProfile }),
     ...(input.title === undefined ? {} : { title: input.title }),
     ...(input.workspaceRoot === undefined ? {} : { workspaceRoot: input.workspaceRoot }),
     ...(input.defaultModelSelection === undefined
