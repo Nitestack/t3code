@@ -35,7 +35,7 @@ export interface ProjectMetaUpdateCommand {
   readonly title?: string;
   readonly workspaceRoot?: string;
   readonly scope?: ProjectScope;
-  readonly homeAixProfile?: string;
+  readonly homeAixProfile?: string | null;
   readonly defaultModelSelection?: ModelSelection | null;
   readonly defaultThreadEnvMode?: ThreadEnvMode | null;
   readonly autoPull?: boolean;

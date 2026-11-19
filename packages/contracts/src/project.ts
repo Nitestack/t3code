@@ -197,7 +197,7 @@ export type ProjectCreatePayload = typeof ProjectCreatePayload.Type;
 
 export const ProjectUpdatePayload = Schema.Struct({
   scope: Schema.optional(ProjectScope),
-  homeAixProfile: Schema.optional(TrimmedNonEmptyString),
+  homeAixProfile: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   title: Schema.optional(TrimmedNonEmptyString),
   workspaceRoot: Schema.optional(TrimmedNonEmptyString),
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
