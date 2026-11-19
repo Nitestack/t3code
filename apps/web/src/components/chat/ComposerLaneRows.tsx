@@ -14,7 +14,7 @@ import type { Thread } from "../../types";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { composerFloatingLayerProps } from "./composerEventScope";
-import { laneLabel } from "./modelLanes.logic";
+import { aixProfileLabels, laneLabel } from "./modelLanes.logic";
 
 /** Drafts have no thread to grant lanes to yet, so they show nothing here. */
 export function ComposerLaneRows(props: {
@@ -40,6 +40,7 @@ export function ComposerLaneRows(props: {
     ),
   ].filter((lane) => !lanes.includes(lane));
 
+  const profileLabels = aixProfileLabels(props.instanceEntries);
   const saveGrants = (next: ReadonlyArray<string>) => {
     void updateThreadMetadata({
       environmentId: thread.environmentId,
@@ -48,11 +49,12 @@ export function ComposerLaneRows(props: {
   };
 
   return (
-    <div className="flex w-full flex-col gap-1 text-xs text-muted-foreground">
+    <div className="flex w-full flex-col items-start gap-1 border-b border-border/70 pb-2 text-xs text-muted-foreground">
+      <span>Agents in this thread may use</span>
       {lanes.map((lane) => (
-        <div key={lane} className="flex items-center justify-between gap-2">
-          <span className="truncate">
-            {laneLabel(lane)}
+        <div key={lane} className="flex w-full items-center justify-between gap-2">
+          <span className="truncate text-foreground">
+            {laneLabel(lane, profileLabels)}
             {lane === home ? " · project key" : null}
           </span>
           {lane === home ? null : (
@@ -74,7 +76,7 @@ export function ComposerLaneRows(props: {
           <MenuPopup side="top" align="start" {...composerFloatingLayerProps}>
             {others.map((lane) => (
               <MenuItem key={lane} onClick={() => saveGrants([...grants, lane])}>
-                {laneLabel(lane)}
+                {laneLabel(lane, profileLabels)}
               </MenuItem>
             ))}
           </MenuPopup>

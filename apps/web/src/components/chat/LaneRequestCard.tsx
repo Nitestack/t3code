@@ -11,10 +11,15 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
 import { threadEnvironment } from "../../state/threads";
 import { Button } from "../ui/button";
-import { laneLabel } from "./modelLanes.logic";
+import { useEnvironmentProviders } from "../../state/environments";
+import { aixProfileLabels, laneLabel } from "./modelLanes.logic";
 import { WorkLogRow } from "./WorkLog";
 
 type LaneRequestItem = Extract<OrchestrationV2TurnItem, { type: "lane_request" }>;
+
+function useLaneLabel(environmentId: EnvironmentId, lane: string): string {
+  return laneLabel(lane, aixProfileLabels(useEnvironmentProviders().get(environmentId) ?? []));
+}
 
 /** Inline card for an agent asking to run on a key outside its thread's lane. */
 export function LaneRequestCard(props: {
@@ -33,6 +38,7 @@ function PendingLaneRequest(props: {
 }) {
   const { item } = props;
   const [busy, setBusy] = useState(false);
+  const label = useLaneLabel(props.environmentId, item.lane);
   const answer = useAtomCommand(modelLaneRequestEnvironment.answer, {
     label: "answer lane request",
   });
@@ -56,8 +62,8 @@ function PendingLaneRequest(props: {
       <div className="flex min-w-0 flex-col gap-1">
         <p className="text-sm font-medium text-foreground">
           {item.requestedFor === "task"
-            ? `Run a subagent on ${laneLabel(item.lane)}?`
-            : `Use ${laneLabel(item.lane)} in this thread?`}
+            ? `Run a subagent on ${label}?`
+            : `Use ${label} in this thread?`}
         </p>
         <p className="text-sm text-muted-foreground">
           {item.providerLabel}: {item.reason}
@@ -106,7 +112,7 @@ function AnsweredLaneRequest(props: {
     modelLaneRequestEnvironment.answer.permissionAtom(props.environmentId),
   );
   const updateThreadMetadata = useOrchestrationCommand(threadEnvironment.updateMetadata);
-  const label = laneLabel(item.lane);
+  const label = useLaneLabel(props.environmentId, item.lane);
 
   if (item.laneStatus === "allowed_thread") {
     const stillAllowed = thread ? threadAllowedLanes(thread).includes(item.lane) : true;

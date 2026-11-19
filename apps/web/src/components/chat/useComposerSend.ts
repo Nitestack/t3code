@@ -104,7 +104,7 @@ import {
   multipleModelSendBlock,
   referencedThreadContexts,
 } from "./composerSend.logic";
-import { laneLabel, sendLanesNeedingConfirm } from "./modelLanes.logic";
+import { aixProfileLabels, laneLabel, sendLanesNeedingConfirm } from "./modelLanes.logic";
 import { readLocalApi } from "~/localApi";
 import { useMultipleModelSend } from "./useMultipleModelSend";
 import { type ComposerDispatchMode } from "@t3tools/client-runtime/state/composer-dispatch";
@@ -790,7 +790,8 @@ export function useComposerSend(input: ComposerSendInput) {
         : [ctxSelectedModelSelection.instanceId],
     });
     if (lanesToConfirm.length > 0) {
-      const names = lanesToConfirm.map(laneLabel).join(" and ");
+      const profileLabels = aixProfileLabels(providerInstanceEntries);
+      const names = lanesToConfirm.map((lane) => laneLabel(lane, profileLabels)).join(" and ");
       const confirmed = await readLocalApi()?.dialogs.confirm(
         `Use ${names} in this thread?\nSending adds ${names} to this thread. Cancel keeps your message.`,
       );

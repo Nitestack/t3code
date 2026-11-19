@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import type { ModelLaneProject } from "@t3tools/shared/modelLanes";
-import { laneLabel, sendLanesNeedingConfirm } from "./modelLanes.logic";
+import { aixProfileLabels, laneLabel, sendLanesNeedingConfirm } from "./modelLanes.logic";
 
 const personal: ModelLaneProject = { scope: "personal" };
 const work: ModelLaneProject = { scope: "work", homeAixProfile: "adcare" };
@@ -86,8 +86,11 @@ describe("sendLanesNeedingConfirm", () => {
 describe("laneLabel", () => {
   it.each([
     ["personal", "Personal"],
-    ["aix:adcare", "adcare"],
+    ["aix:p", "Work · Persönlich"],
+    ["aix:adcare", "Work · adcare"],
   ] as const)("labels %s as %s", (lane, label) => {
-    expect(laneLabel(lane)).toBe(label);
+    expect(
+      laneLabel(lane, aixProfileLabels([{ aixProfile: "p", aixProfileLabel: "Persönlich" }])),
+    ).toBe(label);
   });
 });

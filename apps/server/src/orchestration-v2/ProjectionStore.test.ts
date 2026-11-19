@@ -6579,6 +6579,7 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
           title: "Provider history",
           providerInstanceId,
           modelSelection,
+          allowedLanes: ["personal", "aix:work"],
           runtimeMode: "full-access",
           interactionMode: "default",
           branch: null,
@@ -6638,6 +6639,7 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
         (thread) => thread.id === threadId,
       );
       assert.deepEqual(shell?.providerInstanceHistory, [providerInstanceId, claudeInstanceId]);
+      assert.deepEqual(shell?.allowedLanes, ["personal", "aix:work"]);
     }),
   );
 

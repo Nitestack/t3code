@@ -23,6 +23,22 @@ export function sendLanesNeedingConfirm(input: {
   return [...lanes];
 }
 
-export function laneLabel(lane: string): string {
-  return lane === "personal" ? "Personal" : lane.slice("aix:".length);
+export function aixProfileLabels(
+  entries: ReadonlyArray<{
+    readonly aixProfile?: string | undefined;
+    readonly aixProfileLabel?: string | undefined;
+  }>,
+): ReadonlyMap<string, string> {
+  const labels = new Map<string, string>();
+  for (const entry of entries) {
+    if (entry.aixProfile && entry.aixProfileLabel)
+      labels.set(entry.aixProfile, entry.aixProfileLabel);
+  }
+  return labels;
+}
+
+export function laneLabel(lane: string, profileLabels?: ReadonlyMap<string, string>): string {
+  if (lane === "personal") return "Personal";
+  const profile = lane.slice("aix:".length);
+  return `Work · ${profileLabels?.get(profile) ?? profile}`;
 }
