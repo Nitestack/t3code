@@ -148,6 +148,7 @@ function FooterWithHierarchy() {
               ...runtimeModeConfig[runtimeMode],
             }))}
             onRuntimeModeChange={() => setMode("full-access")}
+            laneRows={null}
           />
         </ModelPickerHierarchyContext.Provider>
       </PopoverPopup>

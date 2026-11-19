@@ -29,6 +29,7 @@ export type ProjectGroupUpdate = Partial<{
   pinned: boolean;
   archived: boolean;
   scope: ProjectScope;
+  homeAixProfile: string | null;
 }>;
 
 type ProjectGroupMember = Pick<

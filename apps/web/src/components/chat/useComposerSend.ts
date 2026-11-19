@@ -104,6 +104,8 @@ import {
   multipleModelSendBlock,
   referencedThreadContexts,
 } from "./composerSend.logic";
+import { laneLabel, sendLanesNeedingConfirm } from "./modelLanes.logic";
+import { readLocalApi } from "~/localApi";
 import { useMultipleModelSend } from "./useMultipleModelSend";
 import { type ComposerDispatchMode } from "@t3tools/client-runtime/state/composer-dispatch";
 import {
@@ -779,6 +781,20 @@ export function useComposerSend(input: ComposerSendInput) {
         }),
       );
       return;
+    }
+    const lanesToConfirm = sendLanesNeedingConfirm({
+      project: activeProject,
+      thread: isLocalDraftThread ? null : activeThread,
+      instanceIds: multipleModelSelections
+        ? multipleModelSelections.map((selection) => selection.instanceId)
+        : [ctxSelectedModelSelection.instanceId],
+    });
+    if (lanesToConfirm.length > 0) {
+      const names = lanesToConfirm.map(laneLabel).join(" and ");
+      const confirmed = await readLocalApi()?.dialogs.confirm(
+        `Use ${names} in this thread?\nSending adds ${names} to this thread. Cancel keeps your message.`,
+      );
+      if (!confirmed) return;
     }
     const threadIdForSend = activeThread.id;
     const sendSnapshot = snapshotComposerSend({

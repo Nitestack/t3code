@@ -112,6 +112,7 @@ function PickerWithPermissions() {
             runtimeMode={mode}
             runtimeModeOptions={options}
             onRuntimeModeChange={setMode}
+            laneRows={null}
           />
         </PopoverPopup>
       </Popover>

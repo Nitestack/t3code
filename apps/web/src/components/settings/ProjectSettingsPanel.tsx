@@ -28,7 +28,14 @@ import {
   type SidebarProjectGroupMember,
   type SidebarProjectSnapshot,
 } from "../../sidebarProjectGrouping";
-import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
+import { groupAixProviderProfiles } from "@t3tools/client-runtime/provider-picker-hierarchy";
+import { providerInstanceEntriesFor } from "../../providerInstances";
+import {
+  useEnvironmentProviders,
+  useEnvironments,
+  usePrimaryEnvironmentId,
+} from "../../state/environments";
+import { EMPTY_SERVER_PROVIDERS } from "../../state/server";
 import { useThreadShells, waitForProjectRemoval } from "../../state/entities";
 import { refreshProjectFaviconUrl } from "../../state/assets";
 import { projectEnvironment } from "../../state/projects";
@@ -62,6 +69,7 @@ import {
 import { useSettingsProjectGroups } from "./useSettingsProjectGroups";
 import { readUnloadedThreadCount } from "../../state/olderSettledShelf";
 import { settingsScopeEnvironmentLabels } from "./settingsScopeAxis";
+import { useScopedSettings } from "./useScopedSettings";
 
 const ProjectIconPickerDialog = lazy(() =>
   import("./ProjectIconPickerDialog").then((module) => ({
@@ -293,6 +301,15 @@ function ProjectDetail({
 
   const { updateProjectGroup, canOrganizeProjectGroup } = useProjectGroupUpdate();
   const { canMoveProjectGroupScope, moveProjectGroupScope } = useProjectPin();
+  const providersByEnvironment = useEnvironmentProviders();
+  const scopedSettings = useScopedSettings();
+  const workKeyProfiles = groupAixProviderProfiles(
+    providerInstanceEntriesFor(
+      providersByEnvironment.get(filePickerProject.environmentId) ?? EMPTY_SERVER_PROVIDERS,
+      scopedSettings,
+      null,
+    ),
+  );
   const updateAllMembers = (
     input: ProjectGroupUpdate | ((member: SidebarProjectGroupMember) => ProjectGroupUpdate),
     failureTitle: string,
@@ -640,6 +657,43 @@ function ProjectDetail({
                 >
                   Move to {group.scope === "work" ? "Personal" : "Work"}
                 </Button>
+              }
+            />
+          ) : null}
+          {group.scope === "work" && canOrganize ? (
+            <SettingsRow
+              title="Work key"
+              description="The aix profile whose models this project's threads use by default."
+              control={
+                <Select
+                  value={group.homeAixProfile ?? ""}
+                  disabled={isOrganizing}
+                  onValueChange={(value) =>
+                    void updateAllMembers(
+                      { homeAixProfile: value === "" ? null : value },
+                      "Failed to set work key",
+                    )
+                  }
+                >
+                  <SelectTrigger size="sm" aria-label="Work key">
+                    <SelectValue>
+                      {workKeyProfiles.find((profile) => profile.id === group.homeAixProfile)
+                        ?.label ??
+                        group.homeAixProfile ??
+                        "None"}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectPopup align="end" alignItemWithTrigger={false}>
+                    <SelectItem hideIndicator value="">
+                      None
+                    </SelectItem>
+                    {workKeyProfiles.map((profile) => (
+                      <SelectItem hideIndicator key={profile.id} value={profile.id}>
+                        {profile.label}
+                      </SelectItem>
+                    ))}
+                  </SelectPopup>
+                </Select>
               }
             />
           ) : null}
