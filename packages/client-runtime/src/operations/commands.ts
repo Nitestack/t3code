@@ -9,6 +9,7 @@ import {
   WS_METHODS,
   type ChatAttachment,
   MessageId,
+  type ModelLane,
   type ModelSelection,
   type NodeId,
   type OrchestrationV2Command,
@@ -150,8 +151,8 @@ export interface UpdateThreadMetadataInput extends ThreadCommandInput {
   readonly worktreePath?: string | null;
   readonly regenerateTitle?: boolean;
   readonly linkedPullRequest?: ThreadLinkedPullRequest | null;
-  readonly allowedLanes?: ReadonlyArray<import("@t3tools/contracts").ModelLane>;
   readonly expectedEmpty?: boolean;
+  readonly allowedLanes?: ReadonlyArray<ModelLane>;
 }
 
 export interface SetThreadRuntimeModeInput extends ThreadCommandInput {
