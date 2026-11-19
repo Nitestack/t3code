@@ -50,9 +50,9 @@ export function laneOfInstanceId(instanceId: string): ModelLane {
 }
 
 /** Threads from before lanes existed keep the lane of their current model. */
-export function threadAllowedLanes(thread: {
-  readonly allowedLanes?: ReadonlyArray<string> | undefined;
+export function threadAllowedLanes<L extends string>(thread: {
+  readonly allowedLanes?: ReadonlyArray<L> | undefined;
   readonly modelSelection: { readonly instanceId: string };
-}): ReadonlyArray<string> {
+}): ReadonlyArray<L | ModelLane> {
   return thread.allowedLanes ?? [laneOfInstanceId(thread.modelSelection.instanceId)];
 }

@@ -48,6 +48,7 @@ import {
   revertThreadCheckpoint,
   resumeThreadQueue,
   startThreadTurn,
+  updateThreadMetadata,
 } from "./commands.ts";
 
 const layerTestRandom = Layer.succeed(
@@ -178,6 +179,28 @@ describe("V2 environment commands", () => {
 
       expect(commands).toEqual([
         { type: "thread.archive", commandId: "queued-command", threadId: "thread-1" },
+      ]);
+    }).pipe(Effect.provide(layerTestRandom)),
+  );
+
+  it.effect("sends a thread's allowed lanes with its metadata update", () =>
+    Effect.gen(function* () {
+      const commands: OrchestrationV2Command[] = [];
+      const supervisor = yield* makeSupervisor({ commands, projects: [] });
+
+      yield* updateThreadMetadata({
+        commandId: CommandId.make("lanes-command"),
+        threadId: ThreadId.make("thread-1"),
+        allowedLanes: ["personal", "aix:work"],
+      }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
+
+      expect(commands).toEqual([
+        {
+          type: "thread.metadata.update",
+          commandId: "lanes-command",
+          threadId: "thread-1",
+          allowedLanes: ["personal", "aix:work"],
+        },
       ]);
     }).pipe(Effect.provide(layerTestRandom)),
   );

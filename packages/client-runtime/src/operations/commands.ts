@@ -150,6 +150,7 @@ export interface UpdateThreadMetadataInput extends ThreadCommandInput {
   readonly worktreePath?: string | null;
   readonly regenerateTitle?: boolean;
   readonly linkedPullRequest?: ThreadLinkedPullRequest | null;
+  readonly allowedLanes?: ReadonlyArray<import("@t3tools/contracts").ModelLane>;
   readonly expectedEmpty?: boolean;
 }
 
@@ -680,7 +681,8 @@ export const updateThreadMetadata = Effect.fn("EnvironmentCommands.updateThreadM
       input.worktreePath !== undefined ||
       input.regenerateTitle !== undefined ||
       input.linkedPullRequest !== undefined ||
-      input.limitRecovery !== undefined
+      input.limitRecovery !== undefined ||
+      input.allowedLanes !== undefined
     ) {
       result = yield* dispatch({
         type: "thread.metadata.update",
@@ -695,6 +697,7 @@ export const updateThreadMetadata = Effect.fn("EnvironmentCommands.updateThreadM
         ...(input.linkedPullRequest === undefined
           ? {}
           : { linkedPullRequest: input.linkedPullRequest }),
+        ...(input.allowedLanes === undefined ? {} : { allowedLanes: [...input.allowedLanes] }),
       });
     }
     if (input.modelSelection !== undefined) {
