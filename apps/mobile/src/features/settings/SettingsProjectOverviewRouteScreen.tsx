@@ -3,7 +3,11 @@ import { AppText as Text, AppTextInput } from "../../components/ui/AppText";
 import { Button } from "../../components/ui/Button";
 import { ProjectFavicon } from "../../components/ProjectFavicon";
 import * as Dialog from "../../components/ui/Dialog";
-import { AuthOrchestrationOperateScope, type ProjectScope } from "@t3tools/contracts";
+import {
+  AuthOrchestrationOperateScope,
+  type EnvironmentId,
+  type ProjectScope,
+} from "@t3tools/contracts";
 import { projectScopeInput, supportsProjectScope } from "@t3tools/client-runtime/environment";
 import { planProjectRemoval } from "@t3tools/client-runtime/state/projects";
 import {
@@ -16,11 +20,14 @@ import {
 } from "@t3tools/client-runtime/state/project-grouping";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { useNavigation } from "@react-navigation/native";
-import { useRef, useState } from "react";
+import { useAtomValue } from "@effect/atom-react";
+import { Atom } from "effect/reactivity";
+import { useMemo, useRef, useState } from "react";
 import { Platform, Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { projectEnvironment } from "../../state/projects";
+import { serverEnvironment } from "../../state/server";
 import { useThreadShells } from "../../state/entities";
 import { appAtomRegistry } from "../../state/atom-registry";
 import {
@@ -38,6 +45,7 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { SettingsScreen } from "./components/SettingsScreen";
 import { SettingsSection } from "./components/SettingsSection";
 import { ListActionRow as SettingsActionRow } from "../../components/ui/ListActionRow";
+import { ListChoiceRow as SettingsChoiceRow } from "../../components/ui/ListChoiceRow";
 import { SettingsSwitchRow } from "./components/SettingsSwitchRow";
 import { useSettingsEnvironmentMenu } from "./components/SettingsEnvironmentFilterHeader";
 import { useSettingsEnvironmentFilter, type SettingsTarget } from "./settings-environment-filter";
@@ -191,11 +199,40 @@ function ProjectOverviewContent(props: {
         target === undefined ||
         target.serverConfig.environment.capabilities.projectOrganization === true,
     );
+  // Every checkout of a work project gets the same home key, so the key list comes from all machines.
+  const memberIdsKey = allMembers.map((member) => member.environmentId).join(",");
+  const memberProvidersAtom = useMemo(
+    () =>
+      Atom.make((get) =>
+        memberIdsKey
+          .split(",")
+          .flatMap(
+            (environmentId) =>
+              get(serverEnvironment.providersValueAtom(environmentId as EnvironmentId)) ?? [],
+          ),
+      ),
+    [memberIdsKey],
+  );
+  const memberProviders = useAtomValue(memberProvidersAtom);
+  const workKeys = new Map<string, string>();
+  for (const provider of memberProviders) {
+    if (provider.aixProfile !== undefined && !workKeys.has(provider.aixProfile)) {
+      workKeys.set(provider.aixProfile, provider.aixProfileLabel ?? provider.aixProfile);
+    }
+  }
+  const canPickWorkKey =
+    isWork &&
+    workKeys.size > 0 &&
+    memberTargets.every(
+      (target) =>
+        target === undefined || target.serverConfig.environment.capabilities.modelLanes === true,
+    );
   // One machine at a time, stopping at the first failure, as web does.
   const organize = async (input: {
     readonly pinned?: boolean;
     readonly archived?: boolean;
     readonly scope?: ProjectScope;
+    readonly homeAixProfile?: string;
   }) => {
     setIsOrganizing(true);
     for (const member of allMembers) {
@@ -206,12 +243,13 @@ function ProjectOverviewContent(props: {
       const target = props.connectedTargets.find(
         (candidate) => candidate.environmentId === member.environmentId,
       );
-      const { scope, ...organization } = input;
+      const { scope, homeAixProfile, ...organization } = input;
       const result = await organizeProject({
         environmentId: member.environmentId,
         input: {
           projectId: member.id,
           ...organization,
+          ...(homeAixProfile === undefined ? {} : { homeAixProfile }),
           ...(scope === undefined || !environmentScopeEnabled
             ? {}
             : projectScopeInput(target?.serverConfig.environment.capabilities, scope)),
@@ -389,6 +427,28 @@ function ProjectOverviewContent(props: {
           />
         ) : null}
       </SettingsSection>
+
+      {canPickWorkKey ? (
+        <SettingsSection title="Work key">
+          {[...workKeys].map(([profile, label], index) => (
+            <SettingsChoiceRow
+              key={profile}
+              label={label}
+              description={
+                offline ? "Connect every machine with this project to change its key." : undefined
+              }
+              selected={representative.homeAixProfile === profile}
+              separated={index > 0}
+              disabled={isOrganizing || offline}
+              onPress={() => {
+                if (representative.homeAixProfile !== profile) {
+                  void organize({ homeAixProfile: profile });
+                }
+              }}
+            />
+          ))}
+        </SettingsSection>
+      ) : null}
 
       {canOrganize ? (
         <SettingsSection title="Organize">

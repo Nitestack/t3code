@@ -9,7 +9,11 @@ import {
   useAndroidFloatingTabs,
 } from "../settings/appearance/AppearancePreferencesProvider";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
-import { settlePromise, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import {
+  isAtomCommandInterrupted,
+  settlePromise,
+  squashAtomCommandFailure,
+} from "@t3tools/client-runtime/state/runtime";
 import { AsyncResult } from "effect/reactivity";
 import { useAtomValue } from "@effect/atom-react";
 import { clampFileAttachmentUploadBytes } from "@t3tools/client-runtime/state/attachments";
@@ -30,6 +34,15 @@ import {
   hasProviderUsageLimits,
   isUsageLimitsCommand,
 } from "@t3tools/shared/usageLimits";
+import {
+  isLaneAllowed,
+  laneOfInstanceId,
+  projectHomeLane,
+  threadAllowedLanes,
+} from "@t3tools/shared/modelLanes";
+import { laneKeyName, sendLaneConfirmCopy } from "../../lib/modelLaneCopy";
+import { threadEnvironment } from "../../state/threads";
+import { useAtomCommand } from "../../state/use-atom-command";
 import { StackActions, useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { ReactNode } from "react";
 import { useEffect, useEffectEvent, useRef, useState, type RefObject } from "react";
@@ -467,6 +480,10 @@ export const THREAD_COMPOSER_BOTTOM_GUTTER = 6;
 
 export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps) {
   const project = useProject(scopeProjectRef(props.environmentId, props.selectedThread.projectId));
+  const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
+    label: "grant thread lane",
+    reportFailure: false,
+  });
   const { themeVariables: materialTheme } = useAppearancePreferences();
   const composerPanel = materialTheme["--color-composer-panel"];
   const navigation = useNavigation();
@@ -745,18 +762,7 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
     settingsSheetPresentation.onEditorFocusChange(false);
     onEditorFocusChange?.(false);
   };
-  const handleSend = async (followUp?: ActiveTurnComposerAction) => {
-    if (
-      isSubmissionLocked ||
-      sendBlockedReason !== null ||
-      pendingPastedTextAttachmentCountRef.current > 0 ||
-      pendingNativeImagePasteCountRef.current > 0
-    )
-      return;
-    if (usageLimitsOffered && isUsageLimitsCommand(draftMessage) && draftAttachments.length === 0) {
-      if (openUsageLimits()) onChangeDraftMessage("");
-      return;
-    }
+  const sendPendingMessage = async (followUp?: ActiveTurnComposerAction) => {
     const threadKey = scopedThreadKey(props.environmentId, props.selectedThread.id);
     if (inFlightThreadIdsRef.current.has(threadKey)) return;
     inFlightThreadIdsRef.current.add(threadKey);
@@ -787,6 +793,77 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
       threadTitle: props.selectedThread.title,
       projectTitle: props.environmentLabel ?? "T3 Code",
     });
+  };
+
+  const sendLane = laneOfInstanceId(currentModelSelection.instanceId);
+  const providerList = props.serverConfig?.providers ?? [];
+  // No lock is held while the confirm is open: the Alert can be dismissed without its callbacks.
+  const confirmLaneSend = (
+    laneProject: NonNullable<typeof project>,
+    followUp: ActiveTurnComposerAction | undefined,
+  ) => {
+    const homeLane = projectHomeLane(laneProject);
+    const copy = sendLaneConfirmCopy({
+      projectTitle: laneProject.title,
+      homeName: homeLane === null ? null : laneKeyName(homeLane, providerList),
+      lane: sendLane,
+      keyName: laneKeyName(sendLane, providerList),
+    });
+    Dialog.confirm({
+      title: copy.title,
+      message: copy.message,
+      cancelText: "Change model",
+      confirmText: copy.confirmText,
+      onCancel: () => settingsSheetPresentation.open(),
+      onConfirm: () => {
+        // A draft has no grant to store; the thread it creates starts on its model's lane.
+        if (props.isDraft) {
+          void sendPendingMessage(followUp);
+          return;
+        }
+        void (async () => {
+          const granted = await updateThreadMetadata({
+            environmentId: props.environmentId,
+            input: {
+              threadId: props.selectedThread.id,
+              allowedLanes: [...threadAllowedLanes(props.selectedThread), sendLane],
+            },
+          });
+          if (granted._tag === "Failure") {
+            if (!isAtomCommandInterrupted(granted)) {
+              Dialog.alert("Could not use the key", "This message was not sent.");
+            }
+            return;
+          }
+          await sendPendingMessage(followUp);
+        })();
+      },
+    });
+  };
+  const handleSend = async (followUp?: ActiveTurnComposerAction) => {
+    if (
+      isSubmissionLocked ||
+      sendBlockedReason !== null ||
+      pendingPastedTextAttachmentCountRef.current > 0 ||
+      pendingNativeImagePasteCountRef.current > 0
+    )
+      return;
+    if (usageLimitsOffered && isUsageLimitsCommand(draftMessage) && draftAttachments.length === 0) {
+      if (openUsageLimits()) onChangeDraftMessage("");
+      return;
+    }
+    if (
+      project !== null &&
+      !isLaneAllowed(
+        project,
+        props.isDraft ? undefined : threadAllowedLanes(props.selectedThread),
+        sendLane,
+      )
+    ) {
+      confirmLaneSend(project, followUp);
+      return;
+    }
+    await sendPendingMessage(followUp);
   };
 
   const lockedProviderInstanceId = props.canSwitchProvider

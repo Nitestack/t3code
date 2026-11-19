@@ -423,6 +423,12 @@ export function isLinkRequestActivityGroup(entry: ThreadFeedActivityGroup): bool
   );
 }
 
+export function isLaneRequestActivityGroup(entry: ThreadFeedActivityGroup): boolean {
+  return (
+    entry.activities.length === 1 && entry.activities[0]?.projectedItem.item.type === "lane_request"
+  );
+}
+
 function isUserInputActivityGroup(entry: ThreadFeedActivityGroup): boolean {
   return entry.activities.some((activity) => activity.workEntry.questionAnswer !== undefined);
 }
@@ -465,7 +471,8 @@ function itemIsProminent(item: OrchestrationV2TurnItem): boolean {
     item.type === "system_notice" ||
     item.type === "proposed_plan" ||
     item.type === "secret_request" ||
-    item.type === "link_request"
+    item.type === "link_request" ||
+    item.type === "lane_request"
   );
 }
 

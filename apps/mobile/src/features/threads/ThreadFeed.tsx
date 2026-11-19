@@ -26,6 +26,7 @@ import {
 } from "./thread-handoff-row";
 import { GuestBubbleTint, GuestMessageName } from "./guestMessageStyle";
 import { ThreadGuestPendingMessage, useThreadGuestShare } from "./ThreadGuestShareBar";
+import { LaneRequestCard } from "./LaneRequestCard";
 import { LinkRequestCard } from "./LinkRequestCard";
 import { SecretRequestCard } from "./SecretRequestCard";
 import { AppActivityIndicator } from "../../components/ui/AppActivityIndicator";
@@ -223,6 +224,7 @@ import {
   threadFeedRunIsUnsettled,
   isContextCompactionActivityGroup,
   isContextHandoffActivityGroup,
+  isLaneRequestActivityGroup,
   isLinkRequestActivityGroup,
   isSecretRequestActivityGroup,
   type ThreadFeedEntry,
@@ -1990,6 +1992,17 @@ function renderFeedEntry(
     return (
       <LinkRequestCard
         environmentId={props.environmentId}
+        projectedItem={entry.activities[0]!.projectedItem}
+        iconColor={iconSubtleColor}
+      />
+    );
+  }
+
+  if (entry.type === "activity-group" && isLaneRequestActivityGroup(entry)) {
+    return (
+      <LaneRequestCard
+        environmentId={props.environmentId}
+        threadId={props.threadId}
         projectedItem={entry.activities[0]!.projectedItem}
         iconColor={iconSubtleColor}
       />
