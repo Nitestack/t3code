@@ -1599,7 +1599,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         : laneOfInstance(configured);
     const project = yield* projects.get(thread.projectId);
     const projectModel = Option.getOrUndefined(project);
-    const modelProject = projectModel ?? { scope: "work" as const };
+    // A thread whose project record is gone is unscoped, and unscoped projects live on Personal.
+    const modelProject = projectModel ?? { scope: "personal" as const };
     const allowedLanes = allowedLanesForProject(modelProject, threadAllowedLanes(thread));
     const allowedProviders = Object.entries(settings.providerInstances)
       .filter(([, instance]) => allowedLanes.includes(laneOfInstance(instance)))

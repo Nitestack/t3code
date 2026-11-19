@@ -234,7 +234,6 @@ const RequestModelLaneTool = Tool.make("request_model_lane", {
 })
   .annotate(Tool.Title, "Request provider lane access")
   .annotate(Tool.Destructive, false)
-  .annotate(Tool.Meta, { "anthropic/alwaysLoad": true })
   .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients);
 
 const CreateThreadsTool = Tool.make("create_threads", {

@@ -117,6 +117,7 @@ import { userFacingDispatchErrorMessage } from "../orchestration-v2/UserFacingEr
 import {
   allowedLanesForProject,
   isLaneAllowed,
+  type ModelLaneProject,
   laneOfInstance,
   projectHomeLane,
   threadAllowedLanes,
@@ -1289,6 +1290,14 @@ const make = Effect.gen(function* () {
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const remoteDelegation = yield* RemoteDelegation.RemoteDelegation;
 
+  // A thread whose project record is gone is unscoped, and unscoped projects live on Personal.
+  const laneProject = (projectId: ProjectId) =>
+    projects.getById(projectId).pipe(
+      Effect.mapError((error) =>
+        failure("orchestration_error", `Unable to read project ${projectId}: ${error.message}`),
+      ),
+      Effect.map(Option.getOrElse((): ModelLaneProject => ({ scope: "personal" }))),
+    );
   const requireProject = (projectId: ProjectId) =>
     projects.getById(projectId).pipe(
       Effect.mapError((error) =>
@@ -2580,7 +2589,7 @@ const make = Effect.gen(function* () {
         Effect.mapError(() => failure("orchestration_error", "Unable to read server settings.")),
       );
       const parentProject =
-        parent === undefined ? undefined : yield* requireProject(parent.thread.projectId);
+        parent === undefined ? undefined : yield* laneProject(parent.thread.projectId);
       const inherited = parent?.thread.modelSelection;
       const searchTerms = input.search?.toLowerCase().split(/\s+/).filter(Boolean) ?? [];
       return {
@@ -2722,7 +2731,7 @@ const make = Effect.gen(function* () {
         providers,
         skipProjectEnablementFilter: isRetryOfAcceptedDelegation,
       });
-      const project = yield* requireProject(parent.thread.projectId);
+      const project = yield* laneProject(parent.thread.projectId);
       const targetLane = laneOfInstance(
         providers.find((provider) => provider.instanceId === target.modelSelection.instanceId) ??
           {},
@@ -3070,7 +3079,7 @@ const make = Effect.gen(function* () {
         }
         const parentNodeId = parentRun.rootNodeId;
         const providers = yield* loadProviders;
-        const parentProject = yield* requireProject(parent.thread.projectId);
+        const parentProject = yield* laneProject(parent.thread.projectId);
         const key = yield* requestKey(input.clientRequestId);
         const created = yield* Effect.forEach(
           input.threads,
@@ -3114,14 +3123,20 @@ const make = Effect.gen(function* () {
                 parentProject,
                 threadAllowedLanes(parent.thread),
               );
-              const laneRequestRecords = isRetryOfAcceptedCreation
-                ? []
-                : (yield* threadManagement
-                    .getThreadRecords(parent.thread.id, ["turnItems"], {
-                      turnItemTypes: ["lane_request"],
-                      messageRoles: [],
-                    })
-                    .pipe(Effect.mapError(threadManagementFailure))).turnItems;
+              const laneAllowed = isLaneAllowed(
+                parentProject,
+                threadAllowedLanes(parent.thread),
+                targetLane,
+              );
+              const laneRequestRecords =
+                isRetryOfAcceptedCreation || laneAllowed
+                  ? []
+                  : (yield* threadManagement
+                      .getThreadRecords(parent.thread.id, ["turnItems"], {
+                        turnItemTypes: ["lane_request"],
+                        messageRoles: [],
+                      })
+                      .pipe(Effect.mapError(threadManagementFailure))).turnItems;
               const taskLaneGrant = laneRequestRecords.find(
                 (item) =>
                   item.type === "lane_request" &&
@@ -3131,7 +3146,7 @@ const make = Effect.gen(function* () {
               );
               if (
                 !isRetryOfAcceptedCreation &&
-                !isLaneAllowed(parentProject, threadAllowedLanes(parent.thread), targetLane) &&
+                !laneAllowed &&
                 taskLaneGrant?.type !== "lane_request"
               ) {
                 return yield* failure(
