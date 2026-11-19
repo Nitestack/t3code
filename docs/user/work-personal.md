@@ -73,6 +73,25 @@ profile's providers you see.
 The [Usage page](./aix-budgets.md) counts Work projects' usage under Work, and personal usage under
 Personal.
 
+## Keys and approvals
+
+A Work project has a **Work key**, the [aix profile](./aix-profiles.md) its agents use by default.
+Set it in **Project settings → Work key**.
+
+Agents can use other keys too, but only when you allow it:
+
+- **Sending on another key.** If you send a message with a model from a different key, T3 Code asks
+  first. Confirm to send, and that key joins the thread. Cancel keeps your message as it is.
+- **An agent asking for a key.** When an agent wants to run work on another key, you decide on its
+  card. **Deny** refuses it. **Allow this task** covers that one run. **Allow for this thread** covers
+  the thread from then on, and you can revoke it from the card.
+- **Allowing keys up front.** For an unattended run, approve keys before it starts. Open the model
+  picker in the thread, where the keys the thread's agents may use are listed. Use **Allow another
+  key…** to add one, and **Remove** to take it back.
+
+The key list appears once a thread has sent its first message. Before that, a key is allowed when you
+send with it and confirm.
+
 ## What the scope filters
 
 The scope filters:
