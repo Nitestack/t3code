@@ -1,10 +1,12 @@
 import { OrchestratorMcpFailure } from "@t3tools/contracts";
 import { OrchestratorToolkit } from "./tools.ts";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 
 import * as PeerForwarding from "../../../peer/PeerForwarding.ts";
 import * as PeerLinkRequests from "../../../peer/PeerLinkRequests.ts";
 import * as PeerLinks from "../../../peer/PeerLinks.ts";
+import * as ModelLaneRequests from "../../../orchestration-v2/ModelLaneRequests.ts";
 import * as RemoteDelegation from "../../../peer/RemoteDelegation.ts";
 import { readCaller } from "../../threadAccess.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
@@ -141,6 +143,19 @@ const handlers = {
       const scope = yield* McpInvocationContext.McpInvocationContext;
       const service = yield* OrchestratorMcpService.OrchestratorMcpService;
       return yield* service.requestSecret(scope, input);
+    }),
+  ),
+  request_model_lane: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* McpInvocationContext.McpInvocationContext;
+      const requests = yield* Effect.serviceOption(ModelLaneRequests.ModelLaneRequests);
+      if (Option.isNone(requests)) {
+        return yield* new OrchestratorMcpFailure({
+          code: "orchestration_error",
+          message: "Model lane requests are unavailable in this environment.",
+        });
+      }
+      return yield* requests.value.request(scope, input);
     }),
   ),
   create_threads: McpToolAccess.actsAsCaller((input) =>

@@ -7,6 +7,7 @@ import {
   ProjectId,
   ProjectScript,
   ProjectScope,
+  TrimmedNonEmptyString,
   ThreadEnvMode,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -33,6 +34,7 @@ export class ProjectStoreV2Error extends Schema.TaggedError<ProjectStoreV2Error>
 export const ProjectRow = Schema.Struct({
   projectId: ProjectId,
   scope: ProjectScope,
+  homeAixProfile: Schema.NullOr(TrimmedNonEmptyString),
   title: Schema.String,
   hasCustomTitle: Schema.Boolean,
   workspaceRoot: Schema.String,
@@ -63,6 +65,7 @@ function toShell(row: ProjectRow): OrchestrationProjectShell {
   return {
     id: row.projectId,
     scope: row.scope,
+    ...(row.homeAixProfile === null ? {} : { homeAixProfile: row.homeAixProfile }),
     title: row.title,
     hasCustomTitle: row.hasCustomTitle,
     workspaceRoot: row.workspaceRoot,
@@ -123,6 +126,7 @@ export const make = Effect.gen(function* () {
       SELECT
         project_id AS "projectId",
         scope,
+        home_aix_profile AS "homeAixProfile",
         title,
         has_custom_title AS "hasCustomTitle",
         workspace_root AS "workspaceRoot",
@@ -157,6 +161,7 @@ export const make = Effect.gen(function* () {
           INSERT INTO projection_projects (
             project_id,
             scope,
+            home_aix_profile,
             title,
             has_custom_title,
             workspace_root,
@@ -175,6 +180,7 @@ export const make = Effect.gen(function* () {
           VALUES (
             ${encoded.projectId},
             ${encoded.scope},
+            ${encoded.homeAixProfile},
             ${encoded.title},
             ${encoded.hasCustomTitle},
             ${encoded.workspaceRoot},
@@ -200,6 +206,7 @@ export const make = Effect.gen(function* () {
             has_custom_title = MAX(projection_projects.has_custom_title, excluded.has_custom_title),
             workspace_root = excluded.workspace_root,
             scope = excluded.scope,
+            home_aix_profile = excluded.home_aix_profile,
             default_model_selection_json = excluded.default_model_selection_json,
             default_thread_env_mode = excluded.default_thread_env_mode,
             auto_pull = excluded.auto_pull,
@@ -249,6 +256,7 @@ export const make = Effect.gen(function* () {
         return yield* upsertRow({
           projectId: payload.projectId,
           scope: payload.scope ?? "personal",
+          homeAixProfile: payload.homeAixProfile ?? null,
           title: payload.title,
           hasCustomTitle: false,
           workspaceRoot: payload.workspaceRoot,
@@ -281,6 +289,7 @@ export const make = Effect.gen(function* () {
         ...(payload.title === undefined ? {} : { title: payload.title, hasCustomTitle: true }),
         ...(payload.workspaceRoot === undefined ? {} : { workspaceRoot: payload.workspaceRoot }),
         ...(payload.scope === undefined ? {} : { scope: payload.scope }),
+        ...(payload.homeAixProfile === undefined ? {} : { homeAixProfile: payload.homeAixProfile }),
         ...(payload.defaultModelSelection === undefined
           ? {}
           : { defaultModelSelection: payload.defaultModelSelection }),

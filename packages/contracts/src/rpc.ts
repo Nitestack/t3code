@@ -26,6 +26,7 @@ import {
   PeerLinkRequestError,
   PeerLinkSummary,
 } from "./peerLink.ts";
+import { ModelLaneRequestAnswerInput, ModelLaneRequestError } from "./modelLaneRequest.ts";
 import {
   ChatGptReconnectProfileInput,
   ChatGptReconnectProfile,
@@ -523,6 +524,7 @@ export const WS_METHODS = {
   peerLinksLink: "peerLinks.link",
   peerLinksUnlink: "peerLinks.unlink",
   peerLinksAnswerRequest: "peerLinks.answerRequest",
+  modelLaneRequestAnswer: "modelLaneRequests.answer",
   serverGetSettings: "server.getSettings",
   serverUpdateSettings: "server.updateSettings",
   serverDiscoverSourceControl: "server.discoverSourceControl",
@@ -863,6 +865,11 @@ const WsPeerLinksUnlinkRpc = Rpc.make(WS_METHODS.peerLinksUnlink, {
 const WsPeerLinksAnswerRequestRpc = Rpc.make(WS_METHODS.peerLinksAnswerRequest, {
   payload: PeerLinkRequestAnswerInput,
   error: Schema.Union([PeerLinkRequestError, EnvironmentAuthorizationError]),
+});
+
+const WsModelLaneRequestAnswerRpc = Rpc.make(WS_METHODS.modelLaneRequestAnswer, {
+  payload: ModelLaneRequestAnswerInput,
+  error: Schema.Union([ModelLaneRequestError, EnvironmentAuthorizationError]),
 });
 
 // No in-tree caller; installed Swift TestFlight builds still request it.
@@ -2147,6 +2154,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsPeerLinksLinkRpc,
   WsPeerLinksUnlinkRpc,
   WsPeerLinksAnswerRequestRpc,
+  WsModelLaneRequestAnswerRpc,
   WsServerDiscoverSourceControlRpc,
   WsServerCheckSecretSourceRpc,
   WsServerSearchAcpRegistryRpc,

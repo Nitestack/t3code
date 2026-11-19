@@ -114,6 +114,12 @@ import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import { isSnoozed } from "../orchestration-v2/ThreadSettlementService.ts";
 import { userFacingDispatchErrorMessage } from "../orchestration-v2/UserFacingErrors.ts";
+import {
+  allowedLanesForProject,
+  isLaneAllowed,
+  laneOfInstance,
+  projectHomeLane,
+} from "@t3tools/shared/modelLanes";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
@@ -269,6 +275,18 @@ function threadManagementFailure(error: unknown): OrchestratorMcpFailure {
     case "ThreadManagementProviderInstanceDisabledError":
       return failure("invalid_request", error.message);
   }
+}
+
+function dispatchMcpFailure(error: unknown, prefix: string): OrchestratorMcpFailure {
+  const message = userFacingDispatchErrorMessage(error) ?? errorMessage(error);
+  const laneMarker = "model_lane_not_allowed: ";
+  const laneDenied = message.indexOf(laneMarker);
+  return laneDenied < 0
+    ? failure("orchestration_error", `${prefix}${message}`)
+    : failure(
+        "model_lane_not_allowed",
+        `${prefix}${message.slice(laneDenied + laneMarker.length)}`,
+      );
 }
 
 // Without a reason, a Stop reads as the user's (see RunExecutionService.USER_STOP_REASON).
@@ -1127,6 +1145,8 @@ function turnItemText(item: OrchestrationV2TurnItem): string | null {
       return item.linkStatus === "linked"
         ? `Linked ${item.linkedLabel ?? item.url ?? "an environment"} (${item.linkedAccess}).`
         : `Asked the user to link ${item.url ?? "an environment"}: ${item.linkStatus}.`;
+    case "lane_request":
+      return `Asked the user for lane ${item.lane} (${item.providerLabel}): ${item.laneStatus}.`;
     case "subagent":
       return item.result ?? item.progress ?? item.prompt;
     case "dynamic_tool":
@@ -2558,6 +2578,8 @@ const make = Effect.gen(function* () {
       const settings = yield* serverSettings.getSettings.pipe(
         Effect.mapError(() => failure("orchestration_error", "Unable to read server settings.")),
       );
+      const parentProject =
+        parent === undefined ? undefined : yield* requireProject(parent.thread.projectId);
       const inherited = parent?.thread.modelSelection;
       const searchTerms = input.search?.toLowerCase().split(/\s+/).filter(Boolean) ?? [];
       return {
@@ -2574,55 +2596,64 @@ const make = Effect.gen(function* () {
           ) ?? [],
         runtimeMode: limits.runtimeMode,
         interactionMode: limits.interactionMode,
-        providers: providers.map((provider) => {
-          // Snapshots list instances any project enables; delegate_task checks the caller's project.
-          const enabledForCaller =
-            parent === undefined ||
-            resolveProjectProviderInstanceEnabled(
-              settings,
-              parent.thread.projectId,
-              provider.instanceId,
+        providers: providers
+          .map((provider) => {
+            const lane = laneOfInstance(provider);
+            const needsApproval =
+              parent !== undefined &&
+              parentProject !== undefined &&
+              !isLaneAllowed(parentProject, parent.thread.allowedLanes, lane);
+            // Snapshots list instances any project enables; delegate_task checks the caller's project.
+            const enabledForCaller =
+              parent === undefined ||
+              resolveProjectProviderInstanceEnabled(
+                settings,
+                parent.thread.projectId,
+                provider.instanceId,
+              );
+            const constraints = providerConstraints(
+              enabledForCaller ? provider : { ...provider, enabled: false },
+              orchestrationCapableInstanceIds.has(provider.instanceId),
             );
-          const constraints = providerConstraints(
-            enabledForCaller ? provider : { ...provider, enabled: false },
-            orchestrationCapableInstanceIds.has(provider.instanceId),
-          );
-          const { listed, omitted } = listCapabilityModels({
-            provider,
-            preferences: settings.providerModelPreferences?.[provider.instanceId],
-            searchTerms,
-            isPinned: (model) =>
-              model.isCustom ||
-              (inherited?.instanceId === provider.instanceId && inherited.model === model.slug) ||
-              (settings.favorites ?? []).some(
-                (favorite) =>
-                  favorite.provider === provider.instanceId && favorite.model === model.slug,
-              ),
-          });
-          return {
-            providerInstanceId: provider.instanceId,
-            driverKind: provider.driver,
-            displayName: provider.displayName ?? null,
-            models: listed.map((model) => {
-              const options = model.capabilities?.optionDescriptors ?? [];
-              return {
-                id: model.slug,
-                ...(model.name.toLowerCase() === model.slug.toLowerCase()
-                  ? {}
-                  : { label: model.name }),
-                ...(options.length === 0 ? {} : { options: options.map(capabilityModelOption) }),
-              };
-            }),
-            ...(omitted === 0 ? {} : { omittedModels: omitted }),
-            ...(provider.supportedRuntimeModes === undefined ||
-            provider.supportedRuntimeModes.length === 0
-              ? {}
-              : { runtimeModes: [...provider.supportedRuntimeModes] }),
-            canRunChildTask: constraints.length === 0,
-            canRunCrossProviderChildTask: constraints.length === 0,
-            constraints: [...constraints],
-          };
-        }),
+            const { listed, omitted } = listCapabilityModels({
+              provider,
+              preferences: settings.providerModelPreferences?.[provider.instanceId],
+              searchTerms,
+              isPinned: (model) =>
+                model.isCustom ||
+                (inherited?.instanceId === provider.instanceId && inherited.model === model.slug) ||
+                (settings.favorites ?? []).some(
+                  (favorite) =>
+                    favorite.provider === provider.instanceId && favorite.model === model.slug,
+                ),
+            });
+            return {
+              providerInstanceId: provider.instanceId,
+              lane,
+              needsApproval,
+              driverKind: provider.driver,
+              displayName: provider.displayName ?? null,
+              models: listed.map((model) => {
+                const options = model.capabilities?.optionDescriptors ?? [];
+                return {
+                  id: model.slug,
+                  ...(model.name.toLowerCase() === model.slug.toLowerCase()
+                    ? {}
+                    : { label: model.name }),
+                  ...(options.length === 0 ? {} : { options: options.map(capabilityModelOption) }),
+                };
+              }),
+              ...(omitted === 0 ? {} : { omittedModels: omitted }),
+              ...(provider.supportedRuntimeModes === undefined ||
+              provider.supportedRuntimeModes.length === 0
+                ? {}
+                : { runtimeModes: [...provider.supportedRuntimeModes] }),
+              canRunChildTask: constraints.length === 0,
+              canRunCrossProviderChildTask: constraints.length === 0,
+              constraints: [...constraints],
+            };
+          })
+          .toSorted((left, right) => Number(left.needsApproval) - Number(right.needsApproval)),
         features: {
           appOwnedSubagents: true,
           asyncPolling: true,
@@ -2631,6 +2662,7 @@ const make = Effect.gen(function* () {
           threadManagement: true,
           incrementalThreadRead: true,
           scheduledTasks: true,
+          modelLanes: true,
           maxBatchThreads: 20,
         },
       };
@@ -2689,6 +2721,17 @@ const make = Effect.gen(function* () {
         providers,
         skipProjectEnablementFilter: isRetryOfAcceptedDelegation,
       });
+      const project = yield* requireProject(parent.thread.projectId);
+      const targetLane = laneOfInstance(
+        providers.find((provider) => provider.instanceId === target.modelSelection.instanceId) ??
+          {},
+      );
+      if (targetLane !== projectHomeLane(project) && input.crossingReason === undefined) {
+        return yield* failure(
+          "invalid_request",
+          `Pass crossingReason to explain why this task needs lane ${targetLane}; it differs from this project's home lane.`,
+        );
+      }
       const runtimeMode = yield* resolveRuntimeMode(
         parent.thread.runtimeMode,
         input.runtimeMode,
@@ -2741,6 +2784,7 @@ const make = Effect.gen(function* () {
           parentRunId: parentRun.id,
           parentNodeId: parentRun.rootNodeId,
           task: taskPrompt(input),
+          ...(input.crossingReason === undefined ? {} : { crossingReason: input.crossingReason }),
           ...(input.title === undefined ? {} : { title: input.title }),
           modelSelection: target.modelSelection,
           runtimeMode,
@@ -2755,10 +2799,7 @@ const make = Effect.gen(function* () {
           Effect.mapError((error) =>
             error._tag === "ThreadManagementProviderInstanceDisabledError"
               ? threadManagementFailure(error)
-              : failure(
-                  "orchestration_error",
-                  `Unable to create delegated task: ${userFacingDispatchErrorMessage(error) ?? errorMessage(error)}`,
-                ),
+              : dispatchMcpFailure(error, "Unable to create delegated task: "),
           ),
         );
       const taskEvent = result.storedEvents.find(
@@ -3028,6 +3069,7 @@ const make = Effect.gen(function* () {
         }
         const parentNodeId = parentRun.rootNodeId;
         const providers = yield* loadProviders;
+        const parentProject = yield* requireProject(parent.thread.projectId);
         const key = yield* requestKey(input.clientRequestId);
         const created = yield* Effect.forEach(
           input.threads,
@@ -3062,6 +3104,45 @@ const make = Effect.gen(function* () {
                 providers,
                 skipProjectEnablementFilter: isRetryOfAcceptedCreation,
               });
+              const targetLane = laneOfInstance(
+                providers.find(
+                  (provider) => provider.instanceId === target.modelSelection.instanceId,
+                ) ?? {},
+              );
+              const inheritedLanes = allowedLanesForProject(
+                parentProject,
+                parent.thread.allowedLanes,
+              );
+              const laneRequestRecords = isRetryOfAcceptedCreation
+                ? []
+                : (yield* threadManagement
+                    .getThreadRecords(parent.thread.id, ["turnItems"], {
+                      turnItemTypes: ["lane_request"],
+                      messageRoles: [],
+                    })
+                    .pipe(Effect.mapError(threadManagementFailure))).turnItems;
+              const taskLaneGrant = laneRequestRecords.find(
+                (item) =>
+                  item.type === "lane_request" &&
+                  item.lane === targetLane &&
+                  item.laneStatus === "allowed_task" &&
+                  item.grantConsumedAt === undefined,
+              );
+              if (
+                !isRetryOfAcceptedCreation &&
+                !isLaneAllowed(parentProject, parent.thread.allowedLanes, targetLane) &&
+                taskLaneGrant?.type !== "lane_request"
+              ) {
+                return yield* failure(
+                  "model_lane_not_allowed",
+                  `Lane ${targetLane} is not allowed for this thread. Allowed providers: ${
+                    providers
+                      .filter((provider) => inheritedLanes.includes(laneOfInstance(provider)))
+                      .map((provider) => provider.instanceId)
+                      .join(", ") || "none"
+                  }. Call request_model_lane to ask the user.`,
+                );
+              }
               const runtimeMode = yield* resolveRuntimeMode(
                 parent.thread.runtimeMode,
                 request.runtimeMode,
@@ -3101,6 +3182,7 @@ const make = Effect.gen(function* () {
                   projectId: parent.thread.projectId,
                   title,
                   modelSelection: target.modelSelection,
+                  allowedLanes: [...new Set([...inheritedLanes, targetLane])],
                   runtimeMode,
                   interactionMode,
                   branch: parent.thread.branch,
@@ -3112,10 +3194,7 @@ const make = Effect.gen(function* () {
                 })
                 .pipe(
                   Effect.mapError((error) =>
-                    failure(
-                      "orchestration_error",
-                      `Unable to create thread ${index + 1}: ${userFacingDispatchErrorMessage(error) ?? errorMessage(error)}`,
-                    ),
+                    dispatchMcpFailure(error, `Unable to create thread ${index + 1}: `),
                   ),
                 );
               // A receipt can appear after target resolution; use the committed thread's selection.
@@ -3147,10 +3226,7 @@ const make = Effect.gen(function* () {
                     Effect.mapError((error) =>
                       error._tag === "ThreadManagementProviderInstanceDisabledError"
                         ? threadManagementFailure(error)
-                        : failure(
-                            "orchestration_error",
-                            `Unable to start thread ${index + 1}: ${userFacingDispatchErrorMessage(error) ?? errorMessage(error)}`,
-                          ),
+                        : dispatchMcpFailure(error, `Unable to start thread ${index + 1}: `),
                     ),
                   );
               }
@@ -3179,6 +3255,27 @@ const make = Effect.gen(function* () {
                     ),
                   ),
                 );
+              if (taskLaneGrant?.type === "lane_request") {
+                yield* threadManagement
+                  .dispatch({
+                    type: "lane_request.record",
+                    commandId: CommandId.make(
+                      `model-lane-request:${taskLaneGrant.id}:consume:${threadId}`,
+                    ),
+                    threadId: parent.thread.id,
+                    runId: taskLaneGrant.runId!,
+                    nodeId: taskLaneGrant.nodeId!,
+                    turnItemId: taskLaneGrant.id,
+                    lane: taskLaneGrant.lane,
+                    providerInstanceId: taskLaneGrant.providerInstanceId,
+                    providerLabel: taskLaneGrant.providerLabel,
+                    reason: taskLaneGrant.reason,
+                    requestedFor: taskLaneGrant.requestedFor,
+                    laneStatus: "allowed_task",
+                    grantConsumedAt: yield* DateTime.now,
+                  })
+                  .pipe(Effect.mapError(threadManagementFailure));
+              }
               return {
                 threadId,
                 link: formatThreadLink(
@@ -3439,10 +3536,7 @@ const make = Effect.gen(function* () {
           Effect.mapError((error) =>
             isThreadManagementError(error)
               ? threadManagementFailure(error)
-              : failure(
-                  "orchestration_error",
-                  `Unable to send to thread ${input.threadId}: ${userFacingDispatchErrorMessage(error) ?? errorMessage(error)}`,
-                ),
+              : dispatchMcpFailure(error, `Unable to send to thread ${input.threadId}: `),
           ),
         );
       return {

@@ -161,6 +161,8 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   projectOrganization: Schema.optionalKey(Schema.Boolean),
   /** Server keeps project scope from project.create and project.update. */
   projectScope: Schema.optionalKey(Schema.Boolean),
+  /** Peer enforces model lane grants before starting agent work. */
+  modelLanes: Schema.optionalKey(Schema.Boolean),
   /** Server answers projects.listIgnoredFiles. */
   ignoredFileListing: Schema.optionalKey(Schema.Boolean),
   /** projects.listIgnoredFiles honors `query`. Older servers ignore it. */

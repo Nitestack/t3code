@@ -43,7 +43,7 @@ import {
   OrchestrationV2TurnItemStatus,
 } from "./orchestrationV2.ts";
 import { ProviderOptionSelection, ProviderOptionSelectionValue } from "./model.ts";
-import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
+import { ModelLane, ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 
 const OrchestratorMcpPrompt = TrimmedNonEmptyString.check(Schema.isMaxLength(120_000));
 const OrchestratorMcpTitle = TrimmedNonEmptyString.check(Schema.isMaxLength(512));
@@ -170,6 +170,11 @@ export type OrchestratorMcpTerminalDelegatedTaskStatus =
 
 export const OrchestratorMcpDelegateTaskInput = Schema.Struct({
   task: OrchestratorMcpPrompt,
+  crossingReason: Schema.optional(
+    TrimmedNonEmptyString.check(Schema.isMaxLength(500)).annotate({
+      description: "Why the task needs a provider lane different from this project's home lane.",
+    }),
+  ),
   target: Schema.optional(OrchestratorMcpTarget),
   title: Schema.optional(OrchestratorMcpTitle),
   role: Schema.optional(OrchestratorMcpTaskRole),
@@ -643,6 +648,8 @@ export type OrchestratorMcpModelOption = typeof OrchestratorMcpModelOption.Type;
 
 export const OrchestratorMcpProviderCapability = Schema.Struct({
   providerInstanceId: ProviderInstanceId,
+  lane: Schema.optionalKey(ModelLane),
+  needsApproval: Schema.optionalKey(Schema.Boolean),
   driverKind: ProviderDriverKind,
   displayName: Schema.NullOr(Schema.String),
   models: Schema.Array(
@@ -699,6 +706,7 @@ export const OrchestratorMcpCapabilitiesResult = Schema.Struct({
     threadManagement: Schema.Boolean,
     incrementalThreadRead: Schema.Boolean,
     scheduledTasks: Schema.Boolean,
+    modelLanes: Schema.optionalKey(Schema.Boolean),
     maxBatchThreads: Schema.Number,
   }),
 });
@@ -855,6 +863,20 @@ export const OrchestratorMcpRequestSecretResult = Schema.Union([
 ]);
 export type OrchestratorMcpRequestSecretResult = typeof OrchestratorMcpRequestSecretResult.Type;
 
+export const OrchestratorMcpRequestModelLaneInput = Schema.Struct({
+  providerInstanceId: ProviderInstanceId,
+  reason: TrimmedNonEmptyString.check(Schema.isMaxLength(500)),
+  for: Schema.Literals(["task", "thread"]),
+});
+export type OrchestratorMcpRequestModelLaneInput = typeof OrchestratorMcpRequestModelLaneInput.Type;
+
+export const OrchestratorMcpRequestModelLaneResult = Schema.Struct({
+  status: Schema.Literal("pending"),
+  turnItemId: TurnItemId,
+});
+export type OrchestratorMcpRequestModelLaneResult =
+  typeof OrchestratorMcpRequestModelLaneResult.Type;
+
 export const OrchestratorMcpEnvironmentLinkInput = Schema.Struct({
   environmentId: Schema.optional(EnvironmentId).annotate({
     description:
@@ -945,6 +967,7 @@ export class OrchestratorMcpFailure extends Schema.TaggedError<OrchestratorMcpFa
       "parent_not_active",
       "provider_unavailable",
       "model_unavailable",
+      "model_lane_not_allowed",
       "runtime_mode_escalation_denied",
       "interaction_mode_escalation_denied",
       "task_not_found",

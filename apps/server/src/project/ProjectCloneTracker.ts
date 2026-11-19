@@ -61,6 +61,7 @@ export interface ProjectCloneHooks {
     readonly workspaceRoot: string;
     readonly createdAt: string;
     readonly scope?: ProjectCloneStartInput["scope"];
+    readonly homeAixProfile?: ProjectCloneStartInput["homeAixProfile"];
   }) => Effect.Effect<void, OrchestrationDispatchCommandError | ProjectConflictError>;
   readonly onCloned: (input: {
     readonly projectId: ProjectId;
@@ -337,6 +338,9 @@ export const make = Effect.gen(function* () {
               workspaceRoot: prepared.destinationPath,
               createdAt: input.createdAt,
               ...(input.scope === undefined ? {} : { scope: input.scope }),
+              ...(input.homeAixProfile === undefined
+                ? {}
+                : { homeAixProfile: input.homeAixProfile }),
             })
             .pipe(
               Effect.as(input.projectId),

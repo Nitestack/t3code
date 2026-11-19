@@ -247,14 +247,16 @@ it.layer(layerTest)("ProjectService", (it) => {
         commandId: CommandId.make("command:scope-update:work"),
         projectId,
         scope: "work",
+        homeAixProfile: "work",
       });
 
       const updated = Option.getOrThrow(yield* service.getById(projectId));
       assert.equal(updated.scope, "work");
-      assert.equal(
-        (yield* service.snapshot).projects.find((project) => project.id === projectId)?.scope,
-        "work",
-      );
+      assert.equal(updated.homeAixProfile, "work");
+      const snapshot = yield* service.snapshot;
+      const snapshotProject = snapshot.projects.find((project) => project.id === projectId);
+      assert.equal(snapshotProject?.scope, "work");
+      assert.equal(snapshotProject?.homeAixProfile, "work");
       yield* service.delete({
         commandId: CommandId.make("command:scope-update:delete"),
         projectId,

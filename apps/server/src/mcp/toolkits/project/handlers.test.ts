@@ -1000,3 +1000,33 @@ it.effect("an update the project refuses tells the agent why", () =>
     expect(refused.at(-1)?.result).toMatchObject({ code: "invalid_request", message: detail });
   }),
 );
+
+it.effect("project MCP tools reject scope and home lane changes", () =>
+  Effect.gen(function* () {
+    const harness = clientLaunchHarness({ runtimeModeCeiling: "full-access", launched: [] });
+    const toolkit = yield* ProjectToolkit.pipe(
+      Effect.provide(
+        McpToolAccess.HandlersLayer.layer(ProjectHandlers.layer).pipe(
+          Layer.provide(harness.dependencies),
+        ),
+      ),
+    );
+    const update = yield* toolkit
+      .handle("t3_project_update", {
+        projectId: harness.projectId,
+        scope: "work",
+        homeAixProfile: "profile-1",
+      })
+      .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(harness.dependencies));
+    const create = yield* toolkit
+      .handle("t3_project_create", {
+        title: "Project",
+        workspaceRoot: "/projects/project",
+        scope: "work",
+      })
+      .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(harness.dependencies));
+
+    expect(update.at(-1)?.result).toMatchObject({ code: "invalid_request" });
+    expect(create.at(-1)?.result).toMatchObject({ code: "invalid_request" });
+  }),
+);

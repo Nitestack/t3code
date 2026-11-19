@@ -24,6 +24,7 @@ export interface ProjectCreateCommand {
   readonly title: string;
   readonly workspaceRoot: string;
   readonly scope?: ProjectScope;
+  readonly homeAixProfile?: string;
   readonly scripts?: ReadonlyArray<ProjectScript>;
 }
 
@@ -34,6 +35,7 @@ export interface ProjectMetaUpdateCommand {
   readonly title?: string;
   readonly workspaceRoot?: string;
   readonly scope?: ProjectScope;
+  readonly homeAixProfile?: string;
   readonly defaultModelSelection?: ModelSelection | null;
   readonly defaultThreadEnvMode?: ThreadEnvMode | null;
   readonly autoPull?: boolean;
@@ -163,6 +165,9 @@ export function planProjectCommand(input: {
           title: command.title,
           workspaceRoot: command.workspaceRoot,
           scope: command.scope ?? "personal",
+          ...(command.homeAixProfile === undefined
+            ? {}
+            : { homeAixProfile: command.homeAixProfile }),
           defaultModelSelection: null,
           faviconPath: null,
           projectIcon: null,
@@ -205,6 +210,9 @@ export function planProjectCommand(input: {
           ...(command.title === undefined ? {} : { title: command.title }),
           ...(command.workspaceRoot === undefined ? {} : { workspaceRoot: command.workspaceRoot }),
           ...(command.scope === undefined ? {} : { scope: command.scope }),
+          ...(command.homeAixProfile === undefined
+            ? {}
+            : { homeAixProfile: command.homeAixProfile }),
           ...(command.defaultModelSelection === undefined
             ? {}
             : { defaultModelSelection: command.defaultModelSelection }),

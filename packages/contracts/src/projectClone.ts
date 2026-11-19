@@ -52,6 +52,7 @@ export const ProjectCloneStartInput = Schema.Struct({
   title: TrimmedNonEmptyString,
   createdAt: IsoDateTime,
   scope: Schema.optional(ProjectScope),
+  homeAixProfile: Schema.optional(TrimmedNonEmptyString),
   provider: Schema.optional(SourceControlProviderKind),
   repository: Schema.optional(TrimmedNonEmptyString),
   remoteUrl: Schema.optional(TrimmedNonEmptyString),

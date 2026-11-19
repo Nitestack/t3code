@@ -47,6 +47,7 @@ import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import { forkParked } from "../serverActivation.ts";
+import { projectHomeLane } from "@t3tools/shared/modelLanes";
 import * as PeerForwarding from "./PeerForwarding.ts";
 import * as PeerLinks from "./PeerLinks.ts";
 
@@ -232,8 +233,9 @@ const make = Effect.gen(function* () {
       readonly providerInstanceId: ProviderInstanceId | undefined;
       readonly inheritedInstanceId: ProviderInstanceId;
     },
+    capabilities: Tool.Success<typeof RemoteCapabilitiesTool>,
   ) {
-    const { providers } = yield* forwarding.call(scope, RemoteCapabilitiesTool, environmentId, {});
+    const { providers } = capabilities;
     if (requested.providerInstanceId !== undefined) {
       const named = providers.find(
         (provider) => provider.providerInstanceId === requested.providerInstanceId,
@@ -300,14 +302,57 @@ const make = Effect.gen(function* () {
       // The provider and model inherit as they do for a task here. Another
       // provider there has no model to inherit, so the caller names one.
       const inherited = parent.thread.modelSelection;
-      const instanceId =
-        target.driverKind === undefined
-          ? (target.providerInstanceId ?? inherited.instanceId)
-          : yield* resolveRemoteInstance(scope, target.environmentId, {
-              driverKind: target.driverKind,
-              providerInstanceId: target.providerInstanceId,
-              inheritedInstanceId: inherited.instanceId,
-            });
+      let capabilities: Tool.Success<typeof RemoteCapabilitiesTool> | undefined;
+      let instanceId: ProviderInstanceId;
+      if (target.driverKind === undefined) {
+        instanceId = target.providerInstanceId ?? inherited.instanceId;
+        if (instanceId.startsWith("aix-")) {
+          capabilities = yield* forwarding.call(
+            scope,
+            RemoteCapabilitiesTool,
+            target.environmentId,
+            {},
+          );
+        }
+      } else {
+        capabilities = yield* forwarding.call(
+          scope,
+          RemoteCapabilitiesTool,
+          target.environmentId,
+          {},
+        );
+        instanceId = yield* resolveRemoteInstance(
+          scope,
+          target.environmentId,
+          {
+            driverKind: target.driverKind,
+            providerInstanceId: target.providerInstanceId,
+            inheritedInstanceId: inherited.instanceId,
+          },
+          capabilities,
+        );
+      }
+      const provider = capabilities?.providers.find(
+        (candidate) => candidate.providerInstanceId === instanceId,
+      );
+      const targetLane =
+        provider?.lane ?? (instanceId.startsWith("aix-") ? "aix:legacy" : "personal");
+      if (capabilities?.features.modelLanes !== true && targetLane.startsWith("aix:")) {
+        return yield* new OrchestratorMcpFailure({
+          code: "model_lane_not_allowed",
+          message: `Linked environment ${target.environmentId} does not advertise model lane enforcement, so AIX provider ${instanceId} cannot be selected there.`,
+        });
+      }
+      const sourceProject = yield* projects
+        .getById(parent.thread.projectId)
+        .pipe(Effect.orElseSucceed(() => Option.none()));
+      const homeLane = Option.isSome(sourceProject) ? projectHomeLane(sourceProject.value) : null;
+      if (targetLane !== homeLane && input.crossingReason === undefined) {
+        return yield* new OrchestratorMcpFailure({
+          code: "invalid_request",
+          message: `Pass crossingReason to explain why this task needs lane ${targetLane}; it differs from this project's home lane.`,
+        });
+      }
       const model =
         target.model ?? (instanceId === inherited.instanceId ? inherited.model : undefined);
       if (model === undefined) {
@@ -387,6 +432,7 @@ const make = Effect.gen(function* () {
           parentNodeId,
           task,
           ...(input.title === undefined ? {} : { title: input.title }),
+          ...(input.crossingReason === undefined ? {} : { crossingReason: input.crossingReason }),
           // The driver runs there; this side only labels the task with it.
           driver: ProviderDriverKind.make("remote"),
           modelSelection: launched.modelSelection,

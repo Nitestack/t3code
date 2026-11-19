@@ -274,6 +274,7 @@ export const make = Effect.gen(function* () {
       projectCloneTracking: true,
       projectOrganization: true,
       projectScope: true,
+      modelLanes: true,
       ignoredFileListing: true,
       ignoredFileSearch: true,
       triage: true,

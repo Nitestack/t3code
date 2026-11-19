@@ -80,6 +80,7 @@ function makeHarness(
           ? Option.some({
               projectId,
               scope: "personal",
+              homeAixProfile: null,
               title: "Project",
               workspaceRoot: "/repo",
               defaultModelSelection: modelSelection,

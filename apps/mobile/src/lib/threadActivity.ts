@@ -589,6 +589,8 @@ function itemIcon(item: OrchestrationV2TurnItem): ThreadFeedActivity["icon"] {
       return "lock";
     case "link_request":
       return "globe";
+    case "lane_request":
+      return "lock";
   }
 }
 
@@ -650,6 +652,8 @@ function itemSummary(
       return item.label;
     case "link_request":
       return `Link ${linkRequestTargetName(item)}`;
+    case "lane_request":
+      return `Request ${item.lane} provider access`;
     case "dynamic_tool": {
       const classified = classifyToolActivity({
         itemType: "dynamic_tool_call",
@@ -701,6 +705,8 @@ function itemPreview(item: OrchestrationV2TurnItem): string | null {
       return item.message || null;
     case "error":
       return item.failure.message;
+    case "lane_request":
+      return item.reason;
     case "compaction":
     case "handoff":
       return item.summary ?? null;

@@ -63,6 +63,10 @@
       "types": "./src/model.ts",
       "import": "./src/model.ts"
     },
+    "./modelLanes": {
+      "types": "./src/modelLanes.ts",
+      "import": "./src/modelLanes.ts"
+    },
     "./advertisedEndpoint": {
       "types": "./src/advertisedEndpoint.ts",
       "import": "./src/advertisedEndpoint.ts"

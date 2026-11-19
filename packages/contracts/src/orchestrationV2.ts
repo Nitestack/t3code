@@ -77,7 +77,7 @@ import {
   UserInputAttachmentAnswerPayload,
   RuntimeMode,
 } from "./providerPolicy.ts";
-import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
+import { ModelLane, ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import { OrchestrationProjectShell } from "./orchestrationProject.ts";
 import {
   TurnTokenUsage,
@@ -470,6 +470,7 @@ export const OrchestrationV2AppThread = Schema.Struct({
   title: TrimmedNonEmptyString,
   providerInstanceId: ProviderInstanceId,
   modelSelection: ModelSelection,
+  allowedLanes: Schema.optional(Schema.Array(ModelLane)),
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
   branch: Schema.NullOr(TrimmedNonEmptyString),
@@ -935,6 +936,7 @@ export const OrchestrationV2Subagent = Schema.Struct({
   title: Schema.NullOr(Schema.String),
   model: Schema.NullOr(Schema.String),
   modelSelection: Schema.optional(ModelSelection),
+  crossingReason: Schema.optional(TrimmedNonEmptyString),
   executedModel: Schema.optional(Schema.String),
   completionWake: Schema.optional(Schema.Literals(["always", "settled_only"])),
   completionDelivery: Schema.optional(OrchestrationV2DelegatedCompletionTaskDelivery),
@@ -1701,6 +1703,27 @@ const OrchestrationV2LinkRequestFields = {
   failure: Schema.optional(Schema.String),
 } as const;
 
+export const OrchestrationV2LaneRequestStatus = Schema.Literals([
+  "pending",
+  "allowed_task",
+  "allowed_thread",
+  "denied",
+  "cancelled",
+]);
+export type OrchestrationV2LaneRequestStatus = typeof OrchestrationV2LaneRequestStatus.Type;
+
+const OrchestrationV2LaneRequestFields = {
+  type: Schema.Literal("lane_request"),
+  lane: ModelLane,
+  providerInstanceId: ProviderInstanceId,
+  providerLabel: TrimmedNonEmptyString,
+  reason: TrimmedNonEmptyString,
+  requestedFor: Schema.Literals(["task", "thread"]),
+  laneStatus: OrchestrationV2LaneRequestStatus,
+  /** Set when a single-use task grant has authorized a child launch. */
+  grantConsumedAt: Schema.optional(Schema.DateTimeUtc),
+} as const;
+
 export const OrchestrationV2TurnItem = Schema.Union([
   Schema.Struct({
     ...OrchestrationV2TurnItemBaseFields,
@@ -1906,6 +1929,10 @@ export const OrchestrationV2TurnItem = Schema.Union([
   }),
   Schema.Struct({
     ...OrchestrationV2TurnItemBaseFields,
+    ...OrchestrationV2LaneRequestFields,
+  }),
+  Schema.Struct({
+    ...OrchestrationV2TurnItemBaseFields,
     type: Schema.Literal("subagent"),
     subagentId: NodeId,
     origin: Schema.Literals(["provider_native", "app_owned"]),
@@ -1913,6 +1940,7 @@ export const OrchestrationV2TurnItem = Schema.Union([
     providerInstanceId: ProviderInstanceId,
     childThreadId: Schema.NullOr(ThreadId),
     remoteChild: Schema.optional(OrchestrationV2RemoteTaskChild),
+    crossingReason: Schema.optional(TrimmedNonEmptyString),
     prompt: Schema.String,
     progress: Schema.optional(Schema.String),
     result: Schema.NullOr(Schema.String),
@@ -2198,6 +2226,7 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   title: Schema.String,
   providerInstanceId: ProviderInstanceId,
   modelSelection: ModelSelection,
+  allowedLanes: OrchestrationV2AppThread.fields.allowedLanes,
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
   branch: Schema.NullOr(TrimmedNonEmptyString),
@@ -2787,6 +2816,11 @@ export const OrchestrationV2TurnItemJson = Schema.Union([
   }),
   Schema.Struct({
     ...OrchestrationV2TurnItemJsonBaseFields,
+    ...OrchestrationV2LaneRequestFields,
+    grantConsumedAt: Schema.optional(Schema.DateTimeUtcFromString),
+  }),
+  Schema.Struct({
+    ...OrchestrationV2TurnItemJsonBaseFields,
     type: Schema.Literal("subagent"),
     subagentId: NodeId,
     origin: Schema.Literals(["provider_native", "app_owned"]),
@@ -2794,6 +2828,7 @@ export const OrchestrationV2TurnItemJson = Schema.Union([
     providerInstanceId: ProviderInstanceId,
     childThreadId: Schema.NullOr(ThreadId),
     remoteChild: Schema.optional(OrchestrationV2RemoteTaskChild),
+    crossingReason: Schema.optional(TrimmedNonEmptyString),
     prompt: Schema.String,
     progress: Schema.optional(Schema.String),
     result: Schema.NullOr(Schema.String),
@@ -3092,6 +3127,7 @@ export const OrchestrationV2Command = Schema.Union([
     projectId: ProjectId,
     title: TrimmedNonEmptyString,
     modelSelection: ModelSelection,
+    allowedLanes: Schema.optional(Schema.Array(ModelLane)),
     runtimeMode: RuntimeMode,
     interactionMode: ProviderInteractionMode,
     branch: Schema.NullOr(TrimmedNonEmptyString),
@@ -3245,6 +3281,7 @@ export const OrchestrationV2Command = Schema.Union([
     type: Schema.Literal("thread.metadata.update"),
     commandId: CommandId,
     threadId: ThreadId,
+    allowedLanes: Schema.optional(Schema.Array(ModelLane)),
     title: Schema.optional(TrimmedNonEmptyString),
     regenerateTitle: Schema.optional(Schema.Boolean),
     branch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
@@ -3531,6 +3568,7 @@ export const OrchestrationV2Command = Schema.Union([
     parentRunId: RunId,
     parentNodeId: NodeId,
     task: TrimmedNonEmptyString,
+    crossingReason: Schema.optional(TrimmedNonEmptyString),
     title: Schema.optional(TrimmedNonEmptyString),
     modelSelection: ModelSelection,
     runtimeMode: RuntimeMode,
@@ -3675,6 +3713,7 @@ const OrchestrationV2InternalCommand = Schema.Union([
     parentNodeId: NodeId,
     task: TrimmedNonEmptyString,
     title: Schema.optional(TrimmedNonEmptyString),
+    crossingReason: Schema.optional(TrimmedNonEmptyString),
     driver: ProviderDriverKind,
     modelSelection: ModelSelection,
     remoteChild: OrchestrationV2RemoteTaskChild,
@@ -3811,6 +3850,28 @@ const OrchestrationV2InternalCommand = Schema.Union([
       }),
     ),
   }),
+  Schema.Struct({
+    type: Schema.Literal("lane_request.record"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    runId: RunId,
+    nodeId: NodeId,
+    turnItemId: TurnItemId,
+    lane: ModelLane,
+    providerInstanceId: ProviderInstanceId,
+    providerLabel: TrimmedNonEmptyString,
+    reason: TrimmedNonEmptyString,
+    requestedFor: Schema.Literals(["task", "thread"]),
+    laneStatus: OrchestrationV2LaneRequestStatus,
+    grantConsumedAt: Schema.optional(Schema.DateTimeUtc),
+    wake: Schema.optional(
+      Schema.Struct({
+        messageId: MessageId,
+        text: Schema.String,
+        notification: OrchestrationV2Notification,
+      }),
+    ),
+  }),
 ]);
 export type OrchestrationV2InternalCommand = typeof OrchestrationV2InternalCommand.Type;
 
@@ -3896,6 +3957,7 @@ export const OrchestrationV2ThreadLaunchInput = Schema.Struct({
   title: TrimmedNonEmptyString,
   generateTitle: Schema.optional(Schema.Boolean),
   modelSelection: ModelSelection,
+  allowedLanes: Schema.optional(Schema.Array(ModelLane)),
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
   workspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy,

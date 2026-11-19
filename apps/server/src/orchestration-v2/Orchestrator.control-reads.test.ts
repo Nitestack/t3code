@@ -17,6 +17,7 @@ import {
   RunAttemptId,
   RunId,
   RuntimeRequestId,
+  ScheduledTaskId,
   ThreadId,
   TurnItemId,
 } from "@t3tools/contracts";
@@ -64,6 +65,9 @@ const adapter = {
   planSelectionTransition: () => Effect.succeed({ type: "apply_on_next_turn" as const }),
   openSession: () => Effect.die("No provider process needed for metadata controls"),
 } as ProviderAdapter.ProviderAdapterV2["Service"];
+const aixInstanceId = ProviderInstanceId.make("aix-codex-work");
+const aixModelSelection = { instanceId: aixInstanceId, model: modelSelection.model };
+const aixAdapter = { ...adapter, instanceId: aixInstanceId };
 const layerDatabase = SqlitePersistence.layerMemory;
 const layerTest = Layer.mergeAll(
   layerDatabase,
@@ -73,6 +77,27 @@ const layerTest = Layer.mergeAll(
     { name: "control-reads" },
     ProviderAdapterRegistry.layerFromAdapters([adapter]),
     { databaseLayer: layerDatabase, runEffectWorker: false },
+  ),
+);
+const layerModelLaneTest = Layer.mergeAll(
+  layerDatabase,
+  ProjectionStore.layer.pipe(Layer.provide(layerDatabase)),
+  EffectOutbox.layer.pipe(Layer.provide(layerDatabase)),
+  ProviderReplayHarness.layerWithRegistry(
+    { name: "control-reads-model-lanes" },
+    ProviderAdapterRegistry.layerFromAdapters([adapter, aixAdapter]),
+    {
+      databaseLayer: layerDatabase,
+      runEffectWorker: false,
+      serverSettingsOverrides: {
+        providerInstances: {
+          [aixInstanceId]: {
+            driver: ProviderDriverKind.make("codex"),
+            config: { aixProfile: "work" },
+          },
+        },
+      },
+    },
   ),
 );
 
@@ -2959,4 +2984,238 @@ it.effect(
       }
       assert.equal(yield* captureReads, quietParent);
     }).pipe(Effect.provide(layerTest)),
+);
+
+it.effect(
+  "enforces model lanes for agent and scheduled sends and seeds an approved child lane",
+  () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      const threadId = ThreadId.make("thread:model-lane-guard");
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("create-model-lane-guard"),
+        threadId,
+        projectId: ProjectId.make("project:model-lane-guard"),
+        title: "Model lane guard",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        createdBy: "user",
+        creationSource: "web",
+      });
+      assert.deepEqual((yield* projections.getThread(threadId)).allowedLanes, ["personal"]);
+
+      const assertLaneDenied = (error: Orchestrator.OrchestratorV2Error) => {
+        assert.equal(error._tag, "OrchestratorDispatchError");
+        const message =
+          error._tag === "OrchestratorDispatchError" && error.cause instanceof Error
+            ? error.cause.message
+            : String(error);
+        assert.include(message, "model_lane_not_allowed");
+        assert.include(message, "aix:work");
+      };
+      const agentSend = yield* orchestrator
+        .dispatch({
+          type: "message.dispatch",
+          commandId: CommandId.make("agent-send-model-lane-guard"),
+          threadId,
+          messageId: MessageId.make("agent-send-model-lane-guard"),
+          text: "Use the AIX provider",
+          modelSelection: aixModelSelection,
+          attachments: [],
+          dispatchMode: { type: "defer_start" },
+          createdBy: "agent",
+          creationSource: "mcp",
+        })
+        .pipe(Effect.flip);
+      assertLaneDenied(agentSend);
+      const scheduledSend = yield* orchestrator
+        .dispatch({
+          type: "message.dispatch",
+          commandId: CommandId.make("scheduled-send-model-lane-guard"),
+          threadId,
+          messageId: MessageId.make("scheduled-send-model-lane-guard"),
+          scheduledTaskId: ScheduledTaskId.make("scheduled:model-lane-guard"),
+          text: "Use the AIX provider",
+          modelSelection: aixModelSelection,
+          attachments: [],
+          dispatchMode: { type: "defer_start" },
+          createdBy: "system",
+          creationSource: "server",
+        })
+        .pipe(Effect.flip);
+      assertLaneDenied(scheduledSend);
+
+      yield* orchestrator.dispatch({
+        type: "message.dispatch",
+        commandId: CommandId.make("start-model-lane-parent"),
+        threadId,
+        messageId: MessageId.make("start-model-lane-parent"),
+        text: "Start the parent run",
+        attachments: [],
+        dispatchMode: { type: "start_immediately" },
+        createdBy: "user",
+        creationSource: "web",
+      });
+      const parentRun = (yield* projections.getThreadRecords(threadId, ["runs"])).runs[0]!;
+      const recordLaneRequest = (
+        turnItemId: TurnItemId,
+        requestedFor: "task" | "thread",
+        laneStatus: "pending" | "allowed_task" | "allowed_thread",
+      ) =>
+        orchestrator.dispatch({
+          type: "lane_request.record",
+          commandId: CommandId.make(`lane-request:${turnItemId}:${laneStatus}`),
+          threadId,
+          runId: parentRun.id,
+          nodeId: parentRun.rootNodeId!,
+          turnItemId,
+          lane: "aix:work",
+          providerInstanceId: aixInstanceId,
+          providerLabel: "AIX Work",
+          reason: "The personal provider is out of quota.",
+          requestedFor,
+          laneStatus,
+        });
+      const deniedDelegation = yield* orchestrator
+        .dispatch({
+          type: "delegated_task.request",
+          commandId: CommandId.make("denied-model-lane-delegation"),
+          parentThreadId: threadId,
+          parentRunId: parentRun.id,
+          parentNodeId: parentRun.rootNodeId!,
+          task: "Use the AIX provider",
+          crossingReason: "This child needs the AIX model.",
+          modelSelection: aixModelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          createdBy: "agent",
+          creationSource: "mcp",
+        })
+        .pipe(Effect.flip);
+      assertLaneDenied(deniedDelegation);
+
+      const taskGrantId = TurnItemId.make("turn-item:model-lane-task-grant");
+      yield* recordLaneRequest(taskGrantId, "task", "pending");
+      yield* recordLaneRequest(taskGrantId, "task", "allowed_task");
+      const childResult = yield* orchestrator.dispatch({
+        type: "delegated_task.request",
+        commandId: CommandId.make("single-use-model-lane-delegation"),
+        parentThreadId: threadId,
+        parentRunId: parentRun.id,
+        parentNodeId: parentRun.rootNodeId!,
+        task: "Use the AIX provider",
+        crossingReason: "This child needs the AIX model.",
+        modelSelection: aixModelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        createdBy: "agent",
+        creationSource: "mcp",
+      });
+      const task = childResult.storedEvents.find(
+        (stored) =>
+          stored.event.type === "subagent.updated" && stored.event.payload.origin === "app_owned",
+      );
+      assert.ok(task?.event.type === "subagent.updated");
+      assert.equal(task.event.payload.crossingReason, "This child needs the AIX model.");
+      const child = yield* projections.getThread(task.event.payload.childThreadId!);
+      assert.deepEqual(child.allowedLanes, ["personal", "aix:work"]);
+      const consumedGrant = (yield* projections.getThreadRecords(threadId, ["turnItems"], {
+        turnItemTypes: ["lane_request"],
+        messageRoles: [],
+      })).turnItems.find((item) => item.id === taskGrantId);
+      assert.equal(consumedGrant?.type, "lane_request");
+      assert.ok(
+        consumedGrant?.type === "lane_request" && consumedGrant.grantConsumedAt !== undefined,
+      );
+
+      const reusedTaskGrant = yield* orchestrator
+        .dispatch({
+          type: "delegated_task.request",
+          commandId: CommandId.make("second-single-use-model-lane-delegation"),
+          parentThreadId: threadId,
+          parentRunId: parentRun.id,
+          parentNodeId: parentRun.rootNodeId!,
+          task: "Use the AIX provider again",
+          crossingReason: "This child needs the AIX model.",
+          modelSelection: aixModelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          createdBy: "agent",
+          creationSource: "mcp",
+        })
+        .pipe(Effect.flip);
+      assertLaneDenied(reusedTaskGrant);
+
+      const threadGrantId = TurnItemId.make("turn-item:model-lane-thread-grant");
+      yield* recordLaneRequest(threadGrantId, "thread", "pending");
+      yield* recordLaneRequest(threadGrantId, "thread", "allowed_thread");
+      const parent = yield* projections.getThreadProjection(threadId);
+      assert.deepEqual(parent.thread.allowedLanes, ["personal", "aix:work"]);
+      const afterThreadGrant = yield* orchestrator.dispatch({
+        type: "delegated_task.request",
+        commandId: CommandId.make("persistent-model-lane-delegation"),
+        parentThreadId: threadId,
+        parentRunId: parentRun.id,
+        parentNodeId: parentRun.rootNodeId!,
+        task: "Use the AIX provider after a thread grant",
+        crossingReason: "This child needs the AIX model.",
+        modelSelection: aixModelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        createdBy: "agent",
+        creationSource: "mcp",
+      });
+      const persistentTask = afterThreadGrant.storedEvents.find(
+        (stored) =>
+          stored.event.type === "subagent.updated" && stored.event.payload.origin === "app_owned",
+      );
+      assert.ok(persistentTask?.event.type === "subagent.updated");
+      assert.deepEqual(
+        (yield* projections.getThread(persistentTask.event.payload.childThreadId!)).allowedLanes,
+        ["personal", "aix:work"],
+      );
+    }).pipe(Effect.provide(layerModelLaneTest)),
+);
+
+it.effect("records the lane of a user-authored turn", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const threadId = ThreadId.make("thread:user-model-lane");
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("create-user-model-lane"),
+      threadId,
+      projectId: ProjectId.make("project:user-model-lane"),
+      title: "User lane selection",
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdBy: "user",
+      creationSource: "web",
+    });
+    yield* orchestrator.dispatch({
+      type: "message.dispatch",
+      commandId: CommandId.make("user-turn-on-aix"),
+      threadId,
+      messageId: MessageId.make("user-turn-on-aix"),
+      text: "Use this provider for the thread",
+      modelSelection: aixModelSelection,
+      attachments: [],
+      dispatchMode: { type: "start_immediately" },
+      createdBy: "user",
+      creationSource: "web",
+    });
+    assert.deepEqual((yield* projections.getThread(threadId)).allowedLanes, [
+      "personal",
+      "aix:work",
+    ]);
+  }).pipe(Effect.provide(layerModelLaneTest)),
 );

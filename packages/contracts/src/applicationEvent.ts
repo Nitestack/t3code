@@ -36,6 +36,7 @@ export type ApplicationEventMetadata = typeof ApplicationEventMetadata.Type;
 export const ApplicationProjectCreatedPayload = Schema.Struct({
   projectId: ProjectId,
   scope: Schema.optional(ProjectScope),
+  homeAixProfile: Schema.optional(TrimmedNonEmptyString),
   title: TrimmedNonEmptyString,
   workspaceRoot: TrimmedNonEmptyString,
   repositoryIdentity: Schema.optional(Schema.NullOr(RepositoryIdentity)),
@@ -52,6 +53,7 @@ export type ApplicationProjectCreatedPayload = typeof ApplicationProjectCreatedP
 export const ApplicationProjectMetaUpdatedPayload = Schema.Struct({
   projectId: ProjectId,
   scope: Schema.optional(ProjectScope),
+  homeAixProfile: Schema.optional(TrimmedNonEmptyString),
   title: Schema.optional(TrimmedNonEmptyString),
   workspaceRoot: Schema.optional(TrimmedNonEmptyString),
   repositoryIdentity: Schema.optional(Schema.NullOr(RepositoryIdentity)),

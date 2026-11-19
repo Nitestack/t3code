@@ -96,6 +96,7 @@ const layerWithPolicy = (policy?: ManagedPolicySummary) =>
           Effect.succeedSome({
             projectId,
             scope: "personal",
+            homeAixProfile: null,
             title: "Project",
             workspaceRoot: "/project-root",
             defaultModelSelection: null,

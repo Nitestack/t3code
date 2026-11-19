@@ -6,6 +6,8 @@ import {
   type ProviderInteractionMode,
   type RuntimeMode,
   type ThreadId,
+  OrchestratorMcpCapabilitiesInput,
+  OrchestratorMcpCapabilitiesResult,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -16,7 +18,8 @@ import * as Struct from "effect/Struct";
 import type * as Layer from "effect/Layer";
 import type * as Scope from "effect/Scope";
 import { McpSchema } from "effect/ai";
-import type { Tool, Toolkit } from "effect/ai";
+import * as Tool from "effect/ai/Tool";
+import type { Toolkit } from "effect/ai";
 
 import {
   DispatchModeLimit,
@@ -38,6 +41,13 @@ import {
 
 /** Private constructors only enforce types; the token also blocks runtime construction. */
 const builtHere: unique symbol = Symbol("t3/mcp/McpToolAccess/builtHere");
+
+const RemoteCapabilitiesTool = Tool.make("orchestrator_capabilities", {
+  parameters: OrchestratorMcpCapabilitiesInput,
+  success: OrchestratorMcpCapabilitiesResult,
+  failure: OrchestratorMcpFailure,
+  failureMode: "return",
+});
 
 const refuseOutsideConstruction = (token: symbol) => {
   if (token !== builtHere) {
@@ -451,6 +461,34 @@ const routed = Effect.fn("McpToolAccess.routed")(function* <Tools extends Record
         if (scope.linkedEnvironments === false) return yield* PeerForwarding.linkedEnvironmentsOff;
         yield* (remote as RemoteCheck<typeof params>)(params);
         if (Option.isNone(forwarding)) return yield* linksUnavailable;
+        if (name === "t3_thread_launch" && "modelSelection" in params) {
+          const selection = params.modelSelection;
+          const instanceId =
+            typeof selection === "object" &&
+            selection !== null &&
+            "instanceId" in selection &&
+            typeof selection.instanceId === "string"
+              ? selection.instanceId
+              : undefined;
+          if (instanceId?.startsWith("aix-")) {
+            const capabilities = yield* forwarding.value.call(
+              scope,
+              RemoteCapabilitiesTool,
+              target,
+              { environmentId: target },
+            );
+            const provider = capabilities.providers.find(
+              (candidate) => candidate.providerInstanceId === instanceId,
+            );
+            const aix = provider?.lane?.startsWith("aix:") ?? instanceId.startsWith("aix-");
+            if (aix && capabilities.features.modelLanes !== true) {
+              return yield* new OrchestratorMcpFailure({
+                code: "model_lane_not_allowed",
+                message: `Linked environment ${target} does not advertise model lane enforcement, so AIX provider ${instanceId} cannot be selected there.`,
+              });
+            }
+          }
+        }
         const result = yield* forwarding.value.call(scope, tool, target, {
           ...params,
           environmentId,

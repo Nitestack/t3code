@@ -270,6 +270,7 @@ function makeHarness(options: HarnessOptions = {}) {
           ? Option.some({
               projectId,
               scope: "personal",
+              homeAixProfile: null,
               title: project.title,
               workspaceRoot: project.workspaceRoot,
               defaultModelSelection: project.defaultModelSelection,

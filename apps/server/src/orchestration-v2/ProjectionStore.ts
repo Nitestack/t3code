@@ -1791,6 +1791,9 @@ export function threadShellFromProjection(
     title: projection.thread.title,
     providerInstanceId: projection.thread.providerInstanceId,
     modelSelection: projection.thread.modelSelection,
+    ...(projection.thread.allowedLanes === undefined
+      ? {}
+      : { allowedLanes: projection.thread.allowedLanes }),
     runtimeMode: projection.thread.runtimeMode,
     interactionMode: projection.thread.interactionMode,
     branch: projection.thread.branch,
@@ -7977,12 +7980,21 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 LIMIT 1
               ) AS pending_secret_request_payload_json,
               (
-                SELECT link.payload_json
-                FROM orchestration_v2_projection_turn_items link
-                  INDEXED BY orchestration_v2_projection_turn_items_waiting_link_idx
-                WHERE link.thread_id = t.thread_id
-                  AND link.type = 'link_request' AND link.status = 'waiting'
-                ORDER BY link.updated_at DESC, link.turn_item_id DESC
+                SELECT pending.payload_json
+                FROM (
+                  SELECT link.payload_json, link.updated_at, link.turn_item_id
+                  FROM orchestration_v2_projection_turn_items link
+                    INDEXED BY orchestration_v2_projection_turn_items_waiting_link_idx
+                  WHERE link.thread_id = t.thread_id
+                    AND link.type = 'link_request' AND link.status = 'waiting'
+                  UNION ALL
+                  SELECT lane.payload_json, lane.updated_at, lane.turn_item_id
+                  FROM orchestration_v2_projection_turn_items lane
+                    INDEXED BY orchestration_v2_projection_turn_items_waiting_lane_idx
+                  WHERE lane.thread_id = t.thread_id
+                    AND lane.type = 'lane_request' AND lane.status = 'waiting'
+                ) pending
+                ORDER BY pending.updated_at DESC, pending.turn_item_id DESC
                 LIMIT 1
               ) AS pending_link_request_payload_json,
               (
@@ -8991,7 +9003,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             OR EXISTS (
               SELECT 1 FROM orchestration_v2_projection_turn_items link_request
               WHERE link_request.thread_id = t.thread_id
-                AND link_request.type = 'link_request' AND link_request.status = 'waiting'
+                  AND link_request.type IN ('link_request', 'lane_request') AND link_request.status = 'waiting'
             )
             OR EXISTS (
               SELECT 1 FROM orchestration_v2_projection_provider_threads provider_thread

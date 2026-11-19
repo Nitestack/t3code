@@ -2,6 +2,7 @@ import * as WorktreeSetupTracker from "../project/WorktreeSetupTracker.ts";
 import * as ProjectCloneTracker from "../project/ProjectCloneTracker.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import { isLaneAllowed, laneOfInstance } from "@t3tools/shared/modelLanes";
 import {
   CommandId,
   type ChatAttachment,
@@ -13,6 +14,7 @@ import {
   type OrchestrationV2LinkOrigin,
   type OrchestrationV2ProviderThreadNativeMetadata,
   type OrchestrationV2ThreadProjection,
+  type OrchestrationV2ThreadLaunchInput,
   type ProviderDriverKind,
   type ProviderInteractionMode,
   ProjectId,
@@ -94,6 +96,7 @@ export interface ThreadLaunchInput {
   readonly title: string;
   readonly generateTitle?: boolean;
   readonly modelSelection: ModelSelection;
+  readonly allowedLanes?: OrchestrationV2ThreadLaunchInput["allowedLanes"];
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ProviderInteractionMode;
   readonly workspaceStrategy: ThreadLaunchWorkspaceStrategy;
@@ -116,7 +119,7 @@ export interface ThreadLaunchInput {
 
 type PreparationInput = Pick<
   ThreadLaunchInput,
-  "commandId" | "projectId" | "workspaceStrategy" | "initialMessage"
+  "commandId" | "projectId" | "workspaceStrategy" | "initialMessage" | "allowedLanes"
 > & {
   readonly reusedWorktree?: { readonly baseRef: string };
 };
@@ -821,92 +824,124 @@ const make = Effect.gen(function* () {
       ) {
         const oldBranch = branch;
         const worktreeCwd = worktreePath;
-        branchRename = yield* generateBranchNameFor(worktreeCwd, initialMessage).pipe(
-          Effect.flatMap(({ branch: newBranch, exactName }) =>
-            git
-              .renameBranch({
-                cwd: worktreeCwd,
-                oldBranch,
-                newBranch,
-                ...(exactName ? { exactName: true } : {}),
-              })
-              .pipe(
-                // A cancel must see the renamed branch, or its cleanup deletes the old name.
-                Effect.tap((renamed) =>
-                  Effect.sync(() => {
-                    createdBranch = renamed.branch;
-                  }),
-                ),
-                Effect.uninterruptible,
-              ),
-          ),
-          Effect.flatMap((renamed) =>
-            Effect.gen(function* () {
-              yield* threads
-                .dispatch({
-                  type: "thread.metadata.update",
-                  commandId: CommandId.make(`${input.commandId}:branch-rename`),
-                  threadId,
-                  branch: renamed.branch,
-                  worktreePath: worktreeCwd,
-                  expectedBranch: oldBranch,
-                  expectedWorktreePath: worktreeCwd,
-                })
-                .pipe(
-                  Effect.catchCause((cause) =>
-                    Effect.logWarning("Parent thread worktree branch update failed", {
-                      threadId,
-                      cause,
-                    }),
+        const branchSettings = yield* serverSettings.getSettings.pipe(
+          Effect.map((settings) => resolveProjectSettings(settings, input.projectId).settings),
+          Effect.orElseSucceed(() => undefined),
+        );
+        if (branchSettings !== undefined) {
+          const branchNameModelSelection =
+            branchSettings.sourceControlWriterModelSelection === null
+              ? branchSettings.textGenerationModelSelection
+              : ServerSettings.resolveSourceControlWriterModelSelection(
+                  branchSettings,
+                  yield* providerRegistry.getProviders,
+                  input.projectId,
+                );
+          const branchNameProvider = yield* providerRegistry.getProviders;
+          const branchNameInstance =
+            branchNameProvider.find(
+              (provider) => provider.instanceId === branchNameModelSelection.instanceId,
+            ) ?? branchSettings.providerInstances[branchNameModelSelection.instanceId];
+          const branchNameLane =
+            branchNameInstance === undefined
+              ? branchNameModelSelection.instanceId.startsWith("aix-")
+                ? undefined
+                : "personal"
+              : laneOfInstance(branchNameInstance);
+          if (
+            branchNameLane !== undefined &&
+            isLaneAllowed(project, input.allowedLanes, branchNameLane)
+          ) {
+            branchRename = yield* generateBranchNameFor(worktreeCwd, initialMessage).pipe(
+              Effect.flatMap(({ branch: newBranch, exactName }) =>
+                git
+                  .renameBranch({
+                    cwd: worktreeCwd,
+                    oldBranch,
+                    newBranch,
+                    ...(exactName ? { exactName: true } : {}),
+                  })
+                  .pipe(
+                    // A cancel must see the renamed branch, or its cleanup deletes the old name.
+                    Effect.tap((renamed) =>
+                      Effect.sync(() => {
+                        createdBranch = renamed.branch;
+                      }),
+                    ),
+                    Effect.uninterruptible,
                   ),
-                );
-              // Update parents first so children inherit names; reread each pass for newly updated descendants.
-              const visited = new Set([threadId]);
-              while (true) {
-                const snapshot = yield* threads.getShellSnapshot({ worktreePath: worktreeCwd });
-                const sharing = [...snapshot.threads, ...snapshot.archivedThreads].filter(
-                  (thread) => !visited.has(thread.id) && thread.branch === oldBranch,
-                );
-                if (sharing.length === 0) break;
-                for (const thread of sharing) {
-                  visited.add(thread.id);
+              ),
+              Effect.flatMap((renamed) =>
+                Effect.gen(function* () {
                   yield* threads
                     .dispatch({
                       type: "thread.metadata.update",
-                      commandId: CommandId.make(`${input.commandId}:branch-rename:${thread.id}`),
-                      threadId: thread.id,
+                      commandId: CommandId.make(`${input.commandId}:branch-rename`),
+                      threadId,
                       branch: renamed.branch,
+                      worktreePath: worktreeCwd,
                       expectedBranch: oldBranch,
                       expectedWorktreePath: worktreeCwd,
                     })
                     .pipe(
                       Effect.catchCause((cause) =>
-                        Effect.logWarning("Shared thread worktree branch update failed", {
-                          threadId: thread.id,
+                        Effect.logWarning("Parent thread worktree branch update failed", {
+                          threadId,
                           cause,
                         }),
                       ),
                     );
-                }
-              }
-            }),
-          ),
-          Effect.catchCause((cause) =>
-            Effect.logWarning("Thread worktree branch rename failed", {
-              commandId: input.commandId,
-              threadId,
-              oldBranch,
-              cause,
-            }).pipe(
-              Effect.andThen(
-                runId === null || Cause.hasInterruptsOnly(cause)
-                  ? Effect.void
-                  : recordBranchRenameFailure(threadId, runId, oldBranch, cause),
+                  // Update parents first so children inherit names; reread each pass for newly updated descendants.
+                  const visited = new Set([threadId]);
+                  while (true) {
+                    const snapshot = yield* threads.getShellSnapshot({ worktreePath: worktreeCwd });
+                    const sharing = [...snapshot.threads, ...snapshot.archivedThreads].filter(
+                      (thread) => !visited.has(thread.id) && thread.branch === oldBranch,
+                    );
+                    if (sharing.length === 0) break;
+                    for (const thread of sharing) {
+                      visited.add(thread.id);
+                      yield* threads
+                        .dispatch({
+                          type: "thread.metadata.update",
+                          commandId: CommandId.make(
+                            `${input.commandId}:branch-rename:${thread.id}`,
+                          ),
+                          threadId: thread.id,
+                          branch: renamed.branch,
+                          expectedBranch: oldBranch,
+                          expectedWorktreePath: worktreeCwd,
+                        })
+                        .pipe(
+                          Effect.catchCause((cause) =>
+                            Effect.logWarning("Shared thread worktree branch update failed", {
+                              threadId: thread.id,
+                              cause,
+                            }),
+                          ),
+                        );
+                    }
+                  }
+                }),
               ),
-            ),
-          ),
-          Effect.forkIn(preparationScope),
-        );
+              Effect.catchCause((cause) =>
+                Effect.logWarning("Thread worktree branch rename failed", {
+                  commandId: input.commandId,
+                  threadId,
+                  oldBranch,
+                  cause,
+                }).pipe(
+                  Effect.andThen(
+                    runId === null || Cause.hasInterruptsOnly(cause)
+                      ? Effect.void
+                      : recordBranchRenameFailure(threadId, runId, oldBranch, cause),
+                  ),
+                ),
+              ),
+              Effect.forkIn(preparationScope),
+            );
+          }
+        }
       }
 
       if (runId !== null && worktreePath !== null) {
@@ -1305,6 +1340,7 @@ const make = Effect.gen(function* () {
                 projectId: input.projectId,
                 title: input.title,
                 modelSelection: input.modelSelection,
+                ...(input.allowedLanes === undefined ? {} : { allowedLanes: input.allowedLanes }),
                 runtimeMode: input.runtimeMode,
                 interactionMode: input.interactionMode,
                 branch: initialBranch,

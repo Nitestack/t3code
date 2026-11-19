@@ -159,6 +159,7 @@ export const ReceivedProjectIcon = ForwardCompatibleUnion(projectIconMembers, "k
 export const Project = Schema.Struct({
   id: ProjectId,
   scope: Schema.optional(ProjectScope),
+  homeAixProfile: Schema.optional(TrimmedNonEmptyString),
   title: TrimmedNonEmptyString,
   workspaceRoot: TrimmedNonEmptyString,
   repositoryIdentity: Schema.optional(Schema.NullOr(RepositoryIdentity)),
@@ -185,6 +186,7 @@ export type ProjectSnapshot = typeof ProjectSnapshot.Type;
 
 export const ProjectCreatePayload = Schema.Struct({
   scope: Schema.optional(ProjectScope),
+  homeAixProfile: Schema.optional(TrimmedNonEmptyString),
   title: TrimmedNonEmptyString,
   workspaceRoot: TrimmedNonEmptyString,
   createWorkspaceRootIfMissing: Schema.optional(Schema.Boolean),
@@ -195,6 +197,7 @@ export type ProjectCreatePayload = typeof ProjectCreatePayload.Type;
 
 export const ProjectUpdatePayload = Schema.Struct({
   scope: Schema.optional(ProjectScope),
+  homeAixProfile: Schema.optional(TrimmedNonEmptyString),
   title: Schema.optional(TrimmedNonEmptyString),
   workspaceRoot: Schema.optional(TrimmedNonEmptyString),
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),

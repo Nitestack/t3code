@@ -1,4 +1,5 @@
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import { isLaneAllowed, laneOfInstance } from "@t3tools/shared/modelLanes";
 import { isAttachmentOnlyBootstrapPrompt } from "@t3tools/shared/composerContextReferences";
 import {
   CommandId,
@@ -213,6 +214,17 @@ const make = Effect.gen(function* () {
         yield* serverSettings.getSettings,
         projection.thread.projectId,
       ).settings;
+      const titleProvider =
+        settings.providerInstances[settings.textGenerationModelSelection.instanceId];
+      if (
+        !isLaneAllowed(
+          project.value,
+          projection.thread.allowedLanes,
+          laneOfInstance(titleProvider ?? {}),
+        )
+      ) {
+        return { status: "unchanged" as const };
+      }
       // Storage cleanup removes worktrees but keeps the path; CLIs cannot spawn in a missing cwd.
       const worktreePath = projection.thread.worktreePath;
       const worktreeExists =

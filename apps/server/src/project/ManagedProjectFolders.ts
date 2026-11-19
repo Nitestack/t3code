@@ -125,6 +125,7 @@ export class ManagedProjectFolders extends Context.Service<
     readonly createNamedProject: (input: {
       readonly name: string;
       readonly scope?: ProjectScope | undefined;
+      readonly homeAixProfile?: string | undefined;
     }) => Effect.Effect<
       {
         readonly projectId: ProjectId;
@@ -493,6 +494,7 @@ const make = Effect.gen(function* () {
         title: input.name,
         workspaceRoot,
         ...(input.scope === undefined ? {} : { scope: input.scope }),
+        ...(input.homeAixProfile === undefined ? {} : { homeAixProfile: input.homeAixProfile }),
       })
       .pipe(
         // Re-check ownership before deleting rejected creations; interruption after commit or conflicts can leave an owner.

@@ -4,6 +4,12 @@ import * as SchemaTransformation from "effect/SchemaTransformation";
 import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { SecretReference } from "./secretReference.ts";
 
+export const ModelLane = Schema.Union([
+  Schema.Literal("personal"),
+  Schema.String.check(Schema.isPattern(/^aix:.+$/)),
+]);
+export type ModelLane = typeof ModelLane.Type;
+
 const PROVIDER_SLUG_MAX_CHARS = 64;
 const PROVIDER_SLUG_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]*$/;
 const ENVIRONMENT_VARIABLE_NAME_MAX_CHARS = 128;

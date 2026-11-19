@@ -371,6 +371,9 @@ const linkedProbe = {
   parameters: Schema.Struct({
     environmentId: OrchestratorMcpEnvironmentTarget,
     threadId: Schema.optional(ThreadId),
+    modelSelection: Schema.optional(
+      Schema.Struct({ instanceId: ProviderInstanceId, model: Schema.String }),
+    ),
     runtimeMode: Schema.optional(RuntimeMode),
     interactionMode: Schema.optional(ProviderInteractionMode),
   }),
@@ -381,6 +384,7 @@ const LinkedProbeToolkit = Toolkit.make(
   Tool.make("writes_with_capability", linkedProbe),
   Tool.make("writes_threads", linkedProbe),
   Tool.make("starts_threads", linkedProbe),
+  Tool.make("t3_thread_launch", linkedProbe),
   Tool.make("writes_environment", linkedProbe),
 );
 /** Runs here, and tells whether `environmentId` reached the handler. */
@@ -395,6 +399,7 @@ const linkedProbeServer = McpHttpServer.toolkitRegistration(
     writes_with_capability: McpToolAccess.writesWithCapability(ranHere),
     writes_threads: McpToolAccess.writesThreads((input) => [input.threadId], ranHere),
     starts_threads: McpToolAccess.startsThreads((input) => input, ranHere, "stamped"),
+    t3_thread_launch: McpToolAccess.startsThreads((input) => input, ranHere, "stamped"),
     writes_environment: McpToolAccess.writesEnvironment(ranHere),
   }),
 ).pipe(
@@ -412,6 +417,68 @@ const linkedProbeServer = McpHttpServer.toolkitRegistration(
     }),
   ),
 );
+
+const remoteLaunchServer = (forwarded: Array<string>) =>
+  McpHttpServer.toolkitRegistration(
+    LinkedProbeToolkit,
+    McpToolAccess.toLayer(LinkedProbeToolkit, {
+      reads: McpToolAccess.reads(ranHere),
+      writes: McpToolAccess.writes(ranHere),
+      writes_with_capability: McpToolAccess.writesWithCapability(ranHere),
+      writes_threads: McpToolAccess.writesThreads((input) => [input.threadId], ranHere),
+      starts_threads: McpToolAccess.startsThreads((input) => input, ranHere, "stamped"),
+      t3_thread_launch: McpToolAccess.startsThreads((input) => input, ranHere, "stamped"),
+      writes_environment: McpToolAccess.writesEnvironment(ranHere),
+    }),
+  ).pipe(
+    Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
+    Layer.provideMerge(
+      Layer.mock(ThreadManagement.ThreadManagementService)({
+        getThreadShell: (threadId) => Effect.succeed(shells.get(threadId) ?? null),
+        getThreadRecords: () => Effect.succeed({ runs: [] }) as never,
+      }),
+    ),
+    Layer.provide(
+      Layer.mock(PeerForwarding.PeerForwarding)({
+        call: (_scope, tool, environmentId) => {
+          if (tool.name === "orchestrator_capabilities") {
+            return Effect.succeed({
+              parentThreadId: null,
+              inheritedProviderInstanceId: null,
+              inheritedModel: null,
+              runtimeMode: "full-access",
+              interactionMode: "default",
+              providers: [
+                {
+                  providerInstanceId: "aix-codex-work",
+                  lane: "aix:work",
+                  driverKind: "codex",
+                  displayName: null,
+                  models: [],
+                  canRunChildTask: true,
+                  canRunCrossProviderChildTask: true,
+                  constraints: [],
+                },
+              ],
+              features: {
+                appOwnedSubagents: true,
+                asyncPolling: true,
+                cancellation: true,
+                batchThreadCreation: true,
+                threadManagement: true,
+                incrementalThreadRead: true,
+                scheduledTasks: true,
+                modelLanes: false,
+                maxBatchThreads: 8,
+              },
+            } as never);
+          }
+          forwarded.push(tool.name);
+          return Effect.succeed({ ran: `${tool.name} in ${environmentId}` } as never);
+        },
+      }),
+    ),
+  );
 
 it.effect.each([
   ["reads", supervised, { environmentId: box }, "reads in environment-box"],
@@ -477,6 +544,36 @@ it.effect("refuses a linked environment to a tool that acts as its calling threa
     expect(Exit.isFailure(built) && Cause.hasDies(built.cause)).toBe(true);
   }),
 );
+
+it.effect("rejects AIX launches to a linked peer without model lane enforcement", () => {
+  const forwarded: Array<string> = [];
+  return call("t3_thread_launch", supervised, {
+    environmentId: box,
+    modelSelection: { instanceId: ProviderInstanceId.make("aix-codex-work"), model: "gpt-6.1-sol" },
+  }).pipe(
+    Effect.map((outcome) => {
+      expect(outcome).toBe("model_lane_not_allowed");
+      expect(forwarded).toEqual([]);
+      return outcome;
+    }),
+    Effect.provide(remoteLaunchServer(forwarded)),
+  );
+});
+
+it.effect("still routes personal launches to an older linked peer", () => {
+  const forwarded: Array<string> = [];
+  return call("t3_thread_launch", supervised, {
+    environmentId: box,
+    modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-6.1-sol" },
+  }).pipe(
+    Effect.map((outcome) => {
+      expect(outcome).toBe("t3_thread_launch in environment-box");
+      expect(forwarded).toEqual(["t3_thread_launch"]);
+      return outcome;
+    }),
+    Effect.provide(remoteLaunchServer(forwarded)),
+  );
+});
 
 // Discovery hides these tools. The handler must refuse on its own if that ever changes.
 it.effect.each(["reads_as_caller", "acts_as_caller"] as const)(

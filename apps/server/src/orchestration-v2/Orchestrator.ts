@@ -203,6 +203,7 @@ import {
 import { planThreadDeletion } from "./ThreadDeletion.ts";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as ServerSettings from "../serverSettings.ts";
+import { allowedLanesForProject, isLaneAllowed, laneOfInstance } from "@t3tools/shared/modelLanes";
 
 const isMessageQuestionAnswer = Schema.is(
   Schema.Union([TrimmedNonEmptyString, Schema.NonEmptyArray(TrimmedNonEmptyString)]),
@@ -689,6 +690,7 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
       return command.parentThreadId;
     case "secret_request.record":
     case "link_request.record":
+    case "lane_request.record":
       return command.threadId;
     case "thread.fork":
     case "thread.merge_back":
@@ -1579,6 +1581,27 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   const providerSessions = yield* ProviderSessionManagerV2;
   const providerSwitchService = yield* ProviderSwitchServiceV2;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
+  const modelLanePolicy = Effect.fnUntraced(function* (
+    thread: OrchestrationV2AppThread,
+    selection: ModelSelection,
+  ) {
+    const settings = yield* serverSettings.getSettings;
+    const configured = settings.providerInstances[selection.instanceId];
+    const lane = laneOfInstance(configured ?? {});
+    const project = yield* projects.get(thread.projectId);
+    const projectModel = Option.getOrUndefined(project);
+    const modelProject = projectModel ?? { scope: "work" as const };
+    const allowedLanes = allowedLanesForProject(modelProject, thread.allowedLanes);
+    const allowedProviders = Object.entries(settings.providerInstances)
+      .filter(([, instance]) => allowedLanes.includes(laneOfInstance(instance)))
+      .map(([instanceId]) => instanceId);
+    return {
+      lane,
+      allowedLanes,
+      allowedProviders,
+      allowed: isLaneAllowed(modelProject, thread.allowedLanes, lane),
+    };
+  }, Effect.orDie);
   const runtimePolicy = yield* RuntimePolicyV2;
   const threadForkService = yield* ThreadForkServiceV2;
   const threadDispatch = yield* ThreadCommandExecutor.ThreadCommandExecutor;
@@ -3777,7 +3800,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
 
     const now = yield* DateTime.now;
     const emitEvent = emit(events, command);
-    const thread: OrchestrationV2AppThread = {
+    let thread: OrchestrationV2AppThread = {
       createdBy: command.createdBy,
       creationSource: command.creationSource,
       id: command.threadId,
@@ -3785,6 +3808,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       title: command.title,
       providerInstanceId: command.modelSelection.instanceId,
       modelSelection: command.modelSelection,
+      allowedLanes: command.allowedLanes ?? [],
       runtimeMode: command.runtimeMode,
       interactionMode: command.interactionMode,
       branch: command.branch,
@@ -3812,6 +3836,19 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       lastVisitedAt: null,
       deletedAt: null,
     };
+    const lanePolicy = yield* modelLanePolicy(thread, command.modelSelection);
+    if (command.createdBy !== "user" && !lanePolicy.allowed) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: new Error(
+          `model_lane_not_allowed: Lane ${lanePolicy.lane} is not allowed for this thread. Allowed providers: ${lanePolicy.allowedProviders.join(", ") || "none"}. Call request_model_lane to ask the user.`,
+        ),
+      });
+    }
+    if (command.createdBy === "user" && !lanePolicy.allowed) {
+      thread = { ...thread, allowedLanes: [...(thread.allowedLanes ?? []), lanePolicy.lane] };
+    }
 
     yield* emitEvent({
       type: "thread.created",
@@ -4850,6 +4887,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                   };
           return {
             ...thread,
+            ...(command.allowedLanes === undefined ? {} : { allowedLanes: command.allowedLanes }),
             ...(command.title === undefined ? {} : { title: command.title }),
             ...(command.limitRecovery === undefined ? {} : { limitRecovery }),
             ...(command.limitRecovery !== undefined &&
@@ -5434,6 +5472,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         cancelQueuedDelivery: false,
       });
       yield* closePendingLinkRequests({ command, events, threadId: command.threadId, now });
+      yield* closePendingLaneRequests({ command, events, threadId: command.threadId, now });
     }
 
     if (liveSessions.length > 0) {
@@ -5693,6 +5732,19 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       );
     // Read under the source's lock; validate the modes copied here, not an earlier read.
     yield* refuseAboveDispatchModeLimit(command, command.sourceThreadId, sourceProjection.thread);
+    const forkLanePolicy = yield* modelLanePolicy(
+      sourceProjection.thread,
+      sourceProjection.thread.modelSelection,
+    );
+    if (command.createdBy !== "user" && !forkLanePolicy.allowed) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: new Error(
+          `model_lane_not_allowed: Lane ${forkLanePolicy.lane} is not allowed for this thread. Allowed providers: ${forkLanePolicy.allowedProviders.join(", ") || "none"}. Call request_model_lane to ask the user.`,
+        ),
+      });
+    }
     if (sourceProjection.thread.deletedAt !== null) {
       return yield* new OrchestratorDispatchError({
         commandId: command.commandId,
@@ -5749,7 +5801,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         type: "fork",
       }),
     );
-    const { targetThread, transfer } = yield* threadForkService
+    const { targetThread: plannedTargetThread, transfer } = yield* threadForkService
       .plan({
         sourceProjection,
         sourceRun,
@@ -5771,6 +5823,15 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         createdAt: now,
       })
       .pipe(mapDispatchError(command));
+    const targetThread =
+      command.createdBy === "user" && !forkLanePolicy.allowed
+        ? {
+            ...plannedTargetThread,
+            allowedLanes: [
+              ...new Set([...(plannedTargetThread.allowedLanes ?? []), forkLanePolicy.lane]),
+            ],
+          }
+        : plannedTargetThread;
 
     yield* emitEvent({
       type: "thread.created",
@@ -7869,6 +7930,30 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       (transfer) => transfer.id !== pendingMergeBackTransfer?.id,
     );
     const now = yield* DateTime.now;
+    const lanePolicy = yield* modelLanePolicy(projection.thread, modelSelection);
+    const userAuthored = command.createdBy === "user" && command.scheduledTaskId === undefined;
+    if (!userAuthored && !lanePolicy.allowed) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: new Error(
+          `model_lane_not_allowed: Lane ${lanePolicy.lane} is not allowed for this thread. Allowed providers: ${lanePolicy.allowedProviders.join(", ") || "none"}. Call request_model_lane to ask the user.`,
+        ),
+      });
+    }
+    if (userAuthored && !lanePolicy.allowed) {
+      const allowedLanes = [...(projection.thread.allowedLanes ?? []), lanePolicy.lane];
+      yield* emit(
+        events,
+        command,
+      )({
+        type: "thread.metadata-updated",
+        threadId: command.threadId,
+        occurredAt: now,
+        payload: { ...projection.thread, allowedLanes, updatedAt: now },
+      });
+      projection = { ...projection, thread: { ...projection.thread, allowedLanes } };
+    }
     if (
       !modelSelectionsEqual(projection.thread.modelSelection, modelSelection) ||
       projection.thread.providerInstanceId !== modelSelection.instanceId
@@ -9427,6 +9512,35 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         ),
       );
 
+      const childLanePolicy = yield* modelLanePolicy(
+        parentProjection.thread,
+        command.modelSelection,
+      );
+      const laneRequestRecords = yield* projectionStore
+        .getThreadRecords(command.parentThreadId, ["turnItems"], {
+          turnItemTypes: ["lane_request"],
+          messageRoles: [],
+        })
+        .pipe(mapDispatchError(command));
+      const taskLaneGrant = childLanePolicy.allowed
+        ? undefined
+        : laneRequestRecords.turnItems.find(
+            (item): item is Extract<OrchestrationV2TurnItem, { readonly type: "lane_request" }> =>
+              item.type === "lane_request" &&
+              item.lane === childLanePolicy.lane &&
+              item.laneStatus === "allowed_task" &&
+              item.grantConsumedAt === undefined,
+          );
+      if (!childLanePolicy.allowed && taskLaneGrant === undefined) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: new Error(
+            `model_lane_not_allowed: Lane ${childLanePolicy.lane} is not allowed for this thread. Allowed providers: ${childLanePolicy.allowedProviders.join(", ") || "none"}. Call request_model_lane to ask the user.`,
+          ),
+        });
+      }
+
       const now = command.createdAt ?? (yield* DateTime.now);
       const taskNodeId = idAllocator.derive.delegatedTaskNode({
         commandId: command.commandId,
@@ -9459,6 +9573,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           createdBy: command.createdBy,
           creationSource: command.creationSource,
         }),
+        allowedLanes: [...new Set([...childLanePolicy.allowedLanes, childLanePolicy.lane])],
         runtimeMode: command.runtimeMode,
         interactionMode: command.interactionMode,
         ...(command.workspaceStrategy === undefined ? {} : { branch: null, worktreePath: null }),
@@ -9477,6 +9592,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         nativeTaskRef: null,
         prompt: command.task,
         title: command.title ?? null,
+        ...(command.crossingReason === undefined ? {} : { crossingReason: command.crossingReason }),
         model: command.modelSelection.model,
         modelSelection: command.modelSelection,
         ...(command.completionWake === undefined ? {} : { completionWake: command.completionWake }),
@@ -9525,6 +9641,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         driver: targetAdapter.driver,
         providerInstanceId: command.modelSelection.instanceId,
         childThreadId,
+        ...(command.crossingReason === undefined ? {} : { crossingReason: command.crossingReason }),
         prompt: command.task,
         result: null,
       };
@@ -9632,6 +9749,17 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         occurredAt: now,
         payload: spawnTransfer,
       });
+      if (taskLaneGrant?.type === "lane_request") {
+        yield* emitEvent({
+          type: "turn-item.updated",
+          threadId: command.parentThreadId,
+          runId: parentRun.id,
+          nodeId: taskLaneGrant.nodeId ?? undefined,
+          providerInstanceId: parentRun.providerInstanceId,
+          occurredAt: now,
+          payload: { ...taskLaneGrant, grantConsumedAt: now, updatedAt: now },
+        });
+      }
     },
   );
 
@@ -9976,6 +10104,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         childThreadId: null,
         remoteChild: command.remoteChild,
         prompt: command.task,
+        ...(command.crossingReason === undefined ? {} : { crossingReason: command.crossingReason }),
         result: null,
       },
     });
@@ -10737,6 +10866,145 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     },
   );
 
+  const dispatchLaneRequestRecord = Effect.fn("orchestrationV2.dispatch.laneRequestRecord")(
+    function* (
+      command: Extract<OrchestrationV2InternalCommand, { readonly type: "lane_request.record" }>,
+      events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+      effects: Ref.Ref<Array<PendingOrchestrationEffectV2>>,
+    ) {
+      const projection = yield* projectionStore
+        .getThreadRecords(command.threadId, ["runs", "turnItems", "attempts", "providerTurns"], {
+          turnItemTypes: ["lane_request"],
+          messageRoles: [],
+        })
+        .pipe(mapDispatchError(command));
+      const run = projection.runs.find((candidate) => candidate.id === command.runId);
+      const existing = projection.turnItems.find((item) => item.id === command.turnItemId);
+      if (run === undefined || run.rootNodeId !== command.nodeId) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: `Lane request ${command.turnItemId} does not belong to the run root.`,
+        });
+      }
+      if (existing !== undefined && existing.type !== "lane_request") {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: `Turn item ${command.turnItemId} is not a lane request.`,
+        });
+      }
+      const consumingGrant =
+        existing?.type === "lane_request" &&
+        existing.laneStatus === "allowed_task" &&
+        existing.grantConsumedAt === undefined &&
+        command.grantConsumedAt !== undefined;
+      if (
+        existing !== undefined &&
+        existing.type === "lane_request" &&
+        existing.laneStatus !== "pending" &&
+        !consumingGrant
+      ) {
+        return;
+      }
+      if (
+        existing === undefined &&
+        (!isActiveRun(run) || (yield* stopReachedRun(command, command.threadId, run.id)))
+      ) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: `Run ${command.runId} is not active.`,
+        });
+      }
+      const now = yield* DateTime.now;
+      const pending = command.laneStatus === "pending";
+      const {
+        type: _type,
+        commandId: _commandId,
+        turnItemId: _turnItemId,
+        wake,
+        ...fields
+      } = command;
+      const turnItem: OrchestrationV2TurnItem =
+        consumingGrant && existing?.type === "lane_request"
+          ? { ...existing, grantConsumedAt: command.grantConsumedAt, updatedAt: now }
+          : {
+              ...fields,
+              id: command.turnItemId,
+              providerThreadId: run.providerThreadId,
+              providerTurnId: providerTurnForRun(projection, run)?.id ?? null,
+              nativeItemRef: null,
+              parentItemId: null,
+              ordinal: yield* nextTurnItemOrdinal(projection),
+              status: pending
+                ? "waiting"
+                : command.laneStatus === "allowed_task" || command.laneStatus === "allowed_thread"
+                  ? "completed"
+                  : "cancelled",
+              title: `Request ${command.lane} provider access`,
+              startedAt: now,
+              completedAt: pending ? null : now,
+              updatedAt: now,
+              type: "lane_request",
+            };
+      yield* emit(
+        events,
+        command,
+      )({
+        type: "turn-item.updated",
+        threadId: command.threadId,
+        runId: command.runId,
+        nodeId: command.nodeId,
+        providerInstanceId: run.providerInstanceId,
+        occurredAt: now,
+        payload: turnItem,
+      });
+      if (
+        !consumingGrant &&
+        command.laneStatus === "allowed_thread" &&
+        !projection.thread.allowedLanes?.includes(command.lane)
+      ) {
+        const allowedLanes = [
+          ...new Set([...(projection.thread.allowedLanes ?? []), command.lane]),
+        ];
+        yield* emit(
+          events,
+          command,
+        )({
+          type: "thread.metadata-updated",
+          threadId: command.threadId,
+          occurredAt: now,
+          payload: { ...projection.thread, allowedLanes, updatedAt: now },
+        });
+      }
+      if (
+        wake === undefined ||
+        consumingGrant ||
+        projection.thread.archivedAt !== null ||
+        projection.thread.deletedAt !== null
+      ) {
+        return;
+      }
+      yield* dispatchMessage(
+        {
+          type: "message.dispatch",
+          commandId: command.commandId,
+          threadId: command.threadId,
+          messageId: wake.messageId,
+          text: wake.text,
+          notification: wake.notification,
+          attachments: [],
+          dispatchMode: { type: "queue_after_active" },
+          createdBy: "agent",
+          creationSource: "server",
+        },
+        events,
+        effects,
+      );
+    },
+  );
+
   /**
    * Closes the link cards still waiting for the user. Their agent stopped
    * waiting long ago, so nobody is woken: stopping or archiving the thread
@@ -10771,6 +11039,43 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             ...item,
             status: "cancelled",
             linkStatus: "cancelled",
+            completedAt: input.now,
+            updatedAt: input.now,
+          },
+        });
+      }
+    },
+  );
+
+  const closePendingLaneRequests = Effect.fn("orchestrationV2.closePendingLaneRequests")(
+    function* (input: {
+      readonly command: OrchestrationV2ServerCommand;
+      readonly events: Ref.Ref<Array<OrchestrationV2DomainEvent>>;
+      readonly threadId: ThreadId;
+      readonly now: DateTime.Utc;
+    }) {
+      const { turnItems } = yield* projectionStore
+        .getThreadRecords(input.threadId, ["turnItems"], {
+          turnItemTypes: ["lane_request"],
+          turnItemStatuses: ["waiting"],
+          messageRoles: [],
+        })
+        .pipe(mapDispatchError(input.command));
+      for (const item of turnItems) {
+        if (item.type !== "lane_request" || item.laneStatus !== "pending") continue;
+        yield* emit(
+          input.events,
+          input.command,
+        )({
+          type: "turn-item.updated",
+          threadId: input.threadId,
+          ...(item.runId === null ? {} : { runId: item.runId }),
+          ...(item.nodeId === null ? {} : { nodeId: item.nodeId }),
+          occurredAt: input.now,
+          payload: {
+            ...item,
+            status: "cancelled",
+            laneStatus: "cancelled",
             completedAt: input.now,
             updatedAt: input.now,
           },
@@ -12769,6 +13074,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       });
     }
     yield* closePendingLinkRequests({ ...input, threadId: thread.id });
+    yield* closePendingLaneRequests({ ...input, threadId: thread.id });
   });
 
   const dispatchInterruptUnresponsive = Effect.fn("Orchestrator.dispatchInterruptUnresponsive")(
@@ -15185,7 +15491,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         break;
       case "queued-run.start":
       case "queue.resume": {
-        const projection = yield* loadProjectionForCommand(
+        let projection = yield* loadProjectionForCommand(
           command,
           ["runs", "turnItems", "providerSessions", "messages"],
           { turnItemTypes: ["error"], messageRoles: ["user"] },
@@ -15221,6 +15527,35 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           }
         }
         const nextRun = selectedRun ?? queuedRunsInDeliveryOrder(projection)[0];
+        if (nextRun !== undefined) {
+          const message = projection.messages.find((item) => item.id === nextRun.userMessageId);
+          const selection = queuedRunModelSelection(projection, nextRun);
+          const policy = yield* modelLanePolicy(projection.thread, selection);
+          const userAuthored =
+            message?.createdBy === "user" && message.scheduledTaskId === undefined;
+          if (!userAuthored && !policy.allowed) {
+            return yield* new OrchestratorDispatchError({
+              commandId: command.commandId,
+              commandType: command.type,
+              cause: new Error(
+                `model_lane_not_allowed: Lane ${policy.lane} is not allowed for this thread. Allowed providers: ${policy.allowedProviders.join(", ") || "none"}. Call request_model_lane to ask the user.`,
+              ),
+            });
+          }
+          if (userAuthored && !policy.allowed) {
+            const allowedLanes = [...(projection.thread.allowedLanes ?? []), policy.lane];
+            yield* emit(
+              events,
+              command,
+            )({
+              type: "thread.metadata-updated",
+              threadId: command.threadId,
+              occurredAt: yield* DateTime.now,
+              payload: { ...projection.thread, allowedLanes },
+            });
+            projection = { ...projection, thread: { ...projection.thread, allowedLanes } };
+          }
+        }
         if (
           usageLimitHoldsQueue(
             projection,
@@ -15331,6 +15666,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         break;
       case "link_request.record":
         yield* dispatchLinkRequestRecord(command, events, effects);
+        break;
+      case "lane_request.record":
+        yield* dispatchLaneRequestRecord(command, events, effects);
         break;
       default:
         return yield* dispatchUnsupported(command);
@@ -15734,6 +16072,38 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       // while writing child events, so nesting parent inside child would invert the order.
       // The keyed semaphores are neither reentrant nor deadlock-aware.
       if (delegatedTaskTerminalStatus(run.status) !== null) {
+        const pendingLaneRequests = yield* projectionStore.getThreadRecords(
+          threadId,
+          ["turnItems"],
+          {
+            turnItemTypes: ["lane_request"],
+            turnItemStatuses: ["waiting"],
+            messageRoles: [],
+          },
+        );
+        for (const item of pendingLaneRequests.turnItems) {
+          if (
+            item.type !== "lane_request" ||
+            item.runId !== run.id ||
+            item.nodeId === null ||
+            item.laneStatus !== "pending"
+          )
+            continue;
+          yield* dispatchWithReceipt({
+            type: "lane_request.record",
+            commandId: CommandId.make(`model-lane-request:${item.id}:cancelled:run-end`),
+            threadId,
+            runId: run.id,
+            nodeId: item.nodeId,
+            turnItemId: item.id,
+            lane: item.lane,
+            providerInstanceId: item.providerInstanceId,
+            providerLabel: item.providerLabel,
+            reason: item.reason,
+            requestedFor: item.requestedFor,
+            laneStatus: "cancelled",
+          }).pipe(Effect.ignoreCause({ log: true }));
+        }
         // Before the parent hears of the failure: a pending continuation keeps the task open.
         if (run.status === "failed" && run.restartContinuationOfRunId !== undefined) {
           yield* threadDispatch.withLock(threadId, retryContinuationStart(threadId, run.id)).pipe(
