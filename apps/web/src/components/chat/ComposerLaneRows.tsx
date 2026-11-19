@@ -49,8 +49,7 @@ export function ComposerLaneRows(props: {
   };
 
   return (
-    // contain:inline-size keeps these rows from widening the picker; they fill the footer's width.
-    <div className="flex w-full flex-col items-start gap-1 border-b border-border/70 pb-2 text-xs text-muted-foreground [contain:inline-size]">
+    <div className="flex w-full flex-col items-start gap-1 border-b border-border/70 pb-2 text-xs text-muted-foreground">
       <span>Agents in this thread may use</span>
       {lanes.map((lane) => (
         <div key={lane} className="flex w-full items-center justify-between gap-2">

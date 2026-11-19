@@ -666,7 +666,8 @@ export function ComposerPickerFooter(props: {
   laneRows: ReactNode;
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-2 border-t border-border/70 bg-muted/40 px-3 py-2">
+    // contain:inline-size: the columns set the picker width; footer controls wrap instead of widening it.
+    <div className="flex flex-wrap items-center gap-2 border-t border-border/70 bg-muted/40 px-3 py-2 [contain:inline-size]">
       {props.laneRows}
       {props.traits ? <SpeedControl traits={props.traits} /> : null}
       {props.traits ? <UltracodeControl traits={props.traits} /> : null}
