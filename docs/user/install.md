@@ -186,8 +186,8 @@ curl -fsSL https://github.com/get-aix/t3code/releases/latest/download/install-ma
 ```
 
 The script checks the download's SHA-256, installs **T3 Code** in `/Applications` (or
-`~/Applications`), and opens it. Set `T3CODE_VERSION=<version>` to install a specific release.
-Later updates arrive in the app.
+`~/Applications`), and opens it. Quit T3 Code first. Set `T3CODE_VERSION=<version>` to install a
+specific release. Later updates arrive in the app.
 
 On Windows, run this in a normal PowerShell window, not as administrator:
 

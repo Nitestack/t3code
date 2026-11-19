@@ -34,8 +34,8 @@ Notes per platform:
   choose **More info → Run anyway**, and a work PC may block it.
 - **macOS.** Use the script. The app is not notarized, so Gatekeeper blocks a DMG or zip downloaded
   in a browser. The script checks the download's SHA-256 and installs **T3 Code** into
-  `/Applications` (or `~/Applications`). Set `T3CODE_VERSION=<version>` to install a specific
-  release.
+  `/Applications` (or `~/Applications`). Quit T3 Code first. Set `T3CODE_VERSION=<version>` to
+  install a specific release.
 - **Linux.** Make the AppImage executable with `chmod +x` and run it, or install the `.deb` with
   `sudo apt install ./T3-Code-<version>-amd64.deb`.
 - **Nix.** The flake builds from source for `x86_64-linux`. See

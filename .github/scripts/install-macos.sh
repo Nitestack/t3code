@@ -47,15 +47,8 @@ mkdir -p "$dest_dir"
 dest="$dest_dir/$(basename "$src")"
 
 executable="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$src/Contents/Info.plist")"
-if pgrep -qx "$executable"; then
-  echo "Quitting the running T3 Code..."
-  osascript -e "tell application \"$dest\" to quit" >/dev/null 2>&1 || true
-  for _ in $(seq 1 20); do
-    pgrep -qx "$executable" || break
-    sleep 0.5
-  done
-  pgrep -qx "$executable" && fail "T3 Code is still running; quit it and run this again."
-fi
+# Replacing the app under a running T3 Code would stop its agents mid-turn.
+pgrep -qx "$executable" && fail "T3 Code is running; quit it and run this again."
 
 rm -rf "$dest"
 ditto "$src" "$dest"
