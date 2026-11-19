@@ -16079,38 +16079,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       // while writing child events, so nesting parent inside child would invert the order.
       // The keyed semaphores are neither reentrant nor deadlock-aware.
       if (delegatedTaskTerminalStatus(run.status) !== null) {
-        const pendingLaneRequests = yield* projectionStore.getThreadRecords(
-          threadId,
-          ["turnItems"],
-          {
-            turnItemTypes: ["lane_request"],
-            turnItemStatuses: ["waiting"],
-            messageRoles: [],
-          },
-        );
-        for (const item of pendingLaneRequests.turnItems) {
-          if (
-            item.type !== "lane_request" ||
-            item.runId !== run.id ||
-            item.nodeId === null ||
-            item.laneStatus !== "pending"
-          )
-            continue;
-          yield* dispatchWithReceipt({
-            type: "lane_request.record",
-            commandId: CommandId.make(`model-lane-request:${item.id}:cancelled:run-end`),
-            threadId,
-            runId: run.id,
-            nodeId: item.nodeId,
-            turnItemId: item.id,
-            lane: item.lane,
-            providerInstanceId: item.providerInstanceId,
-            providerLabel: item.providerLabel,
-            reason: item.reason,
-            requestedFor: item.requestedFor,
-            laneStatus: "cancelled",
-          }).pipe(Effect.ignoreCause({ log: true }));
-        }
         // Before the parent hears of the failure: a pending continuation keeps the task open.
         if (run.status === "failed" && run.restartContinuationOfRunId !== undefined) {
           yield* threadDispatch.withLock(threadId, retryContinuationStart(threadId, run.id)).pipe(

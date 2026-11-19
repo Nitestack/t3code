@@ -1,4 +1,4 @@
-import { ModelLaneRequestError, OrchestrationDispatchCommandError } from "@t3tools/contracts";
+import { OrchestrationDispatchCommandError } from "@t3tools/contracts";
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- A synchronous digest inside the pure provider mapping.
 import * as NodeCrypto from "node:crypto";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -1547,6 +1547,7 @@ export const layerWsRpc = (
       const secretResolver = yield* SecretResolver.SecretResolver;
       const peerLinks = yield* PeerLinks.PeerLinks;
       const peerLinkRequests = yield* PeerLinkRequests.PeerLinkRequests;
+      const modelLaneRequests = yield* ModelLaneRequests.ModelLaneRequests;
       const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
@@ -2680,16 +2681,7 @@ export const layerWsRpc = (
           ),
         [WS_METHODS.modelLaneRequestAnswer]: (input) =>
           Effect.annotateCurrentSpan({ "orchestration_v2.thread_id": input.threadId }).pipe(
-            Effect.andThen(
-              Effect.serviceOption(ModelLaneRequests.ModelLaneRequests).pipe(
-                Effect.flatMap(
-                  Option.match({
-                    onNone: () => Effect.fail(new ModelLaneRequestError({ reason: "load_failed" })),
-                    onSome: (requests) => requests.answer(input),
-                  }),
-                ),
-              ),
-            ),
+            Effect.andThen(modelLaneRequests.answer(input)),
           ),
         [WS_METHODS.serverGetSettings]: (_input) =>
           Effect.map(serverSettings.getSettings, (settings) =>
@@ -3596,6 +3588,7 @@ export const layer = Layer.unwrap(
     const reviewGuides = yield* PullRequestReviewGuideService.PullRequestReviewGuideService;
     const peerLinks = yield* PeerLinks.PeerLinks;
     const peerLinkRequests = yield* PeerLinkRequests.PeerLinkRequests;
+    const modelLaneRequests = yield* ModelLaneRequests.ModelLaneRequests;
     const sql = yield* SqlClient.SqlClient;
     return HttpRouter.add(
       "GET",
@@ -3691,6 +3684,7 @@ export const layer = Layer.unwrap(
               ),
               Layer.provide(Layer.succeed(PeerLinks.PeerLinks, peerLinks)),
               Layer.provide(Layer.succeed(PeerLinkRequests.PeerLinkRequests, peerLinkRequests)),
+              Layer.provide(Layer.succeed(ModelLaneRequests.ModelLaneRequests, modelLaneRequests)),
               Layer.provide(
                 SourceControlDiscovery.layer.pipe(
                   Layer.provide(

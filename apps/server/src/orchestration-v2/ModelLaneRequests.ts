@@ -196,8 +196,8 @@ const make = Effect.gen(function* () {
                   outcome: laneStatus === "denied" ? "cancelled" : "completed",
                   summary:
                     laneStatus === "denied"
-                      ? `Denied lane ${card.lane}`
-                      : `Allowed lane ${card.lane}`,
+                      ? `Denied ${card.providerLabel}`
+                      : `Allowed ${card.providerLabel}`,
                 },
               },
             })
