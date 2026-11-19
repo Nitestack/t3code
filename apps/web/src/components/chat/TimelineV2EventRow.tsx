@@ -11,6 +11,7 @@ import { ChevronDownIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
 import { Collapsible, CollapsibleTrigger, CollapsiblePanel } from "../ui/collapsible";
 import { EnvironmentSubagentAvatar, SubagentElapsed, V2LifecycleRow } from "./V2LifecycleRow";
+import { LaneRequestCard } from "./LaneRequestCard";
 import { LinkRequestCard } from "./LinkRequestCard";
 import { SecretRequestCard } from "./SecretRequestCard";
 import { TimelineRowCtx, type TimelineRow } from "./timelineRowContext";
@@ -39,6 +40,9 @@ export function V2EventTimelineRow({ row }: { row: Extract<TimelineRow, { kind: 
         visibility={visibility}
       />
     );
+  }
+  if (item.type === "lane_request") {
+    return <LaneRequestCard environmentId={ctx.activeThreadEnvironmentId} item={item} />;
   }
   return (
     <V2LifecycleRow

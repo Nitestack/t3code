@@ -165,6 +165,7 @@ export function V2LifecycleRow(props: {
         completedAt={item.completedAt}
         threadId={item.childThreadId}
         remote={item.remoteChild}
+        crossingReason={item.crossingReason}
         onOpenThread={props.onOpenThread}
       />
     );
@@ -378,6 +379,7 @@ export function SubagentNotificationLink(props: {
       progress={agent.progress}
       startedAt={agent.startedAt}
       completedAt={agent.completedAt}
+      crossingReason={agent.crossingReason}
       threadId={props.childThreadId}
       onOpenThread={props.onOpenThread}
       {...(resumed
@@ -408,6 +410,8 @@ function SubagentTimelineLink(props: {
   readonly threadId: ThreadId | null;
   /** The thread in a linked environment that runs this task, when it runs there. */
   readonly remote?: OrchestrationV2RemoteTaskChild | undefined;
+  /** Why the task ran outside its thread's lane. */
+  readonly crossingReason?: string | undefined;
   readonly onOpenThread: (threadId: ThreadId) => void;
   readonly event?: {
     readonly status: OrchestrationV2TurnItem["status"] | null;
@@ -466,6 +470,11 @@ function SubagentTimelineLink(props: {
             <span className="shrink-0 text-xs text-muted-foreground">on {remote.label}</span>
           ) : null}
         </span>
+        {props.crossingReason ? (
+          <span className="block truncate text-2xs leading-relaxed text-muted-foreground">
+            Reason: {props.crossingReason}
+          </span>
+        ) : null}
         <span
           className={cn(
             "block text-2xs leading-relaxed",
