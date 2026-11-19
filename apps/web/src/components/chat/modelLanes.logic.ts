@@ -6,15 +6,16 @@ import {
 } from "@t3tools/shared/modelLanes";
 
 /**
- * Lanes a send would put the thread on that it isn't allowed yet. A draft has no
- * grants, so only the project's home lane is allowed there.
+ * Lanes a send would put the thread on that it isn't allowed yet. A draft allows the
+ * project's home lane plus the lanes granted in the draft.
  */
 export function sendLanesNeedingConfirm(input: {
   readonly project: ModelLaneProject;
   readonly thread: Parameters<typeof threadAllowedLanes>[0] | null;
+  readonly draftLanes?: ReadonlyArray<string> | undefined;
   readonly instanceIds: ReadonlyArray<string>;
 }): ReadonlyArray<string> {
-  const grants = input.thread ? threadAllowedLanes(input.thread) : undefined;
+  const grants = input.thread ? threadAllowedLanes(input.thread) : input.draftLanes;
   const lanes = new Set<string>();
   for (const instanceId of input.instanceIds) {
     const lane = laneOfInstanceId(instanceId);

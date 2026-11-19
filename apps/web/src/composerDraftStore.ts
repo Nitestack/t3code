@@ -11,6 +11,7 @@ import {
   DEFAULT_MODEL_BY_PROVIDER,
   defaultInstanceIdForDriver,
   EnvironmentId,
+  ModelLane,
   ModelSelection,
   ProjectId,
   ProviderInstanceId,
@@ -418,6 +419,7 @@ const PersistedDraftThreadState = Schema.Struct({
   worktreePath: Schema.NullOr(Schema.String),
   envMode: DraftThreadEnvModeSchema,
   startFromOrigin: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  allowedLanes: Schema.optionalKey(Schema.Array(ModelLane)),
   checkoutPullRequest: Schema.optionalKey(
     Schema.Struct({ url: Schema.String, branch: Schema.String }),
   ),
@@ -526,6 +528,8 @@ export interface DraftSessionState {
   worktreePath: string | null;
   envMode: DraftThreadEnvMode;
   startFromOrigin: boolean;
+  /** Lanes granted before the first send; they become the thread's allowedLanes. */
+  allowedLanes?: ReadonlyArray<ModelLane>;
   /** Linked to the thread when the draft is sent on this branch. */
   checkoutPullRequest?: DraftCheckoutPullRequest;
   promotedTo?: ScopedThreadRef | null;
@@ -623,6 +627,7 @@ interface ComposerDraftStoreState {
   setDraftThreadContext: (
     threadRef: ComposerThreadTarget,
     options: {
+      allowedLanes?: ReadonlyArray<ModelLane>;
       branch?: string | null;
       worktreePath?: string | null;
       projectRef?: ScopedProjectRef;
@@ -1760,6 +1765,9 @@ function createDraftThreadState(
     envMode:
       options?.envMode ?? (nextWorktreePath ? "worktree" : (existingThread?.envMode ?? "local")),
     startFromOrigin: nextStartFromOrigin,
+    ...(!projectChanged && existingThread?.allowedLanes
+      ? { allowedLanes: existingThread.allowedLanes }
+      : {}),
     ...(checkoutPullRequest ? { checkoutPullRequest } : {}),
     promotedTo: null,
   };
@@ -1780,6 +1788,16 @@ function checkoutPullRequestsEqual(
   right: DraftCheckoutPullRequest | undefined,
 ): boolean {
   return left === right || (left?.url === right?.url && left?.branch === right?.branch);
+}
+
+function lanesEqual(
+  left: ReadonlyArray<ModelLane> | undefined,
+  right: ReadonlyArray<ModelLane> | undefined,
+): boolean {
+  return (
+    left === right ||
+    (left?.length === right?.length && (left ?? []).every((lane, index) => lane === right?.[index]))
+  );
 }
 
 function scopedThreadRefsEqual(
@@ -1812,6 +1830,7 @@ function draftThreadsEqual(left: DraftThreadState | undefined, right: DraftThrea
     left.worktreePath === right.worktreePath &&
     left.envMode === right.envMode &&
     left.startFromOrigin === right.startFromOrigin &&
+    lanesEqual(left.allowedLanes, right.allowedLanes) &&
     checkoutPullRequestsEqual(left.checkoutPullRequest, right.checkoutPullRequest) &&
     scopedThreadRefsEqual(left.promotedTo, right.promotedTo)
   );
@@ -1924,6 +1943,9 @@ function normalizePersistedDraftThreads(
       const branch = candidateDraftThread.branch;
       const worktreePath = candidateDraftThread.worktreePath;
       const startFromOrigin = candidateDraftThread.startFromOrigin === true;
+      const allowedLanes = decodePersistedAllowedLanes(candidateDraftThread.allowedLanes).pipe(
+        Option.getOrUndefined,
+      );
       const normalizedWorktreePath = typeof worktreePath === "string" ? worktreePath : null;
       const checkoutPullRequest = normalizePersistedCheckoutPullRequest(
         candidateDraftThread.checkoutPullRequest,
@@ -1975,6 +1997,7 @@ function normalizePersistedDraftThreads(
         worktreePath: normalizedWorktreePath,
         envMode: normalizeDraftThreadEnvMode(candidateDraftThread.envMode, normalizedWorktreePath),
         startFromOrigin,
+        ...(allowedLanes ? { allowedLanes } : {}),
         ...(candidateDraftThread.environmentSelection === "manual" ||
         candidateDraftThread.environmentSelection === "auto"
           ? { environmentSelection: candidateDraftThread.environmentSelection }
@@ -2057,6 +2080,7 @@ function normalizePersistedDraftThreads(
 }
 
 const decodePersistedModelSelection = Schema.decodeUnknownOption(ModelSelection);
+const decodePersistedAllowedLanes = Schema.decodeUnknownOption(Schema.Array(ModelLane));
 
 /** Storage v3-v5 wrote `provider` and object-shaped options; the schema upgrades both. */
 function normalizePersistedModelSelectionByProvider(
@@ -2464,7 +2488,10 @@ export function partializeComposerDraftStoreState(
     if (!keptSessionKeys.has(threadKey)) {
       continue;
     }
-    persistedDraftThreadsByThreadKey[threadKey] = draftThread;
+    const { allowedLanes, ...rest } = draftThread;
+    persistedDraftThreadsByThreadKey[threadKey] = allowedLanes
+      ? { ...rest, allowedLanes: [...allowedLanes] }
+      : rest;
   }
   return {
     draftsByThreadKey: persistedDraftsByThreadKey,
@@ -2770,6 +2797,9 @@ function toHydratedDraftThreadState(
     worktreePath: persistedDraftThread.worktreePath,
     envMode: persistedDraftThread.envMode,
     startFromOrigin: persistedDraftThread.startFromOrigin,
+    ...(persistedDraftThread.allowedLanes
+      ? { allowedLanes: persistedDraftThread.allowedLanes }
+      : {}),
     ...(persistedDraftThread.environmentSelection
       ? { environmentSelection: persistedDraftThread.environmentSelection }
       : {}),
@@ -3046,6 +3076,8 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               options.checkoutPullRequest,
               projectChanged,
             );
+            const allowedLanes =
+              options.allowedLanes ?? (projectChanged ? undefined : existing.allowedLanes);
             const nextDraftThread: DraftThreadState = {
               threadId: existing.threadId,
               environmentId: nextProjectRef.environmentId,
@@ -3069,6 +3101,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               envMode:
                 options.envMode ?? (nextWorktreePath ? "worktree" : (existing.envMode ?? "local")),
               startFromOrigin: nextStartFromOrigin,
+              ...(allowedLanes ? { allowedLanes } : {}),
               ...(checkoutPullRequest ? { checkoutPullRequest } : {}),
               promotedTo: existing.promotedTo ?? null,
             };
@@ -3085,6 +3118,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               nextDraftThread.worktreePath === existing.worktreePath &&
               nextDraftThread.envMode === existing.envMode &&
               nextDraftThread.startFromOrigin === existing.startFromOrigin &&
+              lanesEqual(nextDraftThread.allowedLanes, existing.allowedLanes) &&
               checkoutPullRequestsEqual(
                 nextDraftThread.checkoutPullRequest,
                 existing.checkoutPullRequest,

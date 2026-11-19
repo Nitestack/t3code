@@ -174,6 +174,7 @@ interface StartThreadBootstrap {
     readonly branch: string | null;
     readonly worktreePath: string | null;
     readonly createdAt: string;
+    readonly allowedLanes?: ReadonlyArray<ModelLane>;
   };
   readonly prepareWorktree?: {
     readonly requireWorktree?: boolean;
@@ -791,6 +792,9 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
       runtimeMode: input.runtimeMode,
       interactionMode: input.interactionMode,
       workspaceStrategy,
+      ...(bootstrap?.allowedLanes === undefined
+        ? {}
+        : { allowedLanes: [...bootstrap.allowedLanes] }),
       initialMessage: {
         messageId: input.message.messageId,
         text: input.message.text,

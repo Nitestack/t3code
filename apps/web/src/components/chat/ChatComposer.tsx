@@ -2492,6 +2492,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       laneRows={
         <ComposerLaneRows
           thread={routeKind === "server" ? activeThread : undefined}
+          draftId={routeKind === "draft" ? draftId : null}
           projectId={activeProjectId}
           instanceEntries={providerInstanceEntries}
         />

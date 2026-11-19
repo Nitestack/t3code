@@ -44,6 +44,14 @@ describe("sendLanesNeedingConfirm", () => {
       expected: ["aix:adcare"],
     },
     {
+      name: "draft that granted a lane up front sends without asking",
+      project: work,
+      thread: null,
+      draftLanes: ["personal"],
+      instanceIds: ["codex"],
+      expected: [],
+    },
+    {
       name: "thread already granted the lane sends without asking",
       project: work,
       thread: { allowedLanes: ["personal"], modelSelection: { instanceId: "codex" } },
@@ -78,8 +86,8 @@ describe("sendLanesNeedingConfirm", () => {
       instanceIds: ["codex", "aix-codex-adcare", "aix-codex-loom", "aix-codex-loom"],
       expected: ["aix:adcare", "aix:loom"],
     },
-  ])("$name", ({ project, thread, instanceIds, expected }) => {
-    expect(sendLanesNeedingConfirm({ project, thread, instanceIds })).toEqual(expected);
+  ])("$name", ({ expected, ...input }) => {
+    expect(sendLanesNeedingConfirm(input)).toEqual(expected);
   });
 });
 

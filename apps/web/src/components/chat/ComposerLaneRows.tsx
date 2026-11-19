@@ -1,4 +1,4 @@
-import type { ProjectId } from "@t3tools/contracts";
+import type { ModelLane, ProjectId } from "@t3tools/contracts";
 import {
   allowedLanesForProject,
   laneOfInstance,
@@ -6,6 +6,7 @@ import {
   threadAllowedLanes,
 } from "@t3tools/shared/modelLanes";
 
+import { useComposerDraftStore, type DraftId } from "../../composerDraftStore";
 import type { ProviderInstanceEntry } from "../../providerInstances";
 import { useProjects } from "../../state/entities";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
@@ -16,23 +17,30 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { composerFloatingLayerProps } from "./composerEventScope";
 import { aixProfileLabels, laneLabel } from "./modelLanes.logic";
 
-/** Drafts have no thread to grant lanes to yet, so they show nothing here. */
 export function ComposerLaneRows(props: {
   thread: Thread | undefined;
+  /** Used before the first send, when there is no thread yet. */
+  draftId: DraftId | null;
   projectId: ProjectId | null;
   instanceEntries: ReadonlyArray<ProviderInstanceEntry>;
 }) {
   const projects = useProjects();
   const updateThreadMetadata = useOrchestrationCommand(threadEnvironment.updateMetadata);
-  const { thread } = props;
-  const project = projects.find(
-    (candidate) =>
-      candidate.id === props.projectId && candidate.environmentId === thread?.environmentId,
+  const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
+  const { thread, draftId } = props;
+  const draft = useComposerDraftStore((store) =>
+    thread || !draftId ? null : (store.draftThreadsByThreadKey[draftId] ?? null),
   );
-  if (!thread || !project) return null;
+  const environmentId = thread?.environmentId ?? draft?.environmentId;
+  const project = projects.find(
+    (candidate) => candidate.id === props.projectId && candidate.environmentId === environmentId,
+  );
+  if (!project || (!thread && !draft)) return null;
 
   const home = projectHomeLane(project);
-  const grants = threadAllowedLanes(thread).filter((lane) => lane !== home);
+  const grants = (thread ? threadAllowedLanes(thread) : (draft?.allowedLanes ?? [])).filter(
+    (lane) => lane !== home,
+  );
   const lanes = allowedLanesForProject(project, grants);
   const others = [
     ...new Set(
@@ -41,11 +49,15 @@ export function ComposerLaneRows(props: {
   ].filter((lane) => !lanes.includes(lane));
 
   const profileLabels = aixProfileLabels(props.instanceEntries);
-  const saveGrants = (next: ReadonlyArray<string>) => {
-    void updateThreadMetadata({
-      environmentId: thread.environmentId,
-      input: { threadId: thread.id, allowedLanes: next },
-    });
+  const saveGrants = (next: ReadonlyArray<ModelLane>) => {
+    if (thread) {
+      void updateThreadMetadata({
+        environmentId: thread.environmentId,
+        input: { threadId: thread.id, allowedLanes: next },
+      });
+    } else if (draftId) {
+      setDraftThreadContext(draftId, { allowedLanes: next });
+    }
   };
 
   return (

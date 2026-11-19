@@ -3016,7 +3016,11 @@ describe("composerDraftStore checkout pull request", () => {
         state: {
           draftsByThreadKey: {},
           draftThreadsByThreadKey: {
-            [draftId]: { ...persistedDraftThread(threadId), checkoutPullRequest: checkout },
+            [draftId]: {
+              ...persistedDraftThread(threadId),
+              checkoutPullRequest: checkout,
+              allowedLanes: ["personal"],
+            },
             [legacyDraftId]: persistedDraftThread(ThreadId.make("thread-legacy")),
           },
           logicalProjectDraftThreadKeyByLogicalProjectKey: {
@@ -3034,7 +3038,8 @@ describe("composerDraftStore checkout pull request", () => {
       expect(checkoutPullRequestUrlToLink(legacy)).toBeNull();
       expect(
         partializeComposerDraftStoreState(store()).draftThreadsByThreadKey[draftId],
-      ).toMatchObject({ checkoutPullRequest: checkout });
+      ).toMatchObject({ checkoutPullRequest: checkout, allowedLanes: ["personal"] });
+      expect(store().getDraftSession(draftId)?.allowedLanes).toEqual(["personal"]);
     } finally {
       await useComposerDraftStore.persist.clearStorage();
       vi.useRealTimers();

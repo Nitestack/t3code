@@ -785,6 +785,7 @@ export function useComposerSend(input: ComposerSendInput) {
     const lanesToConfirm = sendLanesNeedingConfirm({
       project: activeProject,
       thread: isLocalDraftThread ? null : activeThread,
+      draftLanes: isLocalDraftThread ? draftThread?.allowedLanes : undefined,
       instanceIds: multipleModelSelections
         ? multipleModelSelections.map((selection) => selection.instanceId)
         : [ctxSelectedModelSelection.instanceId],
@@ -1327,6 +1328,9 @@ export function useComposerSend(input: ComposerSendInput) {
                       branch: activeThreadBranch,
                       worktreePath: activeThread.worktreePath,
                       createdAt: activeThread.createdAt,
+                      ...(draftThread?.allowedLanes
+                        ? { allowedLanes: draftThread.allowedLanes }
+                        : {}),
                     },
                   }
                 : {}),

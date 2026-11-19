@@ -2183,6 +2183,9 @@ export const layerWsRpc = (
                           runtimeMode: input.runtimeMode,
                           interactionMode: input.interactionMode,
                           workspaceStrategy: input.workspaceStrategy,
+                          ...(input.allowedLanes === undefined
+                            ? {}
+                            : { allowedLanes: input.allowedLanes }),
                           ...(input.initialMessage === undefined
                             ? {}
                             : {
