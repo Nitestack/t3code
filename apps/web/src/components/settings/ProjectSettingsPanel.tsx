@@ -19,7 +19,11 @@ import { lazy, Suspense, useRef, useState, type ReactNode } from "react";
 
 import { useComposerDraftStore } from "../../composerDraftStore";
 import { releaseProjectDraftUploads } from "../../lib/composerDraftUploads";
-import { persistClientSettingsUpdate, useClientSettings } from "../../hooks/useSettings";
+import {
+  persistClientSettingsUpdate,
+  useClientSettings,
+  useEnvironmentSettings,
+} from "../../hooks/useSettings";
 import { readLocalApi } from "../../localApi";
 import { derivePhysicalProjectKey } from "@t3tools/client-runtime/state/project-grouping";
 import {
@@ -69,7 +73,6 @@ import {
 import { useSettingsProjectGroups } from "./useSettingsProjectGroups";
 import { readUnloadedThreadCount } from "../../state/olderSettledShelf";
 import { settingsScopeEnvironmentLabels } from "./settingsScopeAxis";
-import { useScopedSettings } from "./useScopedSettings";
 
 const ProjectIconPickerDialog = lazy(() =>
   import("./ProjectIconPickerDialog").then((module) => ({
@@ -302,11 +305,11 @@ function ProjectDetail({
   const { updateProjectGroup, canOrganizeProjectGroup } = useProjectGroupUpdate();
   const { canMoveProjectGroupScope, moveProjectGroupScope } = useProjectPin();
   const providersByEnvironment = useEnvironmentProviders();
-  const scopedSettings = useScopedSettings();
+  const environmentSettings = useEnvironmentSettings(filePickerProject.environmentId);
   const workKeyProfiles = groupAixProviderProfiles(
     providerInstanceEntriesFor(
       providersByEnvironment.get(filePickerProject.environmentId) ?? EMPTY_SERVER_PROVIDERS,
-      scopedSettings,
+      environmentSettings,
       null,
     ),
   );
