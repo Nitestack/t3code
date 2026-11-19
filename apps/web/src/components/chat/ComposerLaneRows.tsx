@@ -49,7 +49,8 @@ export function ComposerLaneRows(props: {
   };
 
   return (
-    <div className="flex w-full flex-col items-start gap-1 border-b border-border/70 pb-2 text-xs text-muted-foreground">
+    // contain:inline-size: long key names truncate instead of widening the picker.
+    <div className="flex w-full flex-col items-start gap-1 border-b border-border/70 pb-2 text-xs text-muted-foreground [contain:inline-size]">
       <span>Agents in this thread may use</span>
       {lanes.map((lane) => (
         <div key={lane} className="flex w-full items-center justify-between gap-2">
