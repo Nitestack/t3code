@@ -3219,3 +3219,47 @@ it.effect("records the lane of a user-authored turn", () =>
     ]);
   }).pipe(Effect.provide(layerModelLaneTest)),
 );
+
+it.effect("lets agents keep using the current lane of a thread created before lanes", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const threadId = ThreadId.make("thread:model-lane-legacy");
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("create-model-lane-legacy"),
+      threadId,
+      projectId: ProjectId.make("project:model-lane-legacy"),
+      title: "Legacy lane",
+      modelSelection: modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdBy: "user",
+      creationSource: "web",
+    });
+    const { allowedLanes: _allowedLanes, ...legacyThread } = yield* projections.getThread(threadId);
+    yield* projections.apply({
+      id: EventId.make("event:model-lane-legacy:strip-lanes"),
+      type: "thread.metadata-updated",
+      threadId,
+      occurredAt: legacyThread.updatedAt,
+      payload: legacyThread,
+    });
+    assert.isUndefined((yield* projections.getThread(threadId)).allowedLanes);
+
+    yield* orchestrator.dispatch({
+      type: "message.dispatch",
+      commandId: CommandId.make("agent-send-model-lane-legacy"),
+      threadId,
+      messageId: MessageId.make("agent-send-model-lane-legacy"),
+      text: "Task finished",
+      modelSelection: modelSelection,
+      attachments: [],
+      dispatchMode: { type: "defer_start" },
+      createdBy: "agent",
+      creationSource: "mcp",
+    });
+  }).pipe(Effect.provide(layerTest)),
+);

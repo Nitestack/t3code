@@ -203,7 +203,13 @@ import {
 import { planThreadDeletion } from "./ThreadDeletion.ts";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as ServerSettings from "../serverSettings.ts";
-import { allowedLanesForProject, isLaneAllowed, laneOfInstance } from "@t3tools/shared/modelLanes";
+import {
+  allowedLanesForProject,
+  isLaneAllowed,
+  laneOfInstance,
+  laneOfInstanceId,
+  threadAllowedLanes,
+} from "@t3tools/shared/modelLanes";
 
 const isMessageQuestionAnswer = Schema.is(
   Schema.Union([TrimmedNonEmptyString, Schema.NonEmptyArray(TrimmedNonEmptyString)]),
@@ -1587,11 +1593,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   ) {
     const settings = yield* serverSettings.getSettings;
     const configured = settings.providerInstances[selection.instanceId];
-    const lane = laneOfInstance(configured ?? {});
+    const lane =
+      configured === undefined
+        ? laneOfInstanceId(selection.instanceId)
+        : laneOfInstance(configured);
     const project = yield* projects.get(thread.projectId);
     const projectModel = Option.getOrUndefined(project);
     const modelProject = projectModel ?? { scope: "work" as const };
-    const allowedLanes = allowedLanesForProject(modelProject, thread.allowedLanes);
+    const allowedLanes = allowedLanesForProject(modelProject, threadAllowedLanes(thread));
     const allowedProviders = Object.entries(settings.providerInstances)
       .filter(([, instance]) => allowedLanes.includes(laneOfInstance(instance)))
       .map(([instanceId]) => instanceId);
@@ -1599,7 +1608,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       lane,
       allowedLanes,
       allowedProviders,
-      allowed: isLaneAllowed(modelProject, thread.allowedLanes, lane),
+      allowed: isLaneAllowed(modelProject, threadAllowedLanes(thread), lane),
     };
   }, Effect.orDie);
   const runtimePolicy = yield* RuntimePolicyV2;
@@ -5828,7 +5837,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         ? {
             ...plannedTargetThread,
             allowedLanes: [
-              ...new Set([...(plannedTargetThread.allowedLanes ?? []), forkLanePolicy.lane]),
+              ...new Set([...threadAllowedLanes(plannedTargetThread), forkLanePolicy.lane]),
             ],
           }
         : plannedTargetThread;
@@ -7942,7 +7951,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       });
     }
     if (userAuthored && !lanePolicy.allowed) {
-      const allowedLanes = [...(projection.thread.allowedLanes ?? []), lanePolicy.lane];
+      const allowedLanes = [...threadAllowedLanes(projection.thread), lanePolicy.lane];
       yield* emit(
         events,
         command,
@@ -10963,11 +10972,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       if (
         !consumingGrant &&
         command.laneStatus === "allowed_thread" &&
-        !projection.thread.allowedLanes?.includes(command.lane)
+        !threadAllowedLanes(projection.thread).includes(command.lane)
       ) {
-        const allowedLanes = [
-          ...new Set([...(projection.thread.allowedLanes ?? []), command.lane]),
-        ];
+        const allowedLanes = [...new Set([...threadAllowedLanes(projection.thread), command.lane])];
         yield* emit(
           events,
           command,
@@ -15543,7 +15550,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             });
           }
           if (userAuthored && !policy.allowed) {
-            const allowedLanes = [...(projection.thread.allowedLanes ?? []), policy.lane];
+            const allowedLanes = [...threadAllowedLanes(projection.thread), policy.lane];
             yield* emit(
               events,
               command,

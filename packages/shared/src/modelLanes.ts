@@ -42,3 +42,17 @@ export function allowedLanesForProject(
   const home = projectHomeLane(project);
   return home === null || grants.includes(home) ? grants : [home, ...grants];
 }
+
+/** aix instances are named `aix-<driver>-<profile>` by ProviderInstanceSync; driver kinds have no dash. */
+export function laneOfInstanceId(instanceId: string): ModelLane {
+  const match = /^aix-[^-]+-(.+)$/.exec(instanceId);
+  return match?.[1] === undefined ? "personal" : `aix:${match[1]}`;
+}
+
+/** Threads from before lanes existed keep the lane of their current model. */
+export function threadAllowedLanes(thread: {
+  readonly allowedLanes?: ReadonlyArray<string> | undefined;
+  readonly modelSelection: { readonly instanceId: string };
+}): ReadonlyArray<string> {
+  return thread.allowedLanes ?? [laneOfInstanceId(thread.modelSelection.instanceId)];
+}

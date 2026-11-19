@@ -119,6 +119,7 @@ import {
   isLaneAllowed,
   laneOfInstance,
   projectHomeLane,
+  threadAllowedLanes,
 } from "@t3tools/shared/modelLanes";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
@@ -2602,7 +2603,7 @@ const make = Effect.gen(function* () {
             const needsApproval =
               parent !== undefined &&
               parentProject !== undefined &&
-              !isLaneAllowed(parentProject, parent.thread.allowedLanes, lane);
+              !isLaneAllowed(parentProject, threadAllowedLanes(parent.thread), lane);
             // Snapshots list instances any project enables; delegate_task checks the caller's project.
             const enabledForCaller =
               parent === undefined ||
@@ -3111,7 +3112,7 @@ const make = Effect.gen(function* () {
               );
               const inheritedLanes = allowedLanesForProject(
                 parentProject,
-                parent.thread.allowedLanes,
+                threadAllowedLanes(parent.thread),
               );
               const laneRequestRecords = isRetryOfAcceptedCreation
                 ? []
@@ -3130,7 +3131,7 @@ const make = Effect.gen(function* () {
               );
               if (
                 !isRetryOfAcceptedCreation &&
-                !isLaneAllowed(parentProject, parent.thread.allowedLanes, targetLane) &&
+                !isLaneAllowed(parentProject, threadAllowedLanes(parent.thread), targetLane) &&
                 taskLaneGrant?.type !== "lane_request"
               ) {
                 return yield* failure(

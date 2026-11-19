@@ -1,5 +1,5 @@
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
-import { isLaneAllowed, laneOfInstance } from "@t3tools/shared/modelLanes";
+import { isLaneAllowed, laneOfInstance, threadAllowedLanes } from "@t3tools/shared/modelLanes";
 import { isAttachmentOnlyBootstrapPrompt } from "@t3tools/shared/composerContextReferences";
 import {
   CommandId,
@@ -219,7 +219,7 @@ const make = Effect.gen(function* () {
       if (
         !isLaneAllowed(
           project.value,
-          projection.thread.allowedLanes,
+          threadAllowedLanes(projection.thread),
           laneOfInstance(titleProvider ?? {}),
         )
       ) {

@@ -20,7 +20,7 @@ import * as McpInvocationContext from "../mcp/McpInvocationContext.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
-import { isLaneAllowed, laneOfInstance } from "@t3tools/shared/modelLanes";
+import { isLaneAllowed, laneOfInstance, threadAllowedLanes } from "@t3tools/shared/modelLanes";
 
 export class ModelLaneRequests extends Context.Service<
   ModelLaneRequests,
@@ -97,7 +97,7 @@ const make = Effect.gen(function* () {
         });
       }
       const lane = laneOfInstance(provider);
-      if (isLaneAllowed(projectOption.value, records.thread.allowedLanes, lane)) {
+      if (isLaneAllowed(projectOption.value, threadAllowedLanes(records.thread), lane)) {
         return yield* new OrchestratorMcpFailure({
           code: "invalid_request",
           message: `Lane ${lane} is already allowed for this thread; launch the task directly.`,

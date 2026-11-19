@@ -27,7 +27,12 @@ import * as ServerSettings from "../../../serverSettings.ts";
 import * as ProviderRegistry from "../../../provider/ProviderRegistry.ts";
 import * as DateTime from "effect/DateTime";
 import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
-import { allowedLanesForProject, isLaneAllowed, laneOfInstance } from "@t3tools/shared/modelLanes";
+import {
+  allowedLanesForProject,
+  isLaneAllowed,
+  laneOfInstance,
+  threadAllowedLanes,
+} from "@t3tools/shared/modelLanes";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { resolveRuntimeMode } from "../../delegatedTaskModes.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
@@ -279,8 +284,8 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
               }),
             ),
           );
-          const inheritedLanes = allowedLanesForProject(parentProject, caller.allowedLanes);
-          const laneRequests = isLaneAllowed(parentProject, caller.allowedLanes, targetLane)
+          const inheritedLanes = allowedLanesForProject(parentProject, threadAllowedLanes(caller));
+          const laneRequests = isLaneAllowed(parentProject, threadAllowedLanes(caller), targetLane)
             ? []
             : (yield* context.threads
                 .getThreadRecords(caller.id, ["turnItems"], {
@@ -298,7 +303,7 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
               item.grantConsumedAt === undefined,
           );
           if (
-            !isLaneAllowed(parentProject, caller.allowedLanes, targetLane) &&
+            !isLaneAllowed(parentProject, threadAllowedLanes(caller), targetLane) &&
             taskLaneGrant?.type !== "lane_request"
           ) {
             const allowedProviders = providers
