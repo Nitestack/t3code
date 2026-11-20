@@ -3231,7 +3231,7 @@ it.effect(
         createdBy: "user",
         creationSource: "web",
       });
-      assert.deepEqual((yield* projections.getThread(threadId)).allowedLanes, ["personal"]);
+      assert.deepEqual((yield* projections.getThread(threadId)).allowedLanes, []);
 
       const assertLaneDenied = (error: Orchestrator.OrchestratorV2Error) => {
         assert.equal(error._tag, "OrchestratorDispatchError");
@@ -3379,7 +3379,7 @@ it.effect(
       yield* recordLaneRequest(threadGrantId, "thread", "pending");
       yield* recordLaneRequest(threadGrantId, "thread", "allowed_thread");
       const parent = yield* projections.getThreadProjection(threadId);
-      assert.deepEqual(parent.thread.allowedLanes, ["personal", "aix:work"]);
+      assert.deepEqual(parent.thread.allowedLanes, ["aix:work"]);
       const afterThreadGrant = yield* orchestrator.dispatch({
         type: "delegated_task.request",
         commandId: CommandId.make("persistent-model-lane-delegation"),
@@ -3437,10 +3437,8 @@ it.effect("records the lane of a user-authored turn", () =>
       createdBy: "user",
       creationSource: "web",
     });
-    assert.deepEqual((yield* projections.getThread(threadId)).allowedLanes, [
-      "personal",
-      "aix:work",
-    ]);
+    // The Personal home lane stays implicit; only the crossing is recorded.
+    assert.deepEqual((yield* projections.getThread(threadId)).allowedLanes, ["aix:work"]);
   }).pipe(Effect.provide(layerModelLaneTest)),
 );
 

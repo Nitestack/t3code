@@ -132,6 +132,8 @@ vi.mock("expo", () => ({
     return player;
   },
 }));
+// The lane card's state modules reach the native connection runtime.
+vi.mock("../features/threads/LaneRequestCard", () => ({ LaneRequestCard: () => null }));
 vi.mock("expo-video", () => ({
   useVideoPlayer: () => audio.video,
   VideoView: () => null,
