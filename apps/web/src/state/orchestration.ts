@@ -31,18 +31,18 @@ export const threadCostRead = createEnvironmentRpcQueryAtomFamily(connectionAtom
       );
       const projection = thread?.projection;
       if (projection === undefined || projection === null) return null;
+      // Settled turns only: streaming usage would refetch the whole subagent tree per tick.
       return JSON.stringify({
-        turns: projection.providerTurns.map((turn) => [
-          turn.id,
-          turn.status,
-          turn.model,
-          turn.turnTokenUsage,
-        ]),
+        turns: projection.providerTurns.flatMap((turn) =>
+          turn.status === "pending" || turn.status === "running"
+            ? []
+            : [[turn.id, turn.status, turn.model, turn.turnTokenUsage]],
+        ),
         subagents: projection.subagents.map((subagent) => [
           subagent.id,
           subagent.childThreadId,
           subagent.title,
-          subagent.updatedAt,
+          subagent.status,
         ]),
       });
     }),
