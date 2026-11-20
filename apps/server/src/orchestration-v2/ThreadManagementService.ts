@@ -32,6 +32,7 @@ import {
   type OrchestrationV2ThreadShellSnapshot,
   type OrchestrationV2ThreadProjection,
   type OrchestrationV2ThreadTranscript,
+  type OrchestrationV2ThreadCostSummary,
   type OrchestrationV2TurnItem,
   ProjectId,
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
@@ -71,6 +72,7 @@ import { projectTurnItemForDetail } from "./WireProjection.ts";
 import * as LegacyV1ThreadImporter from "./legacy/LegacyV1ThreadImporter.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { ThreadWorktreeRestore } from "../workspace/restoreMissingWorktree.ts";
+import { calculateThreadCostSummary, type ThreadCostProjection } from "./threadCost.ts";
 
 export type ThreadManagementSendMode = "auto" | "queue" | "steer" | "restart";
 
@@ -411,6 +413,9 @@ export interface ThreadManagementServiceShape {
     readonly itemId: TurnItemId;
   }) => Effect.Effect<OrchestrationV2GetTurnItemResult, Orchestrator.OrchestratorV2Error>;
   readonly getThreadRecords: Orchestrator.OrchestratorV2["Service"]["getThreadRecords"];
+  readonly getThreadCost: (
+    threadId: ThreadId,
+  ) => Effect.Effect<OrchestrationV2ThreadCostSummary | null, Orchestrator.OrchestratorV2Error>;
   readonly getThreadProjection: (
     threadId: ThreadId,
   ) => Effect.Effect<OrchestrationV2ThreadProjection, Orchestrator.OrchestratorV2Error>;
@@ -698,6 +703,53 @@ const make = Effect.gen(function* () {
     ensureProjectionTranscript(threadId).pipe(
       Effect.andThen(orchestrator.getThreadProjection(threadId)),
     );
+
+  const getThreadCost: ThreadManagementServiceShape["getThreadCost"] = Effect.fn(
+    "ThreadManagementService.getThreadCost",
+  )(function* (threadId) {
+    const settings = yield* serverSettings.getSettings.pipe(Effect.orDie);
+    const projections = new Map<ThreadId, ThreadCostProjection>();
+    const visited = new Set<ThreadId>();
+    const visit: (
+      currentThreadId: ThreadId,
+    ) => Effect.Effect<void, Orchestrator.OrchestratorV2Error> = Effect.fn(
+      "ThreadManagementService.getThreadCost.visit",
+    )(function* (currentThreadId) {
+      if (visited.has(currentThreadId)) return;
+      visited.add(currentThreadId);
+      const records = yield* ensureProjectionTranscript(currentThreadId).pipe(
+        Effect.andThen(
+          orchestrator.getThreadRecords(currentThreadId, [
+            "subagents",
+            "providerTurns",
+            "providerThreads",
+            "providerSessions",
+          ]),
+        ),
+      );
+      const projection: ThreadCostProjection = {
+        thread: { id: records.thread.id, title: records.thread.title },
+        subagents: records.subagents,
+        providerTurns: records.providerTurns,
+        providerThreads: records.providerThreads,
+        providerSessions: records.providerSessions,
+      };
+      projections.set(currentThreadId, projection);
+      const childIds = [
+        ...new Set(
+          records.subagents.flatMap((subagent) =>
+            subagent.origin === "app_owned" && subagent.childThreadId !== null
+              ? [subagent.childThreadId]
+              : [],
+          ),
+        ),
+      ];
+      yield* Effect.forEach(childIds, visit, { discard: true });
+    });
+
+    yield* visit(threadId);
+    return calculateThreadCostSummary(threadId, projections, settings);
+  });
 
   const getCheckpointContext: ThreadManagementServiceShape["getCheckpointContext"] = (threadId) =>
     ensureProjectionTranscript(threadId).pipe(
@@ -1740,6 +1792,7 @@ const make = Effect.gen(function* () {
         );
       },
     ),
+    getThreadCost,
     getThreadProjection,
     getCheckpointContext,
     getThreadSnapshot,

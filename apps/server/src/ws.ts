@@ -2084,6 +2084,21 @@ export const layerWsRpc = (
           getOrchestrationV2ArchivedShellSnapshot,
         [ORCHESTRATION_V2_WS_METHODS.getThreadFamily]: (input) =>
           readOmittableShellRows({ familyOf: input.threadId }, "Failed to load the thread family"),
+        [ORCHESTRATION_V2_WS_METHODS.getThreadCost]: (input) =>
+          Effect.annotateCurrentSpan({ "orchestration_v2.thread_id": input.threadId }).pipe(
+            Effect.andThen(
+              threadManagement.getThreadCost(input.threadId).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new OrchestrationV2GetThreadProjectionError({
+                      threadId: input.threadId,
+                      message: `Failed to load thread cost for ${input.threadId}`,
+                      cause,
+                    }),
+                ),
+              ),
+            ),
+          ),
         [ORCHESTRATION_V2_WS_METHODS.getThreadLinkMetadata]: (input) =>
           threadManagement.getThreadLinkMetadata(input.threadIds).pipe(
             Effect.mapError(

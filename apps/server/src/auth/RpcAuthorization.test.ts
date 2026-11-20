@@ -12,6 +12,7 @@ import {
   ThreadId,
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
+  ORCHESTRATION_V2_WS_METHODS,
   AuthSourceControlWriteScope,
   AuthTerminalReadScope,
   AuthTerminalOperateScope,
@@ -73,6 +74,12 @@ describe("RPC authorization scopes", () => {
     for (const method of [WS_METHODS.subscribeVcsBranch, WS_METHODS.vcsRefreshBranch]) {
       expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationReadScope);
     }
+  });
+
+  it("lets thread readers inspect their token cost", () => {
+    expect(requiredScopeForRpcMethod(ORCHESTRATION_V2_WS_METHODS.getThreadCost)).toBe(
+      AuthOrchestrationReadScope,
+    );
   });
 
   it("still lets readers load settings the way installed Swift clients ask", () => {

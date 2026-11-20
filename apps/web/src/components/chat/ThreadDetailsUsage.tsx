@@ -1,7 +1,9 @@
 import type {
+  EnvironmentId,
   ProviderInstanceId,
   ServerProvider,
   ServerProviderUsageWindow,
+  ThreadId,
   UsageLimitSourceSnapshots,
 } from "@t3tools/contracts";
 import {
@@ -28,6 +30,9 @@ import { formatUpcomingTimestamp } from "../../timestampFormat";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { formatContextWindowCompactionMessage } from "./compaction.logic";
 import { ThreadDetailsSection } from "./ThreadDetailsSection";
+import { useEnvironmentQuery } from "../../state/query";
+import { threadCostRead } from "../../state/orchestration";
+import { ThreadDetailsCost } from "./ThreadDetailsCost";
 
 const PACE_LABEL: Record<LimitPace, string> = {
   ahead: "Ahead of pace",
@@ -42,10 +47,37 @@ export interface ThreadDetailsUsageInput {
   readonly contextWindow: ContextWindowSnapshot | null;
 }
 
+export interface ThreadDetailsUsageProps extends Omit<ThreadDetailsUsageInput, "contextWindow"> {
+  readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
+}
+
 type UsageTone = "error" | "warning" | null;
 
+/** AIX threads show their calculated cost; other providers keep their limit windows. */
+export function ThreadDetailsUsage(props: ThreadDetailsUsageProps) {
+  const selected = props.providers.find(
+    (provider) => provider.instanceId === props.providerInstanceId,
+  );
+  return selected?.aixProfile === undefined ? (
+    <ThreadDetailsUsageLimits
+      providerInstanceId={props.providerInstanceId}
+      providers={props.providers}
+      sources={props.sources}
+    />
+  ) : (
+    <AixThreadDetailsCost {...props} />
+  );
+}
+
+function AixThreadDetailsCost({ environmentId, threadId, ...usage }: ThreadDetailsUsageProps) {
+  const cost = useEnvironmentQuery(threadCostRead({ environmentId, input: { threadId } }));
+  if (cost.isSuccess && cost.data !== null) return <ThreadDetailsCost summary={cost.data} />;
+  return <ThreadDetailsUsageLimits {...usage} />;
+}
+
 /** The selected provider's limit windows. Each row reads as room left. */
-export function ThreadDetailsUsage({
+function ThreadDetailsUsageLimits({
   providerInstanceId,
   providers,
   sources,

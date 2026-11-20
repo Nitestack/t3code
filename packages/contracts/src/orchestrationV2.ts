@@ -3877,6 +3877,23 @@ export type OrchestrationV2InternalCommand = typeof OrchestrationV2InternalComma
 
 export type OrchestrationV2ServerCommand = OrchestrationV2Command | OrchestrationV2InternalCommand;
 
+export const OrchestrationV2ThreadCostSubagent = Schema.Struct({
+  threadId: ThreadId,
+  title: TrimmedNonEmptyString,
+  costUsd: Schema.Number.check(Schema.isFinite()),
+});
+export type OrchestrationV2ThreadCostSubagent = typeof OrchestrationV2ThreadCostSubagent.Type;
+
+export const OrchestrationV2ThreadCostSummary = Schema.Struct({
+  totalCostUsd: Schema.Number.check(Schema.isFinite()),
+  mainThreadCostUsd: Schema.Number.check(Schema.isFinite()),
+  subagents: Schema.Array(OrchestrationV2ThreadCostSubagent),
+});
+export type OrchestrationV2ThreadCostSummary = typeof OrchestrationV2ThreadCostSummary.Type;
+
+export const OrchestrationV2GetThreadCostInput = Schema.Struct({ threadId: ThreadId });
+export type OrchestrationV2GetThreadCostInput = typeof OrchestrationV2GetThreadCostInput.Type;
+
 export const ORCHESTRATION_V2_WS_METHODS = {
   dispatchCommand: "orchestration.dispatchCommand",
   getTurnDiff: "orchestration.getTurnDiff",
@@ -3887,6 +3904,7 @@ export const ORCHESTRATION_V2_WS_METHODS = {
   getArchivedShellSnapshot: "orchestration.getArchivedShellSnapshot",
   getThreadFamily: "orchestration.getThreadFamily",
   getThreadTitles: "orchestration.getThreadTitles",
+  getThreadCost: "orchestration.getThreadCost",
   getThreadLinkMetadata: "orchestration.getThreadLinkMetadata",
   getWorktreeThreadIds: "orchestration.getWorktreeThreadIds",
   getOlderSettledThreads: "orchestration.getOlderSettledThreads",
@@ -4572,6 +4590,10 @@ export const OrchestrationV2RpcSchemas = {
   getThreadTitles: {
     input: OrchestrationV2GetThreadTitlesInput,
     output: OrchestrationV2ThreadTitles,
+  },
+  getThreadCost: {
+    input: OrchestrationV2GetThreadCostInput,
+    output: Schema.NullOr(OrchestrationV2ThreadCostSummary),
   },
   getThreadLinkMetadata: {
     input: OrchestrationV2GetThreadTitlesInput,
