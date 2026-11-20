@@ -70,7 +70,7 @@ on:
         default: false
         type: boolean
       # Whether the job opens the packaged app against a seeded database and
-      # opens a thread before uploading it. Linux AppImage or macOS DMG.
+      # opens a thread before uploading it. Linux AppImage or macOS DMG/zip.
       launch_check:
         required: false
         default: false
@@ -112,6 +112,13 @@ on:
       # Fork builds are allowed only through the release workflow's verified
       # build-only path; upstream release callers keep their existing guard.
       fork_build_only:
+        required: false
+        default: false
+        type: boolean
+      # Whether the job builds only the CLI archive (skipping desktop packaging,
+      # desktop dependencies, and desktop artifact uploads). Used by fork
+      # releases to build the Linux x64 WSL runtime needed by Windows x64.
+      cli_archive_only:
         required: false
         default: false
         type: boolean
@@ -163,6 +170,13 @@ jobs:
           echo "::error::untrusted_bundle cannot be combined with launch_check or cli_archive, which run the bundle."
           exit 1
 
+      - name: Reject invalid cli_archive_only options
+        if: inputs.cli_archive_only && (!inputs.cli_archive || inputs.launch_check || inputs.verify_runner != '')
+        shell: bash
+        run: |
+          echo "::error::cli_archive_only requires cli_archive and cannot be combined with launch_check or verify_runner."
+          exit 1
+
       # This repository is public, so Git needs no credentials. checkout's
       # credential cleanup runs submodule foreach even with submodules disabled,
       # which fails on the orphaned gitlinks in our vendored .repos tree.
@@ -194,7 +208,7 @@ jobs:
       - name: Setup dependencies
         uses: ./.github/actions/setup-ci-deps
         with:
-          install-args: --filter=@t3tools/desktop... --filter=t3... --filter=@t3tools/scripts...
+          install-args: ${{ inputs.cli_archive_only && '--filter=t3... --filter=@t3tools/scripts...' || '--filter=@t3tools/desktop... --filter=t3... --filter=@t3tools/scripts...' }}
           save-pnpm-store: ${{ inputs.save_pnpm_store }}
         env:
           pnpm_config_cache_dir: ${{ runner.temp }}/pnpm-metadata
@@ -230,7 +244,7 @@ jobs:
           key: resource-monitor-${{ inputs.rust_target }}-${{ inputs.platform == 'win' && startsWith(inputs.runner, 'windows-') && 'native-' || '' }}${{ hashFiles('native/resource-monitor/Cargo.lock', 'native/resource-monitor/Cargo.toml', 'native/resource-monitor/src/**') }}
 
       - name: Cache Linux capture helpers
-        if: inputs.platform == 'linux'
+        if: inputs.platform == 'linux' && !inputs.cli_archive_only
         id: capture_helper_cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -244,7 +258,7 @@ jobs:
       # checks an archive found here against the SHA-256 pinned in those toolset
       # files and downloads again on a mismatch, so only raw archives are cached.
       - name: Cache Linux packaging tool archives
-        if: inputs.platform == 'linux'
+        if: inputs.platform == 'linux' && !inputs.cli_archive_only
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -262,7 +276,7 @@ jobs:
           fi
 
       - name: Setup Rust
-        if: steps.resource_monitor_cache.outputs.cache-hit != 'true' || (inputs.platform == 'linux' && steps.capture_helper_cache.outputs.cache-hit != 'true')
+        if: steps.resource_monitor_cache.outputs.cache-hit != 'true' || (inputs.platform == 'linux' && !inputs.cli_archive_only && steps.capture_helper_cache.outputs.cache-hit != 'true')
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: stable
@@ -518,7 +532,7 @@ jobs:
           overwrite: true
 
       - name: Install Linux desktop build libraries
-        if: inputs.platform == 'linux'
+        if: inputs.platform == 'linux' && !inputs.cli_archive_only
         shell: bash
         run: |
           sudo apt-get update
@@ -533,9 +547,8 @@ jobs:
               convert -version
           fi
 
-      # The WSL backend embeds the same-arch Linux CLI archive. Upstream Windows
-      # jobs can start alongside Linux and wait here after setup; fork callers
-      # already depend on the Linux job, so its archive is available on arrival.
+      # The WSL backend embeds the same-arch Linux CLI archive. Windows jobs
+      # start alongside Linux and wait here after setup so the two overlap.
       - name: Wait for Linux CLI archive
         if: inputs.platform == 'win'
         shell: pwsh
@@ -629,6 +642,7 @@ jobs:
           echo "T3CODE_DESKTOP_MAC_SELF_SIGNED_IDENTITY=T3 Code Fork" >> "$GITHUB_ENV"
 
       - name: Build desktop artifact
+        if: ${{ !inputs.cli_archive_only }}
         shell: bash
         env:
           # pnpm only goes to the registry for packages or versions the cache lacks.
@@ -832,7 +846,7 @@ jobs:
 
       # A build can package fine and still not open (a missing module in the
       # backend or the bundle). This launches the app from the shipped
-      # AppImage or DMG.
+      # AppImage, DMG, or macOS zip.
       - name: Launch check
         if: inputs.launch_check
         shell: bash
@@ -840,10 +854,19 @@ jobs:
           set -euo pipefail
           check=(node scripts/smoke-desktop-app.ts --artifacts-dir "$RUNNER_TEMP/desktop-launch-check")
           if [[ "${{ inputs.platform }}" == "mac" ]]; then
-            mount="$RUNNER_TEMP/desktop-launch-dmg"
-            hdiutil attach -nobrowse -readonly -mountpoint "$mount" "$(ls "$GITHUB_WORKSPACE"/release/*.dmg)"
-            trap 'hdiutil detach "$mount" -force >/dev/null || true' EXIT
-            app=$(ls -d "$mount"/*.app)
+            if [[ "${{ inputs.target }}" == "zip" ]]; then
+              unpacked="$RUNNER_TEMP/desktop-launch-zip"
+              rm -rf "$unpacked"
+              mkdir -p "$unpacked"
+              trap 'rm -rf "$unpacked"' EXIT
+              ditto -x -k "$(ls "$GITHUB_WORKSPACE"/release/*.zip)" "$unpacked"
+              app=$(ls -d "$unpacked"/*.app)
+            else
+              mount="$RUNNER_TEMP/desktop-launch-dmg"
+              hdiutil attach -nobrowse -readonly -mountpoint "$mount" "$(ls "$GITHUB_WORKSPACE"/release/*.dmg)"
+              trap 'hdiutil detach "$mount" -force >/dev/null || true' EXIT
+              app=$(ls -d "$mount"/*.app)
+            fi
             executable=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$app/Contents/Info.plist")
             "${check[@]}" --executable "$app/Contents/MacOS/$executable"
           else
@@ -895,6 +918,7 @@ jobs:
           overwrite: true
 
       - name: Collect release assets
+        if: ${{ !inputs.cli_archive_only }}
         shell: bash
         run: |
           set -euo pipefail
@@ -992,6 +1016,7 @@ jobs:
           NODE
 
       - name: Collect resource monitor
+        if: ${{ !inputs.cli_archive_only }}
         shell: bash
         run: |
           set -euo pipefail
@@ -1005,6 +1030,7 @@ jobs:
           cp "$source_path" "$target_dir/$binary_name"
 
       - name: Upload build artifacts
+        if: ${{ !inputs.cli_archive_only }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: desktop-${{ inputs.platform }}-${{ inputs.arch }}
@@ -1015,6 +1041,7 @@ jobs:
           overwrite: true
 
       - name: Upload resource monitor
+        if: ${{ !inputs.cli_archive_only }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: resource-monitor-${{ inputs.resource_key }}

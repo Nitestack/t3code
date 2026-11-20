@@ -56,16 +56,7 @@ function resolveForkReleaseVersion({ baseVersion, sha, baseReleaseSha = "", fork
 }
 
 function checksummedReleaseAssets(version) {
-  return [
-    `T3-Code-${version}-x64.exe`,
-    `T3-Code-${version}.apk`,
-    `T3-Code-${version}-arm64.dmg`,
-    `T3-Code-${version}-arm64.zip`,
-    // Unversioned: electron-updater replaces an installed AppImage in place only without x.y.z.
-    "T3-Code-x86_64.AppImage",
-    // electron-builder lists the .deb in latest-linux.yml, so the feed needs it too.
-    `T3-Code-${version}-amd64.deb`,
-  ];
+  return [`T3-Code-${version}-x64.exe`, `T3-Code-${version}.apk`, `T3-Code-${version}-arm64.zip`];
 }
 
 // electron-updater feeds: each manifest must list the installer its platform updates from.
@@ -73,12 +64,11 @@ function updateManifests(version) {
   return {
     "latest.yml": `T3-Code-${version}-x64.exe`,
     "latest-mac.yml": `T3-Code-${version}-arm64.zip`,
-    "latest-linux.yml": "T3-Code-x86_64.AppImage",
   };
 }
 
 function requiredReleaseAssets(version) {
-  const [windows, android, macDmg, macZip, linux, deb] = checksummedReleaseAssets(version);
+  const [windows, android, macZip] = checksummedReleaseAssets(version);
   return [
     windows,
     `${windows}.sha256`,
@@ -87,18 +77,11 @@ function requiredReleaseAssets(version) {
     android,
     `${android}.sha256`,
     "metadata.json",
-    macDmg,
-    `${macDmg}.sha256`,
-    `${macDmg}.blockmap`,
     macZip,
     `${macZip}.sha256`,
     `${macZip}.blockmap`,
     "install-macos.sh",
     "install-windows.ps1",
-    linux,
-    `${linux}.sha256`,
-    deb,
-    `${deb}.sha256`,
     ...Object.keys(updateManifests(version)),
     "nix-build.json",
     "BUILD-INFO.md",
@@ -265,11 +248,10 @@ function buildForkBuildInfo({
     "",
     `These artifacts are built from the fork commit and include fork changes plus upstream through ${upstreamTag}.`,
     "",
-    "The Windows x64 installer was built and its packaged native runtime was verified on the standard Windows 2025 runner. Windows signing status is recorded in windows-metadata.json.",
+    "The Windows x64 installer was built with the Linux x64 WSL runtime and its packaged native runtime was verified on the standard Windows 2025 runner. Windows signing status is recorded in windows-metadata.json.",
     "The Android APK was signed with the release upload certificate and verified by the Android build job.",
-    "The macOS Apple Silicon DMG and zip are signed with the fork's self-signed certificate, not notarized, and passed a launch check on a GitHub macOS runner.",
-    "The Linux x64 AppImage passed a launch check on the standard Ubuntu runner.",
-    "latest.yml, latest-mac.yml, and latest-linux.yml are the desktop update feeds; every file they list was checked against its SHA-512.",
+    "The macOS Apple Silicon zip is signed with the fork's self-signed certificate, not notarized, and passed a launch check on a GitHub macOS runner.",
+    "latest.yml and latest-mac.yml are the desktop update feeds; every file they list was checked against its SHA-512.",
     `The matching ${markdownCode(`t3code-${forkBaseVersion(version)}`)} Nix package was built successfully; its exact source and store path are in nix-build.json.`,
     "",
     publicationMode === "authorized-auto-publish"
@@ -329,7 +311,7 @@ function buildForkReleaseNotes({
     "",
     `Tested build artifact run: ${markdownCode(buildArtifactRunId)} (attempt: ${markdownCode(buildArtifactRunAttempt)})`,
     "",
-    `The Windows installer, macOS Apple Silicon app, Linux AppImage and Debian package, signed Android APK, and versioned Nix package are built from the fork commit and include fork changes plus upstream through ${upstreamTag}. Checksums and build metadata are attached. Installed desktop apps update themselves from fork releases.`,
+    `The Windows installer (with WSL runtime), macOS Apple Silicon app, signed Android APK, and versioned Nix package are built from the fork commit and include fork changes plus upstream through ${upstreamTag}. Checksums and build metadata are attached. Installed desktop apps update themselves from fork releases.`,
     "",
     "On Windows, run this in a normal PowerShell window. It needs no admin rights and avoids the SmartScreen block on the unsigned installer:",
     "",
@@ -337,7 +319,7 @@ function buildForkReleaseNotes({
     "irm https://github.com/get-aix/t3code/releases/latest/download/install-windows.ps1 | iex",
     "```",
     "",
-    "On macOS (Apple Silicon), install only with this command. The app is not notarized, so a DMG or zip downloaded in a browser is blocked by Gatekeeper:",
+    "On macOS (Apple Silicon), install only with this command. The app is not notarized, so a zip downloaded in a browser is blocked by Gatekeeper:",
     "",
     "```sh",
     "curl -fsSL https://github.com/get-aix/t3code/releases/latest/download/install-macos.sh | bash",
