@@ -8,7 +8,7 @@ pingdotgg and distributed under the MIT License. It keeps everything T3 Code doe
 - [Personal and Work](./work-personal.md): every project has a scope, and the sidebar, model
   picker, Settings, and Usage page follow it.
 - [Gateway budgets](./aix-budgets.md): dollar budgets, spend, and reset times for your gateway keys.
-- Fork builds for Windows, macOS, Linux, Nix, and Android that update from fork releases.
+- Fork builds for Windows, Apple Silicon macOS, Nix / NixOS, and Android that update from fork releases.
 
 The fork uses the same app name, `t3` and `t3code-desktop` commands, and data directory as
 upstream T3 Code. Install it **instead of** T3 Code, not next to it.
@@ -21,7 +21,6 @@ Download from the fork's [latest release](https://github.com/get-aix/t3code/rele
 | --------------------- | ------------------------------------------------------------------------------------------------ |
 | Windows x64           | `irm https://github.com/get-aix/t3code/releases/latest/download/install-windows.ps1 \| iex`      |
 | macOS (Apple Silicon) | `curl -fsSL https://github.com/get-aix/t3code/releases/latest/download/install-macos.sh \| bash` |
-| Linux x64             | `T3-Code-x86_64.AppImage` or `T3-Code-<version>-amd64.deb`                                       |
 | Nix / NixOS           | `nix profile add 'github:get-aix/t3code/release'`                                                |
 | Android               | `T3-Code-<version>.apk`                                                                          |
 
@@ -32,12 +31,10 @@ Notes per platform:
   Quit T3 Code first. Set `$env:T3CODE_VERSION = "<version>"` to install a specific release. The
   `T3-Code-<version>-x64.exe` download also works, but it is unsigned: SmartScreen asks you to
   choose **More info → Run anyway**, and a work PC may block it.
-- **macOS.** Use the script. The app is not notarized, so Gatekeeper blocks a DMG or zip downloaded
+- **macOS.** Use the script. The app is not notarized, so Gatekeeper blocks a zip downloaded
   in a browser. The script checks the download's SHA-256 and installs **T3 Code** into
   `/Applications` (or `~/Applications`). Quit T3 Code first. Set `T3CODE_VERSION=<version>` to
   install a specific release.
-- **Linux.** Make the AppImage executable with `chmod +x` and run it, or install the `.deb` with
-  `sudo apt install ./T3-Code-<version>-amd64.deb`.
 - **Nix.** The flake builds from source for `x86_64-linux`. See
   [T3 Code fork (Nix)](./install.md#t3-code-fork-nix) for flake inputs, NixOS, Home Manager, and
   pinning a release.
@@ -64,7 +61,7 @@ Your own provider sign-ins keep working.
 
 ## Updates
 
-The desktop apps on Windows, macOS, and Linux update themselves from fork releases through the
+The desktop apps on Windows and macOS update themselves from fork releases through the
 in-app updater, the same way T3 Code does. Nix installs update through Nix: run
 `nix profile upgrade` or `nix flake update t3code`, then rebuild. Install new Android APKs from the
 Releases page.
@@ -125,7 +122,7 @@ Compared with upstream T3 Code:
 - **Gateway budgets.** The Usage page and the composer's usage-limits banner show aix key budgets,
   grouped by gateway project. See [Gateway budgets](./aix-budgets.md).
 - **Usage by scope.** The Usage page counts Codex and Claude records for Work projects under Work.
-- **Fork builds.** Windows, Apple Silicon macOS, Linux AppImage and `.deb`, a Nix flake, and an
+- **Fork builds.** Windows (with WSL support), Apple Silicon macOS, a Nix flake, and an
   Android APK that replaces the Play Store app. Desktop apps update from fork releases.
 - **Stable-only upstream sync.** The fork takes upstream's stable release tags, never its `main`.
 

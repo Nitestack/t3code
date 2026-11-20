@@ -87,8 +87,8 @@ offers your own Claude and Codex sign-ins instead.
   the conversation.
 - **Everything else from T3 Code.** Worktrees, diffs, checkpoints, remote access, T3 Connect, and
   all of T3's other providers work as before.
-- **Fork builds for every platform.** Windows, Apple Silicon macOS, Linux, Nix, and an Android
-  app. Desktop apps update themselves from fork releases.
+- **Fork builds for supported platforms.** Windows (with WSL support), Apple Silicon macOS,
+  NixOS / Nix, and an Android app. Desktop apps update themselves from fork releases.
 
 ## Installation
 
@@ -98,7 +98,6 @@ Download from the [latest release](https://github.com/get-aix/t3code/releases/la
 | --------------------- | ---------------------------------------------------------------------------------------------------------------- |
 | Windows x64           | `irm https://github.com/get-aix/t3code/releases/latest/download/install-windows.ps1 \| iex` in PowerShell        |
 | macOS (Apple Silicon) | `curl -fsSL https://github.com/get-aix/t3code/releases/latest/download/install-macos.sh \| bash`                 |
-| Linux x64             | `T3-Code-x86_64.AppImage` (`chmod +x`, then run it), or `sudo apt install ./T3-Code-<version>-amd64.deb`         |
 | Nix / NixOS           | `nix profile add 'github:get-aix/t3code/release'`, or the [flake input](./docs/user/install.md#t3-code-fork-nix) |
 | Android               | Install `T3-Code-<version>.apk`. It replaces the Play Store T3 Code app, so uninstall that first.                |
 

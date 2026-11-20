@@ -601,19 +601,9 @@ test("existing release assets must have matching source metadata and file checks
   try {
     const windowsBytes = Buffer.from("windows installer bytes");
     const androidBytes = Buffer.from("signed apk bytes");
-    for (const installer of [
-      macZip,
-      "T3-Code-0.1.9-arm64.dmg",
-      "T3-Code-x86_64.AppImage",
-      "T3-Code-0.1.9-amd64.deb",
-    ]) {
-      fs.writeFileSync(path.join(directory, installer), installer);
-      fs.writeFileSync(
-        path.join(directory, `${installer}.sha256`),
-        `${digest(installer)}  ${installer}\n`,
-      );
-    }
-    for (const blockmapped of [windows, macZip, "T3-Code-0.1.9-arm64.dmg"]) {
+    fs.writeFileSync(path.join(directory, macZip), macZip);
+    fs.writeFileSync(path.join(directory, `${macZip}.sha256`), `${digest(macZip)}  ${macZip}\n`);
+    for (const blockmapped of [windows, macZip]) {
       fs.writeFileSync(path.join(directory, `${blockmapped}.blockmap`), "blockmap");
     }
     fs.writeFileSync(path.join(directory, "install-macos.sh"), "#!/bin/bash\n");
@@ -642,8 +632,7 @@ test("existing release assets must have matching source metadata and file checks
         ].join("\n"),
       );
     writeManifest("latest.yml", [windows]);
-    writeManifest("latest-mac.yml", [macZip, "T3-Code-0.1.9-arm64.dmg"]);
-    writeManifest("latest-linux.yml", ["T3-Code-x86_64.AppImage", "T3-Code-0.1.9-amd64.deb"]);
+    writeManifest("latest-mac.yml", [macZip]);
     fs.writeFileSync(path.join(directory, android), androidBytes);
     fs.writeFileSync(
       path.join(directory, `${windows}.sha256`),
@@ -782,7 +771,22 @@ test("existing release assets must have matching source metadata and file checks
       }),
       /latest-mac\.yml lists T3-Code-0\.1\.9-arm64\.zip/,
     );
-    writeManifest("latest-mac.yml", ["T3-Code-0.1.9-arm64.dmg"]);
+    fs.writeFileSync(path.join(directory, macZip), macZip);
+    fs.writeFileSync(path.join(directory, `${macZip}.sha256`), `${digest(macZip)}  ${macZip}\n`);
+    fs.writeFileSync(
+      path.join(directory, "latest-mac.yml"),
+      [
+        "version: 0.1.9",
+        "files:",
+        "  - url: T3-Code-0.1.9-arm64.dmg",
+        `    sha512: ${sha512(macZip)}`,
+        "    size: 1",
+        "path: T3-Code-0.1.9-arm64.dmg",
+        `sha512: ${sha512(macZip)}`,
+        "releaseDate: '2026-11-18T00:00:00.000Z'",
+        "",
+      ].join("\n"),
+    );
     await assert.rejects(
       verifyForkBuildArtifactAssets({
         directory,
