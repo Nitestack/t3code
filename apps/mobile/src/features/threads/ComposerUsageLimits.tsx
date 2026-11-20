@@ -6,6 +6,7 @@ import type {
   UsageLimitsReport,
   UsageScope,
 } from "@t3tools/contracts";
+import { T, useGT } from "gt-react-native";
 import { Pressable, ScrollView, View } from "react-native";
 import { useState } from "react";
 import { formatUsd } from "@t3tools/shared/usageFormat";
@@ -41,13 +42,14 @@ export function ComposerUsageLimits({
     requestedScope,
     selectedScope,
   );
+  const gt = useGT();
   const now = Date.parse(report.createdAt);
   const work = composerWorkUsage(accounts, providerInstanceId);
   const workGroupName = work?.name ?? "Work";
   const workReset = work?.resetsAt;
   const close = (
     <Pressable
-      accessibilityLabel="Dismiss usage limits"
+      accessibilityLabel={gt("Dismiss usage limits")}
       accessibilityRole="button"
       hitSlop={12}
       onPress={onClose}
@@ -132,7 +134,9 @@ export function ComposerUsageLimits({
         )}
         {scope !== "work" && accounts.length === 0 ? (
           <View className="flex-row items-center gap-3 px-4 pt-3">
-            <Text className="min-w-0 flex-1 text-base text-foreground">Usage limits</Text>
+            <Text className="min-w-0 flex-1 text-base text-foreground">
+              <T>Usage limits</T>
+            </Text>
             {close}
           </View>
         ) : null}

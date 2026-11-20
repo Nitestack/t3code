@@ -1,4 +1,6 @@
 import { ActiveNewTaskContext } from "../../state/active-new-task";
+import { errorDisplayMessage } from "@t3tools/client-runtime/errors";
+import { msg, useMessages } from "gt-react-native";
 import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
 import {
   isModelSelectionInProjectScope,
@@ -7,6 +9,7 @@ import {
   resolveModelPickerProjectScope,
 } from "@t3tools/client-runtime/provider-picker-hierarchy";
 import { useNowMinuteMs } from "../../lib/clock";
+import { m, type MessageResolver } from "../../i18n/messages";
 import * as Dialog from "../../components/ui/Dialog";
 import React, { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 
@@ -117,21 +120,24 @@ import { useConnectionsReady, useWorkspaceEnvironments } from "../../state/works
 
 type WorkspaceMode = "local" | "worktree";
 
-export function branchBadgeLabel(input: {
-  readonly branch: VcsRef;
-  readonly project: EnvironmentProject | null;
-}): string | null {
+export function branchBadgeLabel(
+  input: {
+    readonly branch: VcsRef;
+    readonly project: EnvironmentProject | null;
+  },
+  resolve: MessageResolver = m,
+): string | null {
   if (input.branch.current) {
-    return "current";
+    return resolve(msg("current", { $context: "branch badge, the checked-out branch" }));
   }
   if (input.branch.worktreePath && input.branch.worktreePath !== input.project?.workspaceRoot) {
-    return "worktree";
+    return resolve(msg("worktree", { $context: "branch badge, checked out in another worktree" }));
   }
   if (input.branch.isRemote) {
-    return "remote";
+    return resolve(msg("remote", { $context: "branch badge, a remote-tracking branch" }));
   }
   if (input.branch.isDefault) {
-    return "default";
+    return resolve(msg("default", { $context: "branch badge, the repository default branch" }));
   }
   return null;
 }
@@ -243,15 +249,20 @@ export function NewTaskFlowProvider(
     () => filterThreads(allThreads, allProjects),
     [allProjects, allThreads, filterThreads],
   );
+  const projects = allProjects;
+  const messages = useMessages();
   const { savedConnectionsById } = useSavedRemoteConnections();
   const groupingSettings = useMobileProjectGroupingSettings();
 
   const projectScopes = sortHomeProjectScopes({
-    scopes: buildHomeProjectScopes({
-      projects: scopedProjects,
-      environmentId: null,
-      projectGroupingMode: groupingSettings.sidebarProjectGroupingMode,
-    }),
+    scopes: buildHomeProjectScopes(
+      {
+        projects: scopedProjects,
+        environmentId: null,
+        projectGroupingMode: groupingSettings.sidebarProjectGroupingMode,
+      },
+      messages,
+    ),
     threads,
     pendingTasks: [],
     projectSortOrder: "updated_at",
@@ -341,11 +352,23 @@ export function NewTaskFlowProvider(
   // binding outlives the draft's project stamp (submit clears it).
   const updateFlow = (patch: Partial<NewTaskFlowState>) =>
     updateNewTaskFlowState(flowKey, { ...readFlow(), ...patch });
+  // A draft's project stamp is the selection: picking a project writes it, and uploads and
+  // the send read it, so the screen cannot show one project while the draft holds another.
+  const draftStamp = useComposerDraft(activeDraftKey).project;
+  const stampedProject =
+    draftStamp === undefined
+      ? undefined
+      : projects.find(
+          (project) =>
+            project.environmentId === draftStamp.environmentId &&
+            project.id === draftStamp.projectId,
+        );
   const selectedEnvironmentId =
-    selectedEnvironmentIdOverride !== null &&
+    stampedProject?.environmentId ??
+    (selectedEnvironmentIdOverride !== null &&
     selectableProjects.some((project) => project.environmentId === selectedEnvironmentIdOverride)
       ? selectedEnvironmentIdOverride
-      : (selectableProjects[0]?.environmentId ?? null);
+      : (selectableProjects[0]?.environmentId ?? null));
   const projectsForEnvironment = pipe(
     selectableProjects,
     Arr.filter((project) => project.environmentId === selectedEnvironmentId),
@@ -356,7 +379,8 @@ export function NewTaskFlowProvider(
   const selectedProject =
     routeDraftResolution.kind === "pending"
       ? null
-      : (projectsForEnvironment.find(
+      : (stampedProject ??
+        projectsForEnvironment.find(
           (project) => scopedProjectKey(project.environmentId, project.id) === selectedProjectKey,
         ) ??
         projectsForEnvironment[0] ??
@@ -383,35 +407,31 @@ export function NewTaskFlowProvider(
   const selectedProjectDraftKey = selectedProject ? activeDraftKey : null;
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- keeps the persistent draft's project stamp aligned with the composer's selected destination
   useEffect(() => {
-    // A route that names a draft binds that draft, or returns to the picker.
-    if (props.active === false || props.routeDraftId !== undefined || selectedProject === null) {
+    // A route that names a draft binds that draft; a new draft is created lazily with its project.
+    if (
+      props.active === false ||
+      props.routeDraftId !== undefined ||
+      selectedProject === null ||
+      activeDraftKey === null ||
+      !mobileScope.enabled ||
+      submitting
+    ) {
       return;
     }
-    if (activeDraftKey !== null) {
-      if (!mobileScope.enabled || submitting) return;
-      const stamp = getComposerDraftSnapshot(activeDraftKey).project;
-      if (stamp === undefined) return;
-      if (
-        stamp.environmentId === selectedProject.environmentId &&
-        stamp.projectId === selectedProject.id
-      )
-        return;
-      retargetNewTaskDraft(activeDraftKey, {
-        environmentId: selectedProject.environmentId,
-        projectId: selectedProject.id,
-      });
-      updateNewTaskFlowState(flowKey, {
-        environmentId: selectedProject.environmentId,
-        projectKey: scopedProjectKey(selectedProject.environmentId, selectedProject.id),
-      });
+    const stamp = getComposerDraftSnapshot(activeDraftKey).project;
+    if (stamp === undefined) return;
+    if (
+      stamp.environmentId === selectedProject.environmentId &&
+      stamp.projectId === selectedProject.id
+    )
       return;
-    }
-    // Creates the persistent draft once the project selection is ready; the key must exist before the composer mounts.
+    retargetNewTaskDraft(activeDraftKey, {
+      environmentId: selectedProject.environmentId,
+      projectId: selectedProject.id,
+    });
     updateNewTaskFlowState(flowKey, {
-      draftKey: createNewTaskDraft({
-        environmentId: selectedProject.environmentId,
-        projectId: selectedProject.id,
-      }),
+      environmentId: selectedProject.environmentId,
+      projectKey: scopedProjectKey(selectedProject.environmentId, selectedProject.id),
     });
   }, [
     activeDraftKey,
@@ -779,12 +799,11 @@ export function NewTaskFlowProvider(
     if (!isAtomCommandInterrupted(result)) {
       const error = squashAtomCommandFailure(result);
       Dialog.alert(
-        "Could not switch machine",
-        error instanceof Error
-          ? error.message
-          : triage?._tag === "Failure"
-            ? "The server could not prepare triage."
-            : "The folder for threads without a project could not be created.",
+        m(msg("Could not switch machine")),
+        errorDisplayMessage(error, m) ??
+          (triage?._tag === "Failure"
+            ? m(msg("The server could not prepare triage."))
+            : m(msg("The folder for threads without a project could not be created."))),
       );
     }
     return false;

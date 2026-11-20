@@ -175,7 +175,10 @@ export const OrchestratorMcpDelegateTaskInput = Schema.Struct({
       description: "Why the task needs a provider lane different from this project's home lane.",
     }),
   ),
-  target: Schema.optional(OrchestratorMcpTarget),
+  // Some providers send the whole target object as JSON text.
+  target: Schema.optional(
+    Schema.Union([OrchestratorMcpTarget, Schema.fromJsonString(OrchestratorMcpTarget)]),
+  ),
   title: Schema.optional(OrchestratorMcpTitle),
   role: Schema.optional(OrchestratorMcpTaskRole),
   isolation: Schema.optional(

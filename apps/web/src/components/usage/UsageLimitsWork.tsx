@@ -1,10 +1,10 @@
 import { groupWorkUsage, type WorkUsageRow } from "@t3tools/client-runtime/state/usage-grouping";
 import {
   collectLimitAccounts,
-  collectLimitNotices,
   type LimitPresentations,
   paceRemainingPercent,
 } from "@t3tools/shared/usageLimits";
+import { collectLimitNotices } from "@t3tools/shared/usageLimitsCopy";
 import { formatUsd } from "@t3tools/shared/usageFormat";
 import { cn } from "~/lib/utils";
 import { LimitNotices } from "./UsageLimitsPooled";

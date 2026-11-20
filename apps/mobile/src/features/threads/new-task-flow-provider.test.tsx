@@ -17,7 +17,7 @@ import * as Layer from "effect/Layer";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";
-import { act, useLayoutEffect } from "react";
+import { act, useEffect, useLayoutEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vite-plus/test";
 import type { ComposerDraft } from "../../state/use-composer-drafts";
@@ -280,11 +280,16 @@ function setup() {
   mocks.writeSettings.mockImplementation(write);
   mocks.writeText.mockImplementation((key, text) => write(key, { text }));
   let current: ReturnType<typeof useNewTaskFlow>;
-  function Probe() {
+  function Probe(props: { readonly pickOnMount?: EnvironmentProject }) {
     const value = useNewTaskFlow();
     useLayoutEffect(() => {
       current = value;
     });
+    // Mirrors the draft screen applying its route project on mount, before the provider's effects run.
+    useEffect(() => {
+      if (props.pickOnMount) value.setProject(props.pickOnMount);
+      // oxlint-disable-next-line react/exhaustive-effect-dependencies -- picks once on mount; setProject changes every render
+    }, []);
     return null;
   }
   const root = createRoot(document.createElement("div"));
@@ -328,6 +333,7 @@ function setup() {
       routeDraftId?: string,
       stampedProject?: EnvironmentProject,
       carriedSelection?: ModelSelection,
+      pickOnMount?: EnvironmentProject,
     ) {
       if (routeDraftId !== undefined && stampedProject !== undefined) {
         write(routeDraftId, {
@@ -347,11 +353,15 @@ function setup() {
               {...(routeDraftId === undefined ? {} : { routeDraftId })}
               {...(carriedSelection === undefined ? {} : { carriedSelection })}
             >
-              <Probe />
+              <Probe pickOnMount={pickOnMount} />
             </NewTaskFlowProvider>
           </RegistryContext.Provider>,
         ),
       );
+      // The draft screen applies a project whenever it shows without a draft.
+      if (active && current.draftKey === null) {
+        await act(async () => current.setProject(projects[0]!));
+      }
     },
     async emit(cwd: string, branch: string, isRepo = true) {
       await act(async () => emitters.get(cwd)!(branch, isRepo));
@@ -407,6 +417,16 @@ it("prefers a ready in-scope carried model over the configured default", async (
   expect(screen.current.selectedModel).toEqual({
     instanceId: ProviderInstanceId.make("claudeAgent"),
     model: "claude-default",
+  });
+});
+
+it("keeps the draft on a project the screen picks as it mounts", async () => {
+  using screen = setup();
+  await screen.render(true, undefined, undefined, undefined, screen.projects[2]);
+  expect(screen.current.selectedProject).toEqual(screen.projects[2]);
+  expect(screen.snapshot(screen.current.draftKey).project).toEqual({
+    environmentId: "two",
+    projectId: "b",
   });
 });
 

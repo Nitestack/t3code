@@ -1,4 +1,4 @@
-import { useAtomSet, useAtomValue } from "@effect/atom-react";
+import { useAtomValue } from "@effect/atom-react";
 import Constants from "expo-constants";
 import { AsyncResult } from "effect/reactivity";
 import { useCallback } from "react";
@@ -8,7 +8,8 @@ import {
   resolveActiveEnvironmentScope,
   type EnvironmentScope,
 } from "@t3tools/client-runtime/environment";
-import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
+import { mobilePreferencesAtom, saveMobilePreferences } from "../../state/preferences";
+import { useAtomCommand } from "../../state/use-atom-command";
 import {
   filterMobileProjectScope,
   filterMobileThreadScope,
@@ -17,7 +18,7 @@ import {
 
 export function useMobileEnvironmentScope() {
   const preferencesResult = useAtomValue(mobilePreferencesAtom);
-  const savePreferences = useAtomSet(updateMobilePreferencesAtom);
+  const savePreferences = useAtomCommand(saveMobilePreferences);
   const preferences = AsyncResult.isSuccess(preferencesResult) ? preferencesResult.value : {};
   const enabled = isAndroidForkEnvironmentScopeEnabled({
     platformOS: Platform.OS,
@@ -27,7 +28,7 @@ export function useMobileEnvironmentScope() {
 
   const setActiveScope = useCallback(
     (scope: EnvironmentScope) => {
-      if (enabled) savePreferences({ activeEnvironmentScope: scope });
+      if (enabled) void savePreferences({ activeEnvironmentScope: scope });
     },
     [enabled, savePreferences],
   );

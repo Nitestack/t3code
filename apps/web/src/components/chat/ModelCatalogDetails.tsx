@@ -4,7 +4,7 @@ import type { ServerProvider } from "@t3tools/contracts";
 import { Button } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { catalogMetadataRows } from "./aixModelMetadata";
-import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
+import { namedClipboardTarget, useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 
 export function ModelCatalogDetails(props: {
   modelId: string;
@@ -15,7 +15,7 @@ export function ModelCatalogDetails(props: {
 }) {
   const [copyFailed, setCopyFailed] = useState(false);
   const { copyToClipboard, isCopied: copied } = useCopyToClipboard({
-    target: "model ID",
+    target: namedClipboardTarget("model ID"),
     onError: () => setCopyFailed(true),
     onCopy: () => setCopyFailed(false),
   });
