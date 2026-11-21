@@ -111,8 +111,7 @@ One client can also connect to both an upstream T3 server and a fork server. See
 
 Compared with upstream T3 Code:
 
-- **aix profiles.** API-key profiles become Codex, Claude Code, and OpenCode providers, turned on
-  with `T3CODE_AIX=1` (on by default in the desktop app and Nix package).
+- **aix profiles.** API-key profiles become Codex, Claude Code, and OpenCode providers.
   See [aix profiles](./aix-profiles.md).
 - **Model details.** Family, context window, max output, prices, and reasoning levels for gateway
   models. Catalogs refresh daily and on demand, with a stale warning when a refresh fails.
@@ -137,7 +136,7 @@ Install [vp](../operations/development.md#first-checkout), then:
 git clone https://github.com/get-aix/t3code.git
 cd t3code
 vp i
-T3CODE_AIX=1 vp run dev
+vp run dev
 ```
 
 Open the address printed at startup. `main` includes unreleased fork changes.

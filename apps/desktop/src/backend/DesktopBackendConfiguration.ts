@@ -115,11 +115,7 @@ const WSL_FORWARDED_ENV_NAMES = [
   "OTEL_METRICS_EXPORTER",
   "OTEL_LOGS_EXPORTER",
   "OTEL_RESOURCE_ATTRIBUTES",
-  "T3CODE_AIX",
 ] as const;
-
-// Like the Nix wrapper, the fork turns aix on for every desktop backend; T3CODE_AIX=0 turns it off.
-const WSL_FORWARDED_ENV_DEFAULTS: Partial<Record<string, string>> = { T3CODE_AIX: "1" };
 
 const WSL_SERVER_SYSTEM_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 
@@ -532,7 +528,6 @@ const resolvePrimaryStartConfig = Effect.fn("desktop.backendConfiguration.resolv
     DesktopEnvironment.DesktopEnvironment | DesktopServerExposure.DesktopServerExposure
   > {
     const environment = yield* DesktopEnvironment.DesktopEnvironment;
-    const env = yield* HostProcess.Environment;
     const serverExposure = yield* DesktopServerExposure.DesktopServerExposure;
     const backendExposure = yield* serverExposure.backendConfig;
 
@@ -576,7 +571,6 @@ const resolvePrimaryStartConfig = Effect.fn("desktop.backendConfiguration.resolv
         T3CODE_DESKTOP_SHELL_DISCOVERY_PENDING: "1",
         T3CODE_CLI_PATH: Option.getOrUndefined(input.cliPath),
         [DESKTOP_HOST_SCOPE_ENV]: input.hostScope,
-        T3CODE_AIX: env.T3CODE_AIX || WSL_FORWARDED_ENV_DEFAULTS.T3CODE_AIX,
       },
       extendEnv: true,
       bootstrap,
@@ -676,7 +670,7 @@ const resolveWslStartConfig = Effect.fn("desktop.backendConfiguration.resolveWsl
   const forwardedEnv: Record<string, string> = { [DESKTOP_HOST_SCOPE_ENV]: input.hostScope };
   const forwardedEnvNames: string[] = [DESKTOP_HOST_SCOPE_ENV];
   for (const name of WSL_FORWARDED_ENV_NAMES) {
-    const value = env[name] || WSL_FORWARDED_ENV_DEFAULTS[name];
+    const value = env[name];
     if (value !== undefined && value.length > 0) {
       forwardedEnv[name] = value;
       forwardedEnvNames.push(name);

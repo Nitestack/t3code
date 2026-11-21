@@ -25,12 +25,7 @@ They appear in Work projects next to your regular providers, with the models you
    aix status acme
    ```
 
-3. Start T3 Code with aix turned on:
-   - The **desktop app** and the **Nix package** turn aix on for you.
-   - If you run `t3` or `t3 serve` yourself, set `T3CODE_AIX=1` in its environment.
-   - To turn it off, set `T3CODE_AIX=0`. T3 then behaves like upstream T3 Code and disables the aix
-     providers it created. Your own sign-ins don't change.
-4. Restart T3 after installing aix, so it finds the `aix` command on its `PATH`.
+3. Restart T3 after installing aix, so it finds the `aix` command on its `PATH`.
 
 Your keys stay on the server. T3 asks aix for each profile's endpoint and key when it starts an
 agent. It never writes them to T3 settings or sends them to clients, including remote browsers and
@@ -132,8 +127,7 @@ A change made while a turn runs applies from your next message. It doesn't stop 
 
 **No aix models in the picker.** Check that the project is in Work, and that the footer shows a
 profile. Then check that aix works for the user that runs T3: `aix profiles` lists the profile and
-`aix status <profile>` succeeds. Restart T3 if you installed aix after starting it. Outside the
-desktop app and Nix package, check that `T3CODE_AIX=1` is set.
+`aix status <profile>` succeeds. Restart T3 if you installed aix after starting it.
 
 **Stale catalog or Catalog unavailable.** The last reload couldn't reach the gateway or read the
 key. Fix the cause shown in the message, then press **Refresh**.

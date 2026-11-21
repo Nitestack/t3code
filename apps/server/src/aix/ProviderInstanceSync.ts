@@ -6,7 +6,6 @@ import {
   type ProviderInstanceMutation,
   type ServerProvider,
 } from "@t3tools/contracts";
-import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as NodeUtil from "node:util";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -32,8 +31,6 @@ import * as AixCatalogCache from "./AixCatalogCache.ts";
 import { type CatalogModel, catalogModels, modelName } from "./ModelCatalog.ts";
 import { type AixModelRoute, routeCatalogModel } from "./ModelRouting.ts";
 
-/** Set to `1` on the server host to let aix profiles create provider instances. */
-const AIX_ENABLED_ENVIRONMENT_VARIABLE = "T3CODE_AIX";
 /** Read by the Codex, Claude, and OpenCode drivers at launch. */
 const AIX_PROFILE_VARIABLE = "T3_AIX_PROFILE";
 
@@ -544,25 +541,6 @@ const liveSource = Effect.gen(function* () {
   } satisfies AixSyncSource;
 });
 
-/** Gate: aix profiles are listed only when the host opts in with `T3CODE_AIX=1`. */
-export const syncAixFromEnvironment = Effect.fn("AixProviderInstanceSync.syncFromEnvironment")(
-  function* (
-    environment: Readonly<Record<string, string | undefined>>,
-    source: AixSyncSource,
-    options: {
-      readonly cache?: AixSyncCache;
-      readonly force?: boolean;
-      readonly onStatusChange?: (profile: string) => Effect.Effect<void>;
-    } = {},
-  ) {
-    yield* syncAixProviderInstances({
-      enabled: environment[AIX_ENABLED_ENVIRONMENT_VARIABLE] === "1",
-      source,
-      ...options,
-    });
-  },
-);
-
 const allAixCatalogsExpired = Effect.fn("AixProviderInstanceSync.allCatalogsExpired")(function* (
   cache: AixSyncCache,
 ) {
@@ -622,7 +600,6 @@ export const streamAixProfileStatusChanges = (profileName: string) =>
   );
 
 const make = Effect.gen(function* () {
-  const environment = yield* HostProcess.Environment;
   const settings = yield* ServerSettingsService;
   const digest = yield* Digest.Digest;
   const backgroundPolicy = yield* BackgroundPolicy.BackgroundPolicy;
@@ -633,7 +610,9 @@ const make = Effect.gen(function* () {
   const refresh = Effect.fn("AixProviderInstanceSync.refresh")(function* (input: {
     readonly force: boolean;
   }) {
-    yield* syncAixFromEnvironment(environment, source, {
+    yield* syncAixProviderInstances({
+      enabled: true,
+      source,
       cache,
       force: input.force,
       onStatusChange: (profile) =>

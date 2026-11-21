@@ -243,11 +243,6 @@ describe("DesktopBackendConfiguration", () => {
         assert.equal(first.captureOutput, true);
         assert.equal(first.env.ELECTRON_RUN_AS_NODE, "1");
         assert.equal(first.env.T3CODE_DESKTOP_SHELL_DISCOVERY_PENDING, "1");
-        assert.equal(first.env.T3CODE_AIX, "1");
-        const aixOff = yield* configuration.resolvePrimary.pipe(
-          Effect.provideService(HostProcess.Environment, { T3CODE_AIX: "0" }),
-        );
-        assert.equal(aixOff.env.T3CODE_AIX, "0");
         assert.isUndefined(first.env.T3CODE_PORT);
         assert.isUndefined(first.env.T3CODE_MODE);
         assert.isUndefined(first.env.T3CODE_DESKTOP_LAN_HOST);
@@ -747,7 +742,6 @@ describe("DesktopBackendConfiguration", () => {
         assert.include((config.env.WSLENV ?? "").split(":"), "T3CODE_TELEMETRY_ENABLED");
         assert.equal(config.env.OTEL_RESOURCE_ATTRIBUTES, "deployment.environment.name=staging");
         assert.include((config.env.WSLENV ?? "").split(":"), "OTEL_RESOURCE_ATTRIBUTES");
-        assert.equal(config.env.T3CODE_AIX, "0");
       }).pipe(
         Effect.provide(
           layerBackendConfiguration().pipe(
@@ -768,7 +762,6 @@ describe("DesktopBackendConfiguration", () => {
           OTEL_SDK_DISABLED: "true",
           T3CODE_TELEMETRY_ENABLED: "false",
           OTEL_RESOURCE_ATTRIBUTES: "deployment.environment.name=staging",
-          T3CODE_AIX: "0",
         }),
       );
     }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
@@ -795,10 +788,9 @@ describe("DesktopBackendConfiguration", () => {
         assert.equal(config.env.OPENAI_API_KEY, "openai-key");
         assert.equal(config.env.ANTHROPIC_API_KEY, "anthropic-key");
         assert.equal(config.env.T3CODE_OTLP_PROTOCOL, "http/protobuf");
-        assert.equal(config.env.T3CODE_AIX, "1");
         assert.equal(
           config.env.WSLENV,
-          "GOPATH/p:OPENAI_API_KEY/u:EMPTY::AZURE_DEVOPS_EXT_PAT/u:T3CODE_DESKTOP_HOST_SCOPE:ANTHROPIC_API_KEY:T3CODE_OTLP_HEADERS:T3CODE_OTLP_PROTOCOL:T3CODE_AIX",
+          "GOPATH/p:OPENAI_API_KEY/u:EMPTY::AZURE_DEVOPS_EXT_PAT/u:T3CODE_DESKTOP_HOST_SCOPE:ANTHROPIC_API_KEY:T3CODE_OTLP_HEADERS:T3CODE_OTLP_PROTOCOL",
         );
       }).pipe(
         Effect.provide(

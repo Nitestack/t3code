@@ -220,8 +220,7 @@ same default T3 state directory and desktop profile as upstream; install it in p
 T3 Code rather than running both against the same data.
 
 Nix only installs the pinned application build. It does not configure aix,
-resolve profiles, or place endpoints or API keys in the store. The Nix package
-and the desktop app turn aix on for you; set `T3CODE_AIX=0` to turn it off. See
+resolve profiles, or place endpoints or API keys in the store. See
 [aix profiles](./aix-profiles.md#turn-on-aix).
 
 ### The `t3` command

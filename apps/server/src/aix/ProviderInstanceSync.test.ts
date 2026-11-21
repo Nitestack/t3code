@@ -40,7 +40,6 @@ import {
   planAixInstanceSync,
   routeAixModels,
   runAixCatalogRefreshLoop,
-  syncAixFromEnvironment,
   syncAixProviderInstances,
   withAixCatalogStatus,
 } from "./ProviderInstanceSync.ts";
@@ -1401,21 +1400,6 @@ describe("syncAixProviderInstances", () => {
           displayName: "My Codex",
         });
       }).pipe(Effect.provide(aixTestLayer)),
-  );
-
-  effectIt.effect("reads aix profiles at startup only when T3CODE_AIX is 1", () =>
-    Effect.gen(function* () {
-      const listings = yield* Ref.make(0);
-      const source = sourceFor({
-        listProfiles: Ref.update(listings, (count) => count + 1).pipe(Effect.as([])),
-      });
-
-      yield* syncAixFromEnvironment({}, source);
-      expect(yield* Ref.get(listings)).toBe(0);
-
-      yield* syncAixFromEnvironment({ T3CODE_AIX: "1" }, source);
-      expect(yield* Ref.get(listings)).toBe(1);
-    }).pipe(Effect.provide(aixTestLayer)),
   );
 
   effectIt.effect("with aix off and no managed instance, writes nothing", () =>
