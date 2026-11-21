@@ -10,11 +10,8 @@ import type { MFunctionType } from "gt-i18n/types";
 import {
   collectExternalUsageLinks as collectExternalUsageLinksWith,
   cursorUsageWindowDetails as cursorUsageWindowDetailsBase,
-  aixProfileName,
-  isLatestAixProfileUsageReport,
   type LimitPool,
   type LimitPresentations,
-  providersWithLimits,
   type ResetCreditChoice,
   resetCountdown,
 } from "./usageLimits.ts";
@@ -78,43 +75,6 @@ export function limitsNotice(
     return limits.unavailable.message ?? resolve(msg("Could not read limits."));
   }
   return limits.windows.length === 0 ? resolve(msg("No limits reported.")) : null;
-}
-
-/** @public */
-export function collectLimitNotices(
-  presentations: LimitPresentations,
-  resolve: MFunctionType = mFallback,
-): readonly string[] {
-  const label = (environmentLabel: string, subject: string) =>
-    presentations.size > 1 ? `${environmentLabel} · ${subject}` : subject;
-  const notices = new Set<string>();
-  for (const [environmentId, presentation] of presentations) {
-    const environmentLabel = presentation.entry.target.label;
-    for (const provider of providersWithLimits(presentation.serverConfig?.providers ?? [])) {
-      const profileName = aixProfileName(provider.usageLimits);
-      if (!isLatestAixProfileUsageReport(presentations, environmentId, provider)) continue;
-      if (provider.usageLimits?.unavailable?.reason === "unsupported") continue;
-      const notice = provider.usageLimits ? limitsNotice(provider.usageLimits, resolve) : null;
-      const name = profileName
-        ? provider.aixProfileLabel?.trim() || profileName
-        : provider.displayName?.trim() || String(provider.driver);
-      if (notice) notices.add(`${label(environmentLabel, name)}: ${notice}`);
-    }
-    for (const source of presentation.serverConfig?.usageLimitSources ?? []) {
-      if (source.error) {
-        notices.add(`${label(environmentLabel, source.label)}: ${source.error}`);
-      } else if (source.accounts.length === 0) {
-        notices.add(
-          resolve(
-            msg("{source}: No accounts reported.", {
-              source: label(environmentLabel, source.label),
-            }),
-          ),
-        );
-      }
-    }
-  }
-  return [...notices];
 }
 
 /** @public */

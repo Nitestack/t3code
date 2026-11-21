@@ -22,7 +22,6 @@ import {
 import { formatUsd } from "@t3tools/shared/usageFormat";
 import {
   collectExternalUsageLinks,
-  collectLimitNotices,
   cursorUsageWindowDetails,
 } from "@t3tools/shared/usageLimitsCopy";
 import { msg, T, useGT, useMessages, Var } from "gt-react-native";
@@ -522,7 +521,6 @@ export function UsageLimitsSection({
       : [];
   const repeatedProfiles = profilesOnSeveralEnvironments(pools);
   const m = useMessages();
-  const notices = collectLimitNotices(scopedPresentations, m);
   const externalLinks = collectExternalUsageLinks(scopedPresentations, m);
   const colors = useProviderColors();
   const gt = useGT();
@@ -530,27 +528,20 @@ export function UsageLimitsSection({
     return (
       <View className="gap-3">
         <UsageLimitsWork presentations={scopedPresentations} now={now} />
-        {workAccounts.length === 0 && notices.length === 0 && externalLinks.length === 0 ? (
+        {workAccounts.length === 0 && externalLinks.length === 0 ? (
           <Text className="py-12 text-center text-base text-foreground-muted">
             {selected.size === 0
               ? gt("Select an environment to see limits.")
               : gt("No Work profile limits are available for the selected environments.")}
           </Text>
         ) : null}
-        {notices.length > 0 || failedLabels.length > 0 ? (
+        {failedLabels.length > 0 ? (
           <View className="gap-1 rounded-xl border border-warning-border bg-warning px-3.5 py-3">
-            {notices.map((notice) => (
-              <Text key={notice} className="text-sm font-t3-medium text-warning-foreground">
-                {notice}
-              </Text>
-            ))}
-            {failedLabels.length > 0 ? (
-              <Text className="text-sm font-t3-medium text-warning-foreground">
-                {gt("{environments} could not refresh limits. Showing the last known values.", {
-                  environments: failedLabels.join(", "),
-                })}
-              </Text>
-            ) : null}
+            <Text className="text-sm font-t3-medium text-warning-foreground">
+              {gt("{environments} could not refresh limits. Showing the last known values.", {
+                environments: failedLabels.join(", "),
+              })}
+            </Text>
           </View>
         ) : null}
       </View>
@@ -558,7 +549,7 @@ export function UsageLimitsSection({
   }
   return (
     <View className="gap-6">
-      {pools.length === 0 && notices.length === 0 && externalLinks.length === 0 ? (
+      {pools.length === 0 && externalLinks.length === 0 ? (
         <Text className="py-12 text-center text-base text-foreground-muted">
           {selected.size === 0
             ? gt("Select an environment to see limits.")
@@ -634,7 +625,7 @@ export function UsageLimitsSection({
           </Pressable>
         </View>
       ))}
-      {notices.length > 0 || failedLabels.length > 0 ? (
+      {failedLabels.length > 0 ? (
         <View
           accessible
           accessibilityRole="alert"
@@ -647,19 +638,12 @@ export function UsageLimitsSection({
             tintColorClassName="accent-warning-foreground"
           />
           <View className="min-w-0 flex-1 gap-0.5">
-            {notices.map((notice) => (
-              <Text key={notice} className="text-sm font-t3-medium text-warning-foreground">
-                {notice}
-              </Text>
-            ))}
-            {failedLabels.length > 0 ? (
-              <Text className="text-sm font-t3-medium text-warning-foreground">
-                <T>
-                  <Var>{failedLabels.join(", ")}</Var> could not refresh limits. Showing the last
-                  known values.
-                </T>
-              </Text>
-            ) : null}
+            <Text className="text-sm font-t3-medium text-warning-foreground">
+              <T>
+                <Var>{failedLabels.join(", ")}</Var> could not refresh limits. Showing the last
+                known values.
+              </T>
+            </Text>
           </View>
         </View>
       ) : null}

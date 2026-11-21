@@ -166,7 +166,7 @@ function cursorUsageWindowRank(id: string): number {
   return rank < 0 ? CURSOR_USAGE_WINDOWS.length : rank;
 }
 
-export function providersWithLimits(
+function providersWithLimits(
   providers: readonly ServerProvider[],
 ): readonly ServerProvider[] {
   return providers.filter(
@@ -281,7 +281,7 @@ export function budgetLeftUsd(window: ServerProviderUsageWindow): number | undef
   return window.amounts ? Math.max(0, window.amounts.total - window.amounts.spent) : undefined;
 }
 
-export function aixProfileName(limits: ServerProviderUsageLimits | undefined): string | undefined {
+function aixProfileName(limits: ServerProviderUsageLimits | undefined): string | undefined {
   if (limits?.profileName) return limits.profileName;
   const windows = limits?.windows ?? [];
   if (windows.length !== 1) return undefined;
@@ -322,19 +322,6 @@ function latestAixProfileReports(presentations: LimitPresentations) {
     }
   }
   return latest;
-}
-
-export function isLatestAixProfileUsageReport(
-  presentations: LimitPresentations,
-  environmentId: EnvironmentId,
-  provider: ServerProvider,
-): boolean {
-  const profileName = aixProfileName(provider.usageLimits);
-  return (
-    profileName === undefined ||
-    latestAixProfileReports(presentations).get(aixProfileKey(environmentId, profileName))
-      ?.provider === provider
-  );
 }
 
 const nativeReport = (provider: ServerProvider): AccountReport => ({

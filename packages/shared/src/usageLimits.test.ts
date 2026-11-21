@@ -29,7 +29,6 @@ import {
   usageLimitsForProviderInstance,
   resolveUsageLimitAccountsScope,
 } from "./usageLimits.ts";
-import { collectLimitNotices } from "./usageLimitsCopy.ts";
 
 const now = Date.parse("2026-09-03T12:00:00.000Z");
 
@@ -465,9 +464,6 @@ describe("pools", () => {
     expect(
       survivingAccounts.find((account) => account.profileName === undefined)?.limits.windows[0],
     ).toMatchObject({ id: "native-session", usedPercent: 10 });
-    expect(collectLimitNotices(withFailedProbe)).toEqual([
-      "Laptop · adCare: Gateway budget unavailable.",
-    ]);
 
     const oldFailure = {
       ...failedProbe,
@@ -483,7 +479,6 @@ describe("pools", () => {
           account.profileName === "work" && account.environments[0]?.environmentId === "env-a",
       )?.limits.windows[0]?.usedPercent,
     ).toBe(55);
-    expect(collectLimitNotices(withOldFailure)).toEqual([]);
 
     const unsupportedProfile = {
       ...reports[0]!,
@@ -501,7 +496,6 @@ describe("pools", () => {
           account.profileName === "work" && account.environments[0]?.environmentId === "env-a",
       ),
     ).toBe(false);
-    expect(collectLimitNotices(withUnsupportedProfile)).toEqual([]);
   });
 
   it("uses the freshest reported plan even when the newest quota has no plan", () => {
@@ -2090,24 +2084,6 @@ describe("external usage settings", () => {
       },
     ]);
     expect(collectLimitAccounts(presentations)).toEqual([]);
-    expect(collectLimitNotices(presentations)).toEqual([]);
-  });
-
-  it("shows a notice once when environments with one label report the same failure", () => {
-    const failing = provider({
-      usageLimits: {
-        checkedAt: "2026-09-03T11:00:00.000Z",
-        windows: [],
-        unavailable: { reason: "probeFailed" },
-      },
-    });
-    const host = { entry: { target: { label: "Host" } }, serverConfig: { providers: [failing] } };
-    const presentations = new Map([
-      [EnvironmentId.make("a"), host],
-      [EnvironmentId.make("b"), host],
-      [EnvironmentId.make("c"), host],
-    ]);
-    expect(collectLimitNotices(presentations)).toEqual(["Host · codex: Could not read limits."]);
   });
 });
 

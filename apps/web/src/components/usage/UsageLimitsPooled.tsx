@@ -20,7 +20,7 @@ import type { Popover as PopoverPrimitive } from "@base-ui/react/popover";
 import { normalizeProviderAccentColor } from "@t3tools/client-runtime/state/provider-instance-display";
 import { aixProfileLabel } from "@t3tools/client-runtime/provider-picker-hierarchy";
 import { formatUsd } from "@t3tools/shared/usageFormat";
-import { AlertTriangleIcon, ExternalLinkIcon, TicketIcon } from "lucide-react";
+import { ExternalLinkIcon, TicketIcon } from "lucide-react";
 import {
   createContext,
   Fragment,
@@ -41,12 +41,10 @@ import { providerClients } from "../settings/providerDriverMeta";
 import { RedactedSensitiveText } from "../settings/RedactedSensitiveText";
 import { Button } from "../ui/button";
 import { OpenAI } from "../Icons";
-import { Alert, AlertTitle } from "../ui/alert";
 import { Popover, PopoverCreateHandle, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { PaceIcon, ResetCreditDialog, barColor, usePaceMark, useResetCredit } from "./UsageLimits";
 import {
   collectExternalUsageLinks,
-  collectLimitNotices,
   cursorUsageWindowDetails,
   formatResetsIn,
   resetCreditChoices,
@@ -739,11 +737,10 @@ export function UsageLimitsPooled({
   const segmentPopoverActions = useRef<PopoverPrimitive.Root.Actions | null>(null);
   const pools = collectLimitPools(collectLimitAccounts(presentations), now);
   const repeatedProfiles = profilesOnSeveralEnvironments(pools);
-  const notices = collectLimitNotices(presentations, m);
   const externalLinks = collectExternalUsageLinks(presentations, m);
   return (
     <div className="flex flex-col gap-8">
-      {pools.length === 0 && notices.length === 0 && externalLinks.length === 0 ? (
+      {pools.length === 0 && externalLinks.length === 0 ? (
         <p className="text-sm text-muted-foreground">{emptyMessage}</p>
       ) : null}
       <SegmentPopoverContext value={segmentPopover}>
@@ -808,21 +805,6 @@ export function UsageLimitsPooled({
           </Button>
         </section>
       ))}
-      <LimitNotices notices={notices} />
     </div>
-  );
-}
-
-export function LimitNotices({ notices }: { readonly notices: readonly string[] }) {
-  if (notices.length === 0) return null;
-  return (
-    <Alert variant="warning" controlAlignment="first-line">
-      <AlertTriangleIcon />
-      {notices.map((notice) => (
-        <AlertTitle key={notice} className="break-words">
-          {notice}
-        </AlertTitle>
-      ))}
-    </Alert>
   );
 }
