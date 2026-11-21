@@ -44,9 +44,11 @@ APK uses the official package ID and replaces the store app.
    explicitly enabled. To publish manually, first run a build-only release, then dispatch again
    with `publish=true` and that run's `artifact_run_id`. `FORK_AUTO_PUBLISH_STABLE_RELEASES=true`
    authorizes automatic publication only. Do not move or force-push tags.
-9. Confirm release notes identify the actual fork commit, source branch, upstream base, and tested
-   artifact run, and attach both installers, checksums, platform metadata, Nix build verification,
-   and the pinned Nix install command. The Nix build is a required publication gate.
+9. Confirm release notes include upstream T3 Code's release notes on merge releases plus fork
+   changes since the previous fork release (or fork changes only on `-aix.N` releases), identify
+   the actual fork commit, source branch, upstream base, and tested artifact run, and attach all
+   installers, checksums, platform metadata, Nix build verification, and the pinned Nix install
+   command. The Nix build is a required publication gate.
 
 Local checks for a release commit, each run from the package directory:
 

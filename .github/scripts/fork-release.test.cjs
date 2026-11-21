@@ -5,6 +5,7 @@ const path = require("node:path");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const {
+  MAX_RELEASE_NOTES_LENGTH,
   analyzeForkUpstreamHistory,
   assertExistingForkReleaseMetadata,
   assertForkReleaseTagTarget,
@@ -12,6 +13,7 @@ const {
   buildForkBuildInfo,
   buildForkNixBuildSummary,
   buildForkReleaseNotes,
+  compareForkVersions,
   decideReleaseBranchUpdate,
   forkAndroidVersionCode,
   forkBaseVersion,
@@ -19,6 +21,7 @@ const {
   resolveForkUpstreamBase,
   resolveForkRelease,
   resolveForkReleaseVersion,
+  selectPreviousForkRelease,
   validateForkBuildOnlyRun,
   validateForkPublicationMode,
   verifyForkBuildArtifactAssets,
@@ -837,5 +840,295 @@ test("fork releases select GitHub-hosted runners after checking the repository",
   assert.throws(
     () => resolveForkRelease({ ...dispatch, repository: "pingdotgg/t3code" }),
     /only available from get-aix/,
+  );
+});
+
+test("fork versions order aix fixes below the next upstream stable release", () => {
+  const ordered = [
+    "0.1.10",
+    "0.1.11-aix.1",
+    "0.1.11-aix.2",
+    "0.1.11-aix.10",
+    "0.1.11",
+    "0.1.12-aix.1",
+    "0.2.0",
+    "1.0.0",
+  ];
+  const shuffled = [...ordered].toReversed();
+  assert.deepEqual(shuffled.toSorted(compareForkVersions), ordered);
+  assert.equal(compareForkVersions("0.1.11-aix.1", "0.1.11-aix.1"), 0);
+  assert.throws(() => compareForkVersions("0.2.0-aix.1", "0.2.0"), /Invalid fork version/);
+  assert.throws(() => compareForkVersions("0.1.11", "0.1.11-nightly.1"), /Invalid fork version/);
+});
+
+test("selectPreviousForkRelease chooses the highest published ancestor release below currentVersion", () => {
+  const sha10 = "1".repeat(40);
+  const sha11Aix1 = "2".repeat(40);
+  const sha11Aix2 = "3".repeat(40);
+  const sha11 = "4".repeat(40);
+  const releases = [
+    { tag_name: "v0.1.10", draft: false, prerelease: false, sha: sha10, isAncestor: true },
+    {
+      tag_name: "v0.1.11-aix.1",
+      draft: false,
+      prerelease: false,
+      sha: sha11Aix1,
+      isAncestor: true,
+    },
+    // Draft, prerelease, non-ancestor, and same-or-newer releases are skipped.
+    { tag_name: "v0.1.11-aix.2", draft: true, prerelease: false, sha: sha11Aix2, isAncestor: true },
+    { tag_name: "v0.1.11-aix.3", draft: false, prerelease: true, sha: sha11Aix2, isAncestor: true },
+    {
+      tag_name: "v0.1.11-aix.4",
+      draft: false,
+      prerelease: false,
+      sha: sha11Aix2,
+      isAncestor: false,
+    },
+    {
+      tag_name: "v0.1.11-nightly.1",
+      draft: false,
+      prerelease: false,
+      sha: sha11Aix2,
+      isAncestor: true,
+    },
+    { tag_name: "v0.1.11", draft: false, prerelease: false, sha: sha11, isAncestor: true },
+    { tag_name: "v0.1.12-aix.1", draft: false, prerelease: false, sha: sha11, isAncestor: true },
+  ];
+
+  assert.deepEqual(selectPreviousForkRelease({ releases, currentVersion: "0.1.11" }), {
+    tag: "v0.1.11-aix.1",
+    version: "0.1.11-aix.1",
+    sha: sha11Aix1,
+  });
+  assert.deepEqual(selectPreviousForkRelease({ releases, currentVersion: "0.1.12-aix.1" }), {
+    tag: "v0.1.11",
+    version: "0.1.11",
+    sha: sha11,
+  });
+  assert.equal(selectPreviousForkRelease({ releases, currentVersion: "0.1.10" }), null);
+  assert.throws(
+    () => selectPreviousForkRelease({ releases, currentVersion: "0.1.10-nightly.1" }),
+    /Invalid current fork release version/,
+  );
+});
+
+test("merge release notes include upstream T3 Code notes followed by fork changes and metadata", () => {
+  const commitA = "a".repeat(40);
+  const commitB = "b".repeat(40);
+  const upstreamNotes = [
+    "v0.1.11 · 12 fixes · 3 improvements",
+    "",
+    "- Fixed reconnect handling",
+    "",
+    "<details>",
+    "<summary>Full changelog</summary>",
+    "",
+    "- upstream item 1",
+    "</details>",
+  ].join("\n");
+
+  const notes = buildForkReleaseNotes({
+    upstreamBase,
+    sha,
+    sourceBranch: "main",
+    buildArtifactRunId: "12345",
+    buildArtifactRunAttempt: "1",
+    upstreamTag: "v0.1.11",
+    releaseTag: "v0.1.11",
+    upstreamNotes,
+    previousReleaseTag: "v0.1.11-aix.1",
+    forkCommits: [
+      { sha: commitA, subject: "feat(web): show AIX thread cost breakdown" },
+      { sha: commitB, subject: "fix(nix): update pnpm deps hash" },
+    ],
+  });
+
+  const upstreamIdx = notes.indexOf(
+    "## Upstream T3 Code ([`v0.1.11`](https://github.com/pingdotgg/t3code/releases/tag/v0.1.11))",
+  );
+  const forkIdx = notes.indexOf("## Fork changes since v0.1.11-aix.1");
+  const changelogIdx = notes.indexOf("### Full Changelog");
+  const installIdx = notes.indexOf("## Install");
+  const metadataIdx = notes.indexOf("## Build metadata");
+
+  assert.ok(upstreamIdx === 0);
+  assert.ok(upstreamIdx < forkIdx);
+  assert.ok(forkIdx < changelogIdx);
+  assert.ok(changelogIdx < installIdx);
+  assert.ok(installIdx < metadataIdx);
+  assert.match(notes, /Fixed reconnect handling/);
+  assert.match(
+    notes,
+    /- feat\(web\): show AIX thread cost breakdown \(\[`aaaaaaaa`\]\(https:\/\/github\.com\/get-aix\/t3code\/commit\/a{40}\)\)/,
+  );
+  assert.match(
+    notes,
+    /https:\/\/github\.com\/get-aix\/t3code\/compare\/v0\.1\.11-aix\.1\.\.\.v0\.1\.11/,
+  );
+
+  assert.doesNotThrow(() =>
+    assertExistingForkReleaseMetadata({
+      release: {
+        tag_name: "v0.1.11",
+        name: "T3 Code v0.1.11",
+        body: notes,
+        draft: false,
+        prerelease: false,
+        assets: requiredReleaseAssets("0.1.11").map((name) => ({ name })),
+      },
+      version: "0.1.11",
+      sha,
+      upstreamBase,
+      upstreamTag: "v0.1.11",
+      sourceBranch: "main",
+    }),
+  );
+});
+
+test("fork-only aix release notes omit upstream notes and lead with fork changes", () => {
+  const commitA = "c".repeat(40);
+  const notes = buildForkReleaseNotes({
+    upstreamBase,
+    sha,
+    sourceBranch: "main",
+    buildArtifactRunId: "12345",
+    buildArtifactRunAttempt: "1",
+    upstreamTag: "v0.1.11",
+    releaseTag: "v0.1.12-aix.1",
+    upstreamNotes: "Upstream body that should not appear on a fork-only release",
+    previousReleaseTag: "v0.1.11",
+    forkCommits: [{ sha: commitA, subject: "chore(release): trim fork release targets" }],
+  });
+
+  assert.doesNotMatch(notes, /## Upstream T3 Code/);
+  assert.doesNotMatch(notes, /Upstream body that should not appear/);
+  assert.ok(notes.startsWith("## Fork changes since v0.1.11\n"));
+  assert.match(notes, /chore\(release\): trim fork release targets/);
+  assert.match(
+    notes,
+    /https:\/\/github\.com\/get-aix\/t3code\/compare\/v0\.1\.11\.\.\.v0\.1\.12-aix\.1/,
+  );
+
+  assert.doesNotThrow(() =>
+    assertExistingForkReleaseMetadata({
+      release: {
+        tag_name: "v0.1.12-aix.1",
+        name: "T3 Code v0.1.12-aix.1",
+        body: notes,
+        draft: false,
+        prerelease: false,
+        assets: requiredReleaseAssets("0.1.12-aix.1").map((name) => ({ name })),
+      },
+      version: "0.1.12-aix.1",
+      sha,
+      upstreamBase,
+      upstreamTag: "v0.1.11",
+      sourceBranch: "main",
+    }),
+  );
+});
+
+test("merge release notes degrade cleanly when upstream notes are unavailable or fork has no new commits", () => {
+  const notes = buildForkReleaseNotes({
+    upstreamBase,
+    sha,
+    sourceBranch: "main",
+    buildArtifactRunId: "12345",
+    buildArtifactRunAttempt: "1",
+    upstreamTag: "v0.1.11",
+    releaseTag: "v0.1.11",
+    upstreamNotes: "",
+    previousReleaseTag: "v0.1.10",
+    forkCommits: [],
+  });
+
+  assert.match(
+    notes,
+    /See the upstream \[T3 Code `v0\.1\.11` release notes\]\(https:\/\/github\.com\/pingdotgg\/t3code\/releases\/tag\/v0\.1\.11\)\./,
+  );
+  assert.match(
+    notes,
+    /No additional fork changes since \[`v0\.1\.10`\]\(https:\/\/github\.com\/get-aix\/t3code\/releases\/tag\/v0\.1\.10\)\./,
+  );
+});
+
+test("oversized upstream notes with unclosed details are truncated safely while preserving fork changes and metadata", () => {
+  const commitA = "d".repeat(40);
+  const oversizedUpstream = [
+    "Highlights",
+    "",
+    "<details>",
+    "<summary>Full changelog</summary>",
+    "",
+    ...Array.from({ length: 2_500 }, (_, i) => `- Upstream change #${i}: ${"x".repeat(60)}`),
+  ].join("\n");
+
+  const notes = buildForkReleaseNotes({
+    upstreamBase,
+    sha,
+    sourceBranch: "main",
+    buildArtifactRunId: "12345",
+    buildArtifactRunAttempt: "1",
+    upstreamTag: "v0.1.10",
+    releaseTag: "v0.1.10",
+    upstreamNotes: oversizedUpstream,
+    previousReleaseTag: "v0.1.9",
+    forkCommits: [{ sha: commitA, subject: "feat(fork): preserve fork section after truncation" }],
+  });
+
+  assert.ok(
+    notes.length <= MAX_RELEASE_NOTES_LENGTH,
+    `Expected length <= ${MAX_RELEASE_NOTES_LENGTH}, got ${notes.length}`,
+  );
+  const opens = (notes.match(/<details\b[^>]*>/gi) ?? []).length;
+  const closes = (notes.match(/<\/details>/gi) ?? []).length;
+  assert.equal(opens, closes);
+  assert.ok(notes.indexOf("</details>") < notes.indexOf("## Fork changes since v0.1.9"));
+  assert.match(notes, /Upstream release notes truncated to fit GitHub's release size limit/);
+  assert.match(notes, /feat\(fork\): preserve fork section after truncation/);
+  assert.doesNotThrow(() =>
+    assertExistingForkReleaseMetadata({
+      release: {
+        tag_name: "v0.1.10",
+        name: "T3 Code v0.1.10",
+        body: notes,
+        draft: false,
+        prerelease: false,
+        assets: requiredReleaseAssets("0.1.10").map((name) => ({ name })),
+      },
+      version: "0.1.10",
+      sha,
+      upstreamBase,
+      upstreamTag: "v0.1.10",
+      sourceBranch: "main",
+    }),
+  );
+});
+
+test("oversized fork commit lists keep the newest commits and link to the full changelog", () => {
+  const commits = Array.from({ length: 400 }, (_, i) => ({
+    sha: i.toString(16).padStart(40, "0"),
+    subject: `feat(fork): change number ${i} ${"y".repeat(60)}`,
+  }));
+  const notes = buildForkReleaseNotes({
+    upstreamBase,
+    sha,
+    sourceBranch: "main",
+    buildArtifactRunId: "12345",
+    buildArtifactRunAttempt: "1",
+    upstreamTag: "v0.1.11",
+    releaseTag: "v0.1.12-aix.1",
+    previousReleaseTag: "v0.1.11",
+    forkCommits: commits,
+  });
+
+  assert.ok(notes.length <= MAX_RELEASE_NOTES_LENGTH);
+  assert.match(notes, /earlier fork commit\(s\) omitted; see the full changelog below/);
+  assert.match(notes, /change number 399/);
+  assert.doesNotMatch(notes, /change number 0 /);
+  assert.match(
+    notes,
+    /https:\/\/github\.com\/get-aix\/t3code\/compare\/v0\.1\.11\.\.\.v0\.1\.12-aix\.1/,
   );
 });

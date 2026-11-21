@@ -293,6 +293,189 @@ function analyzeForkUpstreamHistory({ sourceRangeCommits, upstreamMainCommits })
   };
 }
 
+const UPSTREAM_REPOSITORY = "pingdotgg/t3code";
+const MAX_RELEASE_NOTES_LENGTH = 124_000;
+const MAX_FORK_CHANGES_LENGTH = 20_000;
+
+function parseForkVersion(version) {
+  const match = FORK_VERSION.exec(version ?? "");
+  if (!match || (match[4] !== undefined && match[3] === "0")) {
+    return null;
+  }
+  return {
+    major: Number(match[1]),
+    minor: Number(match[2]),
+    patch: Number(match[3]),
+    aix: match[4] === undefined ? null : Number(match[4]),
+  };
+}
+
+function compareForkVersions(left, right) {
+  const a = parseForkVersion(left);
+  const b = parseForkVersion(right);
+  if (!a || !b) {
+    throw new Error(`Invalid fork version comparison: ${left} vs ${right}`);
+  }
+  if (a.major !== b.major) return a.major - b.major;
+  if (a.minor !== b.minor) return a.minor - b.minor;
+  if (a.patch !== b.patch) return a.patch - b.patch;
+  if (a.aix === b.aix) return 0;
+  if (a.aix === null) return 1;
+  if (b.aix === null) return -1;
+  return a.aix - b.aix;
+}
+
+function selectPreviousForkRelease({ releases, currentVersion }) {
+  if (!parseForkVersion(currentVersion)) {
+    throw new Error(`Invalid current fork release version: ${currentVersion}`);
+  }
+  if (!Array.isArray(releases)) {
+    throw new Error("Fork releases must be provided as a list.");
+  }
+  let best = null;
+  for (const release of releases) {
+    if (!release || release.draft || release.prerelease) continue;
+    const tag = typeof release.tag_name === "string" ? release.tag_name : release.tagName;
+    if (typeof tag !== "string" || !tag.startsWith("v")) continue;
+    const version = tag.slice(1);
+    if (!parseForkVersion(version)) continue;
+    if (compareForkVersions(version, currentVersion) >= 0) continue;
+    if (release.isAncestor === false) continue;
+    if (typeof release.sha === "string" && release.sha !== "" && !COMMIT_SHA.test(release.sha)) {
+      continue;
+    }
+    if (!best || compareForkVersions(version, best.version) > 0) {
+      best = {
+        tag,
+        version,
+        sha: typeof release.sha === "string" ? release.sha.toLowerCase() : "",
+      };
+    }
+  }
+  return best;
+}
+
+function countUnclosedDetailsTags(text) {
+  const opens = (text.match(/<details\b[^>]*>/gi) ?? []).length;
+  const closes = (text.match(/<\/details>/gi) ?? []).length;
+  return Math.max(0, opens - closes);
+}
+
+function closeDetailsSuffix(text) {
+  const unclosed = countUnclosedDetailsTags(text);
+  return unclosed > 0 ? `\n\n${"</details>\n".repeat(unclosed).trimEnd()}` : "";
+}
+
+function formatUpstreamReleaseNotes({ upstreamNotes, upstreamTag, maxLength }) {
+  const upstreamUrl = `https://github.com/${UPSTREAM_REPOSITORY}/releases/tag/${encodeURIComponent(upstreamTag)}`;
+  const normalized = String(upstreamNotes ?? "")
+    .replace(/\r\n?/g, "\n")
+    .trim();
+  const fallback = `See the upstream [T3 Code ${markdownCode(upstreamTag)} release notes](${upstreamUrl}).`;
+  if (normalized === "") {
+    return fallback;
+  }
+
+  const closedNormalized = `${normalized}${closeDetailsSuffix(normalized)}`;
+  if (closedNormalized.length <= maxLength) {
+    return closedNormalized;
+  }
+
+  const notice =
+    `\n\n…\n\n_Upstream release notes truncated to fit GitHub's release size limit. ` +
+    `See the full [T3 Code ${markdownCode(upstreamTag)} release](${upstreamUrl})._`;
+  if (maxLength <= fallback.length) {
+    return fallback;
+  }
+
+  // Reserve room for the notice plus closing tags for any <details> left open by slicing.
+  let limit = Math.max(0, maxLength - notice.length);
+  for (let pass = 0; pass < 4; pass += 1) {
+    let prefix = normalized.slice(0, limit);
+    const lastNewline = prefix.lastIndexOf("\n");
+    if (lastNewline > Math.floor(prefix.length * 0.5)) {
+      prefix = prefix.slice(0, lastNewline);
+    }
+    prefix = prefix.trimEnd();
+    const candidate = `${prefix}${notice}${closeDetailsSuffix(prefix)}`;
+    if (candidate.length <= maxLength) {
+      return candidate;
+    }
+    limit = Math.max(0, limit - (candidate.length - maxLength));
+  }
+  return fallback;
+}
+
+function formatForkCommitLine(commit) {
+  if (!commit || typeof commit !== "object") return "";
+  const subject = String(commit.subject ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (subject === "") return "";
+  const sha = typeof commit.sha === "string" ? commit.sha.trim() : "";
+  if (COMMIT_SHA.test(sha)) {
+    const shortSha = sha.slice(0, 8);
+    return `- ${subject} ([${markdownCode(shortSha)}](https://github.com/${RELEASE_REPOSITORY}/commit/${sha}))`;
+  }
+  return `- ${subject}`;
+}
+
+function buildForkChangesSection({
+  forkCommits = [],
+  previousReleaseTag = "",
+  releaseTag,
+  maxLength = MAX_FORK_CHANGES_LENGTH,
+}) {
+  const lines = Array.isArray(forkCommits)
+    ? forkCommits.map(formatForkCommitLine).filter(Boolean)
+    : [];
+  if (lines.length === 0 && previousReleaseTag === "") {
+    return "";
+  }
+
+  const heading = previousReleaseTag
+    ? `## Fork changes since ${previousReleaseTag}`
+    : "## Fork changes";
+  const changelogLines = previousReleaseTag
+    ? [
+        "",
+        "### Full Changelog",
+        "",
+        `https://github.com/${RELEASE_REPOSITORY}/compare/${encodeURIComponent(previousReleaseTag)}...${encodeURIComponent(releaseTag)}`,
+      ]
+    : [];
+
+  if (lines.length === 0) {
+    const prevUrl = `https://github.com/${RELEASE_REPOSITORY}/releases/tag/${encodeURIComponent(previousReleaseTag)}`;
+    return [
+      heading,
+      "",
+      `No additional fork changes since [${markdownCode(previousReleaseTag)}](${prevUrl}).`,
+      ...changelogLines,
+    ].join("\n");
+  }
+
+  const fullBody = [heading, "", ...lines, ...changelogLines].join("\n");
+  if (fullBody.length <= maxLength) {
+    return fullBody;
+  }
+
+  const changelogText = changelogLines.join("\n");
+  const kept = [];
+  const baseOverhead = heading.length + changelogText.length + 120;
+  let used = baseOverhead;
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const lineLength = lines[i].length + 1;
+    if (kept.length > 0 && used + lineLength > maxLength) break;
+    kept.push(lines[i]);
+    used += lineLength;
+  }
+  kept.reverse();
+  const omitted = lines.length - kept.length;
+  const notice = `- … ${omitted} earlier fork commit(s) omitted; see the full changelog below.`;
+  return [heading, "", notice, ...kept, ...changelogLines].join("\n");
+}
+
 function buildForkReleaseNotes({
   upstreamBase,
   sha,
@@ -301,15 +484,13 @@ function buildForkReleaseNotes({
   buildArtifactRunAttempt,
   upstreamTag,
   releaseTag,
+  upstreamNotes = "",
+  previousReleaseTag = "",
+  forkCommits = [],
 }) {
-  return [
-    `Fork commit (built source): ${markdownCode(sha)}`,
-    "",
-    `Upstream stable base: ${markdownCode(upstreamTag)} = ${markdownCode(upstreamBase)}`,
-    "",
-    `Source branch: ${markdownCode(sourceBranch)}`,
-    "",
-    `Tested build artifact run: ${markdownCode(buildArtifactRunId)} (attempt: ${markdownCode(buildArtifactRunAttempt)})`,
+  const isUpstreamMergeRelease = releaseTag === upstreamTag;
+  const installAndMetadata = [
+    "## Install",
     "",
     `The Windows installer (with WSL runtime), macOS Apple Silicon app, signed Android APK, and versioned Nix package are built from the fork commit and include fork changes plus upstream through ${upstreamTag}. Checksums and build metadata are attached. Installed desktop apps update themselves from fork releases.`,
     "",
@@ -331,7 +512,54 @@ function buildForkReleaseNotes({
     `nix profile add 'github:get-aix/t3code/${releaseTag}'`,
     "```",
     "",
+    "## Build metadata",
+    "",
+    `Fork commit (built source): ${markdownCode(sha)}`,
+    "",
+    `Upstream stable base: ${markdownCode(upstreamTag)} = ${markdownCode(upstreamBase)}`,
+    "",
+    `Source branch: ${markdownCode(sourceBranch)}`,
+    "",
+    `Tested build artifact run: ${markdownCode(buildArtifactRunId)} (attempt: ${markdownCode(buildArtifactRunAttempt)})`,
   ].join("\n");
+
+  const forkChangesBudget = Math.min(
+    MAX_FORK_CHANGES_LENGTH,
+    Math.max(1_000, MAX_RELEASE_NOTES_LENGTH - installAndMetadata.length - 500),
+  );
+  const forkChangesSection = buildForkChangesSection({
+    forkCommits,
+    previousReleaseTag,
+    releaseTag,
+    maxLength: forkChangesBudget,
+  });
+
+  const sections = [];
+  if (isUpstreamMergeRelease) {
+    const upstreamUrl = `https://github.com/${UPSTREAM_REPOSITORY}/releases/tag/${encodeURIComponent(upstreamTag)}`;
+    const upstreamHeading = `## Upstream T3 Code ([${markdownCode(upstreamTag)}](${upstreamUrl}))`;
+    const separator = "\n\n---\n\n";
+    const fixedLength =
+      upstreamHeading.length +
+      2 +
+      (forkChangesSection ? separator.length + forkChangesSection.length : 0) +
+      separator.length +
+      installAndMetadata.length +
+      1;
+    const upstreamBody = formatUpstreamReleaseNotes({
+      upstreamNotes,
+      upstreamTag,
+      maxLength: Math.max(0, MAX_RELEASE_NOTES_LENGTH - fixedLength),
+    });
+    sections.push(`${upstreamHeading}\n\n${upstreamBody}`);
+  }
+
+  if (forkChangesSection) {
+    sections.push(forkChangesSection);
+  }
+  sections.push(installAndMetadata);
+
+  return `${sections.join("\n\n---\n\n")}\n`;
 }
 
 function validateForkPublicationMode({ publish, artifactRunId = "", autoPublishAllowed = false }) {
@@ -726,10 +954,13 @@ function resolveForkRelease({
 }
 
 module.exports = {
+  MAX_RELEASE_NOTES_LENGTH,
   RELEASE_REPOSITORY,
+  compareForkVersions,
   forkAndroidVersionCode,
   forkBaseVersion,
   resolveForkReleaseVersion,
+  selectPreviousForkRelease,
   analyzeForkUpstreamHistory,
   assertForkReleaseTagTarget,
   assertExistingForkReleaseMetadata,
