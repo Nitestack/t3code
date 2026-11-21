@@ -1044,17 +1044,105 @@ jobs:
             actualSha: process.env.ACTUAL_TAG_SHA,
           });
           NODE
-          UPSTREAM_BASE="$UPSTREAM_BASE" UPSTREAM_TAG="$UPSTREAM_TAG" RELEASE_SHA="$RELEASE_SHA" SOURCE_BRANCH="$SOURCE_BRANCH" BUILD_ARTIFACT_RUN_ID="$BUILD_ARTIFACT_RUN_ID" BUILD_ARTIFACT_RUN_ATTEMPT="$BUILD_ARTIFACT_RUN_ATTEMPT" RELEASE_TAG="$RELEASE_TAG" node - <<'NODE' > ../release-notes.md
-          const { buildForkReleaseNotes } = require("../.github/scripts/fork-release.cjs");
-          process.stdout.write(buildForkReleaseNotes({
-            upstreamBase: process.env.UPSTREAM_BASE,
-            upstreamTag: process.env.UPSTREAM_TAG,
-            sha: process.env.RELEASE_SHA,
-            sourceBranch: process.env.SOURCE_BRANCH,
-            buildArtifactRunId: process.env.BUILD_ARTIFACT_RUN_ID,
-            buildArtifactRunAttempt: process.env.BUILD_ARTIFACT_RUN_ATTEMPT,
-            releaseTag: process.env.RELEASE_TAG,
-          }));
+
+      - name: Generate fork release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.fork_preflight.outputs.tag }}
+          RELEASE_SHA: ${{ needs.fork_preflight.outputs.sha }}
+          UPSTREAM_BASE: ${{ needs.fork_preflight.outputs.upstream_base }}
+          UPSTREAM_TAG: ${{ needs.fork_preflight.outputs.upstream_tag }}
+          SOURCE_BRANCH: ${{ needs.fork_preflight.outputs.source_branch }}
+          BUILD_ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id || github.run_id }}
+          BUILD_ARTIFACT_RUN_ATTEMPT: ${{ inputs.artifact_run_id != '' && needs.fork_verify_tested_artifact.outputs.build_run_attempt || github.run_attempt }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/$GH_REPO/releases?per_page=100" \
+            --jq '.[] | {tag_name, draft, prerelease}' > "$RUNNER_TEMP/fork-releases.jsonl"
+
+          upstream_notes_file="$RUNNER_TEMP/upstream-release-notes.md"
+          : > "$upstream_notes_file"
+          if [[ "$RELEASE_TAG" == "$UPSTREAM_TAG" ]]; then
+            if ! gh api "repos/pingdotgg/t3code/releases/tags/$UPSTREAM_TAG" --jq '.body // ""' \
+              > "$upstream_notes_file" 2>"$RUNNER_TEMP/upstream-release-notes.err"; then
+              echo "::warning::Could not fetch upstream release notes for pingdotgg/t3code $UPSTREAM_TAG: $(cat "$RUNNER_TEMP/upstream-release-notes.err")"
+              : > "$upstream_notes_file"
+            fi
+          fi
+
+          node - "$RUNNER_TEMP/fork-releases.jsonl" "$upstream_notes_file" <<'NODE' > release-notes.md
+          const cp = require("node:child_process");
+          const fs = require("node:fs");
+          const {
+            buildForkReleaseNotes,
+            selectPreviousForkRelease,
+          } = require("./.github/scripts/fork-release.cjs");
+
+          const releaseSha = process.env.RELEASE_SHA;
+          const upstreamBase = process.env.UPSTREAM_BASE;
+          const releaseTag = process.env.RELEASE_TAG;
+          const currentVersion = releaseTag.replace(/^v/, "");
+
+          const rawReleases = fs
+            .readFileSync(process.argv[2], "utf8")
+            .split(/\r?\n/)
+            .filter(Boolean)
+            .map(JSON.parse);
+
+          const releases = rawReleases.map((release) => {
+            let sha = "";
+            let isAncestor = false;
+            try {
+              sha = cp
+                .execFileSync(
+                  "git",
+                  ["rev-parse", "--verify", `refs/tags/${release.tag_name}^{commit}`],
+                  { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+                )
+                .trim();
+              cp.execFileSync("git", ["merge-base", "--is-ancestor", sha, releaseSha], {
+                stdio: "ignore",
+              });
+              isAncestor = true;
+            } catch {
+              isAncestor = false;
+            }
+            return { ...release, sha, isAncestor };
+          });
+
+          const previousRelease = selectPreviousForkRelease({ releases, currentVersion });
+          const logArgs = ["log", "--no-merges", "--reverse", "--format=%H%x09%s"];
+          if (previousRelease?.sha) {
+            logArgs.push(`${previousRelease.sha}..${releaseSha}`, `^${upstreamBase}`);
+          } else {
+            logArgs.push(`${upstreamBase}..${releaseSha}`);
+          }
+          const forkCommits = cp
+            .execFileSync("git", logArgs, { encoding: "utf8" })
+            .split(/\r?\n/)
+            .filter(Boolean)
+            .map((line) => {
+              const tab = line.indexOf("\t");
+              return { sha: line.slice(0, tab), subject: line.slice(tab + 1) };
+            });
+
+          const upstreamNotes = fs.readFileSync(process.argv[3], "utf8");
+          process.stdout.write(
+            buildForkReleaseNotes({
+              upstreamBase,
+              upstreamTag: process.env.UPSTREAM_TAG,
+              sha: releaseSha,
+              sourceBranch: process.env.SOURCE_BRANCH,
+              buildArtifactRunId: process.env.BUILD_ARTIFACT_RUN_ID,
+              buildArtifactRunAttempt: process.env.BUILD_ARTIFACT_RUN_ATTEMPT,
+              releaseTag,
+              upstreamNotes,
+              previousReleaseTag: previousRelease?.tag ?? "",
+              forkCommits,
+            }),
+          );
           NODE
 
       - name: Create the authorized immutable fork release
